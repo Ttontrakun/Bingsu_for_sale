@@ -1,0 +1,25 @@
+{
+  "name": "bingsu-database-management",
+  "version": "1.0.0",
+  "description": "Bingsu Database Management - Orchestrator for PostgreSQL and Qdrant databases",
+  "scripts": {
+    "start": "docker compose up -d",
+    "stop": "docker compose down",
+    "logs": "docker compose logs -f",
+    "logs:postgres": "docker compose logs -f postgres",
+    "logs:qdrant": "docker compose logs -f qdrant",
+    "logs:redis": "docker compose logs -f redis",
+    "status": "docker compose ps",
+    "restart": "docker compose restart",
+    "postgres:start": "cd ../PostgreSQL && npm run db:start",
+    "postgres:stop": "cd ../PostgreSQL && npm run db:stop",
+    "postgres:migrate": "cd ../PostgreSQL && npm run db:migrate",
+    "qdrant:start": "cd ../Qdrant && npm run start:qdrant",
+    "qdrant:stop": "cd ../Qdrant && npm run stop:qdrant",
+    "redis:start": "cd ../Redis && npm run start",
+    "redis:stop": "cd ../Redis && npm run stop"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

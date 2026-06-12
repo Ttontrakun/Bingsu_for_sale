@@ -1,0 +1,48 @@
+{
+  "name": "askaa-backend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:server": "node --watch server/index.js",
+    "dev:legacy": "node --watch server/index.js",
+    "dev:fastapi": "python -m uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 5051",
+    "start:server": "node server/index.js",
+    "start:web": "node server/index.js",
+    "start:worker": "node server/worker.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "seed:admins": "node server/scripts/seed-admins.js",
+    "seed:pending-demo": "node server/scripts/seed-pending-demo-user.js",
+    "seed:demo-applicants": "node server/scripts/seed-demo-applicants.js",
+    "seed:admins:docker": "docker compose --profile app exec legacy node server/scripts/seed-admins.js",
+    "seed:help-bot": "node server/scripts/seed-help-bot.js",
+    "reindex:documents": "node server/scripts/reindex-documents.js",
+    "security:rotation-checklist": "node server/scripts/security-rotation-checklist.js",
+    "security:secret-hygiene": "node server/scripts/security-secret-hygiene.js",
+    "test:excel-parser": "node server/scripts/test-excel-parser.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.697.0",
+    "@google/genai": "^1.29.0",
+    "@pinecone-database/pinecone": "^7.1.0",
+    "@prisma/client": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.19.2",
+    "helmet": "^8.2.0",
+    "multer": "^2.0.2",
+    "nodemailer": "^8.0.8",
+    "pdfjs-dist": "^4.10.38",
+    "redis": "^4.7.0",
+    "undici": "^7.21.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "prisma": "^6.0.0"
+  }
+}

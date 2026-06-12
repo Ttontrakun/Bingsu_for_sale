@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "Bot" ADD COLUMN "enabled" BOOLEAN NOT NULL DEFAULT true;

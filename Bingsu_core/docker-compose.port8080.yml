@@ -1,0 +1,8 @@
+# ใช้เมื่อพอร์ต 80 ถูกใช้อยู่ — รัน web ที่พอร์ตอื่น (แก้ 8080 เป็นพอร์ตที่ว่างได้)
+# รัน: docker compose -f docker-compose.yml -f docker-compose.port8080.yml up -d web
+# แล้วเปิด http://localhost:8082
+
+services:
+  web:
+    ports:
+      - "0.0.0.0:8082:80"

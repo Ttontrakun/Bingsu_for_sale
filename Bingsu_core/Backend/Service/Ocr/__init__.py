@@ -1,0 +1,3 @@
+"""
+Bingsu OCR Service
+"""

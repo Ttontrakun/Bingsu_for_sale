@@ -1,0 +1,17 @@
+{
+  "name": "bingsu-redis",
+  "version": "1.0.0",
+  "description": "Bingsu Redis Service - Redis client for queue and caching",
+  "type": "module",
+  "main": "redis.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "redis": "^4.7.0"
+  }
+}

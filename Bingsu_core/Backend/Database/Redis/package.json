@@ -1,0 +1,15 @@
+{
+  "name": "bingsu-database-redis",
+  "version": "1.0.0",
+  "description": "Bingsu Redis Database - Redis service",
+  "scripts": {
+    "start": "docker compose up -d",
+    "stop": "docker compose down",
+    "logs": "docker compose logs -f redis",
+    "restart": "docker compose restart",
+    "status": "docker compose ps"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

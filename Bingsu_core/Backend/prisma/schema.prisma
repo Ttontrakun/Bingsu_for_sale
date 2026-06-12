@@ -1,0 +1,360 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  user
+  support
+  admin_metrics
+  admin
+}
+
+enum UserApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum DocumentShareRole {
+  viewer
+  editor
+}
+
+enum UploadBatchStatus {
+  uploading
+  processing
+  done
+  error
+}
+
+enum UploadFileStatus {
+  uploading
+  complete
+  error
+}
+
+enum MessageFeedbackRating {
+  up
+  down
+}
+
+enum IntegrationProvider {
+  line
+  messenger
+  website
+  api
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  displayName  String
+  ragStoreName String
+  sourceFiles  Json
+  ownerId      String
+  tags         String[] @default([])
+  link         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  bots          BotDocument[]
+  shares        DocumentShare[]
+  uploadBatches UploadBatch[]
+}
+
+model Conversation {
+  id         String   @id @default(cuid())
+  userId     String
+  documentId String
+  botId      String?
+  title      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document  Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  bot       Bot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
+  messages  Message[]
+
+  @@index([userId])
+  @@index([documentId])
+  @@index([botId])
+}
+
+model Message {
+  id              String   @id @default(cuid())
+  conversationId  String
+  userId          String?
+  role            String
+  content         String
+  groundingChunks Json?
+  /** การ์ดแหล่งที่มา (ชื่อไฟล์/docId/ตำแหน่ง) ที่ส่งให้ frontend — เซฟเพื่อหลังโหลดจาก API แล้วยังเห็นการ์ดได้ */
+  references      Json?
+  platform        String   @default("website")
+  createdAt       DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  feedbacks    MessageFeedback[]
+
+  @@index([conversationId])
+}
+
+model Bot {
+  id        String   @id @default(cuid())
+  name      String
+  prompt    String
+  description String?
+  model     String?
+  avatarUrl String?
+  ownerId   String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  documents     BotDocument[]
+
+  @@index([ownerId])
+}
+
+model BotDocument {
+  botId      String
+  documentId String
+  createdAt  DateTime @default(now())
+
+  bot      Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([botId, documentId])
+  @@index([documentId])
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  avatarUrl    String?
+  expiresAt    DateTime?
+  emailVerifiedAt DateTime?
+  emailVerificationToken String? @unique
+  emailVerificationExpiresAt DateTime?
+  passwordResetToken String? @unique
+  passwordResetExpiresAt DateTime?
+  role         UserRole @default(user)
+  isActive     Boolean  @default(true)
+  approvalStatus UserApprovalStatus @default(approved)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions      Session[]
+  documents     Document[]
+  sharedDocuments DocumentShare[]
+  conversations Conversation[]
+  messages      Message[]
+  bots          Bot[]
+  uploadBatches UploadBatch[]
+  usageDaily    UsageDaily[]
+  logs          SystemLog[]
+  messageFeedbacks MessageFeedback[]
+  integrations  IntegrationSetting[]
+
+  // Optional: legacy Bingsu backend/website compatibility (separate credential table)
+  credential Credential?
+
+  // Optional: multi-user chat rooms (backend/website-style)
+  chatMemberships ChatUser[]
+  chatMessages    ChatMessage[]
+}
+
+model IntegrationSetting {
+  id        String              @id @default(cuid())
+  userId    String
+  provider  IntegrationProvider
+  enabled   Boolean             @default(false)
+  config    Json?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model MessageFeedback {
+  id        String   @id @default(cuid())
+  messageId String
+  userId    String
+  rating    MessageFeedbackRating
+  comment   String?
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([userId])
+}
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     String
+  message   String
+  meta      Json?
+  userId    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+}
+
+model DocumentShare {
+  id         String   @id @default(cuid())
+  documentId String
+  userId     String
+  role       DocumentShareRole @default(viewer)
+  createdAt  DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([userId])
+}
+
+model UploadBatch {
+  id                 String           @id @default(cuid())
+  userId             String
+  displayName        String
+  status             UploadBatchStatus @default(uploading)
+  error              String?
+  progressCurrent    Int              @default(0)
+  progressTotal      Int              @default(0)
+  progressMessage    String?
+  progressFileName   String?
+  uploadPartsTotal   Int              @default(0)
+  uploadPartsReceived Int             @default(0)
+  documentId         String?
+  /** โครงสร้างจากปุ่ม "ดูโครงสร้าง" — ถ้ามี ใช้เข้า embed โดยไม่แปลงซ้ำ แค่ chunk แล้ว embed */
+  previewSourceFiles Json?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  files    UploadFile[]
+
+  @@index([userId])
+}
+
+model UploadFile {
+  id            String          @id @default(cuid())
+  batchId       String
+  name          String
+  size          Int
+  type          String?
+  totalParts    Int
+  receivedParts Int             @default(0)
+  status        UploadFileStatus @default(uploading)
+  assembledPath String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  batch UploadBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@index([batchId])
+}
+
+model UsageDaily {
+  id          String   @id @default(cuid())
+  userId      String
+  dateKey     String
+  chatCount   Int      @default(0)
+  promptTokens Int     @default(0)
+  completionTokens Int @default(0)
+  totalTokens Int      @default(0)
+  uploadBytes Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dateKey])
+  @@index([userId])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// --- Optional models ported from bingsu_plus/backend/website ---
+
+model Credential {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  username     String?  @unique
+  passwordHash String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Chat {
+  id        String   @id @default(cuid())
+  name      String?
+  description String?
+  kind      String   @default("group")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsed  DateTime @default(now())
+
+  users    ChatUser[]
+  messages ChatMessage[]
+}
+
+model ChatUser {
+  chatId   String
+  userId   String
+  joinedAt DateTime @default(now())
+  role     String   @default("member") // member/admin/owner
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([chatId, userId])
+  @@index([userId])
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  chatId    String
+  userId    String
+  message   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chat   Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([userId])
+}

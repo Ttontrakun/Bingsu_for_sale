@@ -1,0 +1,18 @@
+{
+  "name": "bingsu-embeddings",
+  "version": "1.0.0",
+  "description": "Bingsu Embeddings Service - OpenAI and Gemini embeddings",
+  "type": "module",
+  "main": "embeddings.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "@google/genai": "^0.2.1",
+    "undici": "^6.19.0"
+  }
+}

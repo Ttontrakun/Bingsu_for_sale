@@ -1,0 +1,227 @@
+// Prisma schema for Bingsu - Combined best practices
+// User and Credential models follow Backend/website pattern (Int ID, separated tables)
+// Enhanced with Enums and features from askaa_backend
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS - Type safety for better data integrity
+// ============================================
+
+enum UserRole {
+  user
+  support
+  admin_metrics
+  admin
+}
+
+enum UserApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ChatUserRole {
+  member
+  admin
+  owner
+}
+
+enum DocumentShareRole {
+  viewer
+  editor
+}
+
+// ============================================
+// USER MODELS - Following Backend/website pattern
+// ============================================
+
+// User model - User information and profile
+model User {
+  id               Int       @id @default(autoincrement())
+  email            String    @unique
+  firstName        String?
+  lastName         String?
+  emailVerified    Boolean   @default(false)
+  emailVerifiedAt  DateTime?
+  emailVerificationToken String?  @unique
+  emailVerificationExpiresAt DateTime?
+  passwordResetToken String? @unique
+  passwordResetExpiresAt DateTime?
+  role             UserRole  @default(user)
+  approvalStatus   UserApprovalStatus @default(pending)
+  isActive         Boolean   @default(true)
+  avatarUrl        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  
+  // One-to-one relationship with Credential (separated for security)
+  credential Credential?
+  
+  // Chat relationships
+  chats     ChatUser[]
+  messages  ChatMessage[]
+  
+  // Bot and Document relationships
+  bots      Bot[]
+  documents Document[]
+  sharedDocuments DocumentShare[]
+  
+  @@index([email])
+  @@index([emailVerificationToken])
+  @@index([passwordResetToken])
+  @@index([role])
+  @@index([approvalStatus])
+}
+
+// Credential model - Authentication credentials (separated for security)
+model Credential {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique  // One-to-one with User
+  username  String?  @unique
+  password  String   // Hashed password
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  // Relationship
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([username])
+}
+
+// ============================================
+// CHAT MODELS - Multi-user chat rooms
+// ============================================
+
+// Chat room model - supports multi-user
+model Chat {
+  id        Int      @id @default(autoincrement())
+  name      String?
+  botId     Int?     // Bot used in this chat (cannot be changed after creation)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  lastUsed  DateTime @default(now()) @updatedAt
+  
+  users     ChatUser[]
+  messages  ChatMessage[]
+  bot       Bot?     @relation(fields: [botId], references: [id], onDelete: SetNull)
+  
+  @@index([lastUsed])
+  @@index([botId])
+}
+
+// Junction table for many-to-many relationship
+model ChatUser {
+  chatId    Int
+  userId    Int
+  joinedAt  DateTime @default(now())
+  role      ChatUserRole @default(member)
+  
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@id([chatId, userId])
+  @@index([chatId])
+  @@index([userId])
+  @@index([role])
+}
+
+// Message in a chat room
+model ChatMessage {
+  id            Int      @id @default(autoincrement())
+  chatId        Int
+  userId        Int      // Sender
+  message       String
+  isAiGenerated Boolean  @default(false)  // Mark if message is AI generated
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  sender    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
+  @@index([userId])
+  @@index([createdAt])
+  @@index([chatId, createdAt])  // Composite index for efficient message queries
+  @@index([isAiGenerated])
+}
+
+// ============================================
+// BOT MODELS - AI Bot Configuration
+// ============================================
+
+model Bot {
+  id          Int      @id @default(autoincrement())
+  name        String
+  prompt      String   @db.Text
+  description String?
+  model       String?
+  avatarUrl   String?
+  ownerId     Int
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner    User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  documents BotDocument[]
+  chats    Chat[]        // Chats that use this bot
+
+  @@index([ownerId])
+}
+
+model BotDocument {
+  botId      Int
+  documentId Int
+  createdAt  DateTime @default(now())
+
+  bot      Bot      @relation(fields: [botId], references: [id], onDelete: Cascade)
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([botId, documentId])
+  @@index([documentId])
+}
+
+// ============================================
+// DOCUMENT MODELS - Knowledge Base Documents
+// ============================================
+
+model Document {
+  id           Int      @id @default(autoincrement())
+  displayName  String
+  ragStoreName String
+  sourceFiles  Json     // Array of file objects with text/blocks
+  ownerId      Int
+  tags         Json     @default("[]") // Array of strings
+  link         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  owner   User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  bots    BotDocument[]
+  shares  DocumentShare[]
+
+  @@index([ownerId])
+}
+
+model DocumentShare {
+  id         Int              @id @default(autoincrement())
+  documentId Int
+  userId     Int
+  role       DocumentShareRole @default(viewer)
+  createdAt  DateTime         @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, userId])
+  @@index([documentId])
+  @@index([userId])
+}

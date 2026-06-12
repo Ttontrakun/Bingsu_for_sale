@@ -1,0 +1,25 @@
+{
+  "name": "bingsu-database-postgresql",
+  "version": "1.0.0",
+  "description": "Bingsu PostgreSQL Database - PostgreSQL with Prisma",
+  "scripts": {
+    "prisma": "node_modules/.bin/prisma",
+    "db:push": "node_modules/.bin/prisma db push",
+    "db:migrate": "node_modules/.bin/prisma migrate dev",
+    "db:generate": "node_modules/.bin/prisma generate",
+    "db:studio": "node_modules/.bin/prisma studio",
+    "db:reset": "node_modules/.bin/prisma migrate reset",
+    "db:start": "docker compose up -d",
+    "db:stop": "docker compose down",
+    "db:logs": "docker compose logs -f postgres"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "prisma": "^6.19.2"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2"
+  }
+}

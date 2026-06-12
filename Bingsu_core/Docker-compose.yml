@@ -1,0 +1,91 @@
+# bb - รันทั้ง Backend + Supportadmin ใน Docker (Postgres, Qdrant, Redis, Legacy, Supportadmin)
+# ใช้: cd bb && docker compose up -d --build
+# Supportadmin: http://localhost:3014  |  API (legacy): http://localhost:5052
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ask_the_manual
+    ports:
+      - "5436:5432"
+    volumes:
+      - bb_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ask_the_manual"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "6336:6333"
+    volumes:
+      - bb_qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6382:6379"
+    volumes:
+      - bb_redis_data:/data
+
+  legacy:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.legacy
+    restart: unless-stopped
+    env_file:
+      - ./Backend/.env
+    environment:
+      PORT: "5052"
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
+      REDIS_URL: redis://redis:6379
+      QDRANT_URL: http://qdrant:6333
+      UPLOAD_QUEUE_MODE: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      redis:
+        condition: service_started
+    ports:
+      - "5052:5052"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:5052/api/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    command: sh -c "npx prisma migrate deploy && node server/index.js"
+
+  supportadmin:
+    build:
+      context: ./Frontend/Supportadmin
+      dockerfile: Dockerfile
+      args:
+        # ชี้ไป backend โดยตรงเพื่อลดปัญหาเรียก localhost:3014 ผิดพอร์ต
+        REACT_APP_API_BASE_URL: "http://localhost:5052"
+    ports:
+      - "3014:80"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "8083:80"
+    restart: unless-stopped
+
+volumes:
+  bb_postgres_data:
+  bb_qdrant_data:
+  bb_redis_data:

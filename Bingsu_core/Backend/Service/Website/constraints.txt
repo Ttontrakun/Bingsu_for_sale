@@ -1,0 +1,2 @@
+# บังคับให้ใช้ PaddlePaddle 3.2.2 เพื่อหลีกเลี่ยงบั๊ก OneDNN ใน 3.3.0
+paddlepaddle==3.2.2

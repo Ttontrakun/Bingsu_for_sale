@@ -1,0 +1,27 @@
+# Legacy (Node) — build context = bb/Backend, โค้ด ask_aa จาก askaa_backend
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+ENV NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_FACTOR=2 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000
+RUN npm install
+
+RUN apk add --no-cache curl python3 py3-pip
+RUN python3 -m pip install --break-system-packages pdfplumber || true
+
+COPY prisma ./prisma
+RUN npx prisma generate
+
+COPY server ./server
+COPY scripts ./scripts
+RUN mkdir -p Service/Website/scripts
+
+ENV NODE_ENV=production
+EXPOSE 5052
+CMD ["node", "server/index.js"]

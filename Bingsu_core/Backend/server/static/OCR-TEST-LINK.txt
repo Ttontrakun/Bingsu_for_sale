@@ -1,0 +1,21 @@
+========================================
+  ลิงก์หน้าเทส สแกน OCR (Paddle + LLM)
+========================================
+
+เปิดในเบราว์เซอร์ (ต้องรัน Node backend ก่อน):
+
+  ลิงก์ที่ 1:  http://localhost:5052/ocr-test
+  ลิงก์ที่ 2:  http://localhost:5052/test-ocr/ocr-test.html
+
+ถ้าใช้พอร์ตอื่น (ดูจาก .env.local):
+  http://localhost:<PORT>/ocr-test
+  http://localhost:<PORT>/test-ocr/ocr-test.html
+
+เช็คว่า backend รันอยู่ + ได้ลิงก์ถูก:
+  เปิด: http://localhost:5052/api/ocr-test-link
+  จะได้ JSON บอก link และ port
+
+========================================
+รัน Node backend (จากโฟลเดอร์ askaa_backend):
+  node server/index.js
+========================================

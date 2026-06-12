@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>สแกน OCR — Paddle + LLM (เทส แยกจากระบบหลัก)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: "Sarabun", "Segoe UI", sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background: #f0f4f8; }
+    h1 { font-size: 1.4rem; color: #1e293b; }
+    .card { background: #fff; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    label { display: block; margin-bottom: 6px; font-weight: 500; color: #334155; }
+    input[type="file"], input[type="number"] { margin-bottom: 12px; }
+    input[type="number"] { width: 72px; padding: 6px 8px; }
+    .row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+    .row input[type="checkbox"] { width: 18px; height: 18px; }
+    button { background: #2563eb; color: #fff; border: none; padding: 10px 20px; border-radius: 8px; font-size: 1rem; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
+    .speed { font-size: 1rem; margin: 12px 0; padding: 12px; background: #ecfdf5; border-radius: 8px; color: #065f46; }
+    .speed span { margin-right: 12px; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+    .tabs button { background: #e2e8f0; color: #475569; padding: 8px 14px; font-size: 0.9rem; }
+    .tabs button.active { background: #2563eb; color: #fff; }
+    .page-block { margin: 12px 0; padding: 12px; background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 0.95rem; }
+    .page-title { font-weight: 600; color: #1e40af; margin-bottom: 6px; }
+    .structured { white-space: pre-wrap; line-height: 1.6; }
+    .loading { color: #64748b; }
+    .error { color: #b91c1c; background: #fef2f2; padding: 10px; border-radius: 6px; margin: 10px 0; }
+    .hint { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+    #panelRaw, #panelClean, #panelStructure { display: none; }
+    #panelRaw.show, #panelClean.show, #panelStructure.show { display: block; }
+  </style>
+</head>
+<body>
+  <h1>สแกน OCR — Paddle + LLM</h1>
+  <p class="hint">หน้านี้เป็นเทสเท่านั้น แยกจากระบบหลัก — อัปโหลด PDF หรือรูปสแกน แล้วดูข้อความ + โครงสร้าง + เวลาที่ใช้</p>
+  <p class="hint" style="background:#fef3c7;padding:6px 10px;border-radius:6px;">⏱ ครั้งแรกอาจนาน 1–3 นาที (โหลดโมเดล); ตั้งจำนวนหน้า = 1 และติ๊ก "โหมดเร็ว" จะเร็วขึ้นมาก</p>
+
+  <div class="card">
+    <label>เลือกไฟล์ (PDF หรือรูปสแกน)</label>
+    <input type="file" id="file" accept=".pdf,application/pdf,image/*">
+    <div class="row">
+      <label style="margin:0;">จำนวนหน้าสูงสุด (PDF):</label>
+      <input type="number" id="maxPages" value="1" min="1" max="30">
+      <span class="hint">= 1 เร็วสุด</span>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="fastMode">
+      <label style="margin:0;">โหมดเร็ว (1 หน้า + DPI ต่ำ = เร็วขึ้น)</label>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="withLlm" checked>
+      <label style="margin:0;">ใช้ LLM จัดรูปแบบ/แก้คำผิด (เช่น gpt-4o-mini)</label>
+    </div>
+    <div class="row">
+      <input type="checkbox" id="withStructure" checked>
+      <label style="margin:0;">ใช้ LLM จัดโครงสร้าง (หัวข้อ ย่อหน้า รายการ)</label>
+    </div>
+    <button id="btn" type="button">สแกน OCR</button>
+  </div>
+
+  <div id="out"></div>
+
+  <script>
+    const fileEl = document.getElementById("file");
+    const maxPagesEl = document.getElementById("maxPages");
+    const withLlmEl = document.getElementById("withLlm");
+    const withStructureEl = document.getElementById("withStructure");
+    const fastModeEl = document.getElementById("fastMode");
+    const btnEl = document.getElementById("btn");
+    const outEl = document.getElementById("out");
+
+    function out(html) { outEl.innerHTML = html; }
+    function escapeHtml(s) {
+      const div = document.createElement("div");
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    function showPanel(name) {
+      ["Raw", "Clean", "Structure"].forEach(function (p) {
+        var el = document.getElementById("panel" + p);
+        if (el) el.classList.toggle("show", p === name);
+      });
+      document.querySelectorAll(".tabs button").forEach(function (b) {
+        b.classList.toggle("active", b.dataset.panel === name);
+      });
+    }
+
+    btnEl.addEventListener("click", async () => {
+      const file = fileEl.files[0];
+      if (!file) {
+        out('<p class="error">กรุณาเลือกไฟล์ PDF หรือรูป</p>');
+        return;
+      }
+      const fastMode = fastModeEl && fastModeEl.checked;
+      const maxPages = fastMode ? 1 : Math.max(1, Math.min(30, parseInt(maxPagesEl.value, 10) || 1));
+      const dpi = fastMode ? 150 : undefined;
+      const withLlm = withLlmEl.checked;
+      const withStructure = withStructureEl.checked;
+
+      btnEl.disabled = true;
+      out('<p class="loading">กำลังอ่านไฟล์...</p>');
+
+      let fileBase64;
+      try {
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        fileBase64 = btoa(binary);
+      } catch (e) {
+        out('<p class="error">อ่านไฟล์ไม่ได้: ' + escapeHtml(e.message) + '</p>');
+        btnEl.disabled = false;
+        return;
+      }
+
+      const contentType = file.type || "application/pdf";
+      out('<p class="loading">กำลังเรียก Paddle OCR...</p>');
+      const t0 = Date.now();
+      const base = window.location.origin;
+      let ocrResult;
+      try {
+        const r = await fetch(base + "/api/test/ocr-extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fileBase64, fileName: file.name, contentType, maxPages, dpi }),
+        });
+        const ocrJson = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(ocrJson.error || ocrJson.detail || r.statusText || "OCR ไม่สำเร็จ");
+        if (ocrJson && ocrJson.ok === false && ocrJson.error) throw new Error(ocrJson.error);
+        ocrResult = ocrJson;
+      } catch (e) {
+        out('<p class="error">OCR ไม่สำเร็จ: ' + escapeHtml(e.message) + '</p><p class="hint">ตรวจว่า FastAPI OCR รันอยู่ (Docker api หรือ npm run dev:fastapi) และ OCR_API_URL ถูกต้อง</p>');
+        btnEl.disabled = false;
+        return;
+      }
+      const ocrMs = Date.now() - t0;
+      const pages = Array.isArray(ocrResult.pages) ? ocrResult.pages : [];
+      const rawText = (ocrResult.text || "").trim();
+      const pagesToShow = maxPages ? pages.slice(0, maxPages) : pages;
+
+      let llmMs = 0, structureMs = 0;
+      let cleanedMerged = "";
+      let structuredText = "";
+
+      if (withLlm && rawText) {
+        out('<p class="loading">กำลังเรียก LLM จัดรูปแบบ...</p>');
+        const t1 = Date.now();
+        const r = await fetch(base + "/api/test/ocr-clean", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: rawText }),
+        });
+        const j = await r.json();
+        cleanedMerged = (j && j.text != null ? j.text : rawText);
+        llmMs = Date.now() - t1;
+      } else {
+        cleanedMerged = rawText;
+      }
+
+      const textForStructure = cleanedMerged || rawText;
+      if (withStructure && textForStructure) {
+        out('<p class="loading">กำลังเรียก LLM จัดโครงสร้าง...</p>');
+        const t2 = Date.now();
+        const r = await fetch(base + "/api/test/ocr-structure", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: textForStructure }),
+        });
+        const j = await r.json();
+        structuredText = (j && j.text != null ? j.text : textForStructure);
+        structureMs = Date.now() - t2;
+      } else {
+        structuredText = textForStructure;
+      }
+
+      const totalMs = ocrMs + llmMs + structureMs;
+
+      let html = '<div class="card">';
+      html += '<div class="speed"><strong>เวลาที่ใช้</strong><br>';
+      html += '<span>Paddle OCR: ' + (ocrMs / 1000).toFixed(2) + ' s</span>';
+      if (withLlm && rawText) html += '<span>LLM จัดรูปแบบ: ' + (llmMs / 1000).toFixed(2) + ' s</span>';
+      if (withStructure && textForStructure) html += '<span>LLM จัดโครงสร้าง: ' + (structureMs / 1000).toFixed(2) + ' s</span>';
+      html += '<span><strong>รวม: ' + (totalMs / 1000).toFixed(2) + ' s</strong></span></div></div>';
+
+      html += '<div class="card">';
+      html += '<div class="tabs">';
+      html += '<button type="button" data-panel="Raw" class="active">จาก Paddle (แบ่งหน้า)</button>';
+      html += '<button type="button" data-panel="Clean">หลัง LLM จัดรูปแบบ</button>';
+      html += '<button type="button" data-panel="Structure">โครงสร้างที่จัดแล้ว</button>';
+      html += '</div>';
+
+      html += '<div id="panelRaw" class="show">';
+      if (pagesToShow.length > 0) {
+        pagesToShow.forEach(function (p) {
+          const num = p.page != null ? p.page : "?";
+          const txt = String(p.text || "").trim();
+          html += '<div class="page-block"><span class="page-title">════ หน้า ' + num + ' ════</span><br>' + escapeHtml(txt.slice(0, 2000)) + (txt.length > 2000 ? "\n\n... (ตัดแสดง)" : "") + '</div>';
+        });
+      } else {
+        html += '<div class="page-block">' + escapeHtml(rawText.slice(0, 3000)) + (rawText.length > 3000 ? "\n\n... (ตัดแสดง)" : "") + '</div>';
+      }
+      html += '</div>';
+
+      html += '<div id="panelClean">';
+      html += '<div class="page-block structured">' + escapeHtml(cleanedMerged.slice(0, 5000)) + (cleanedMerged.length > 5000 ? "\n\n... (ตัดแสดง)" : "") + '</div>';
+      html += '</div>';
+
+      html += '<div id="panelStructure">';
+      html += '<div class="page-block structured">' + escapeHtml(structuredText.slice(0, 5000)) + (structuredText.length > 5000 ? "\n\n... (ตัดแสดง)" : "") + '</div>';
+      html += '</div>';
+      html += '</div>';
+
+      out(html);
+
+      outEl.querySelectorAll(".tabs button").forEach(function (b) {
+        b.addEventListener("click", function () { showPanel(b.dataset.panel); });
+      });
+
+      btnEl.disabled = false;
+    });
+  </script>
+</body>
+</html>

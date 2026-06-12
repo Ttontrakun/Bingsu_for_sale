@@ -1,0 +1,17 @@
+{
+  "name": "bingsu-database-qdrant",
+  "version": "1.0.0",
+  "description": "Bingsu Qdrant Database - Qdrant service",
+  "type": "module",
+  "main": "qdrant.js",
+  "scripts": {
+    "test": "node test.js",
+    "start:qdrant": "docker compose up -d",
+    "stop:qdrant": "docker compose down",
+    "logs:qdrant": "docker compose logs -f qdrant"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}

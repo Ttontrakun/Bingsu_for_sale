@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <clipPath id="clipCircleFemale">
+      <circle cx="64" cy="64" r="54" />
+    </clipPath>
+  </defs>
+
+  <!-- ring + background -->
+  <circle cx="64" cy="64" r="58" fill="#FFFFFF" />
+  <circle cx="64" cy="64" r="58" stroke="#0B0F19" stroke-width="6" />
+  <circle cx="64" cy="64" r="54" fill="#EEF2F7" />
+
+  <g clip-path="url(#clipCircleFemale)">
+    <!-- shirt -->
+    <path d="M22 132c9-34 32-50 42-50s33 16 42 50" fill="#7AD7DE" />
+    <!-- v-collar -->
+    <path d="M46 96l18-14 18 14-10 18H56l-10-18Z" fill="#68C9D1" />
+
+    <!-- neck -->
+    <path d="M56 86h16v14c0 6-16 6-16 0V86Z" fill="#F2C3A6" />
+
+    <!-- face -->
+    <path d="M64 38c-18 0-30 12-30 28v8c0 18 12 32 30 32s30-14 30-32v-8c0-16-12-28-30-28Z" fill="#F7C9AA" />
+
+    <!-- eyes -->
+    <ellipse cx="54" cy="69" rx="6" ry="8" fill="#1F2937" />
+    <ellipse cx="74" cy="69" rx="6" ry="8" fill="#1F2937" />
+
+    <!-- mouth -->
+    <path d="M56 86c4 6 12 6 16 0" stroke="#E85A6A" stroke-width="6" stroke-linecap="round" fill="none" />
+
+    <!-- hair (dark navy, long) -->
+    <path
+      d="M34 58c0-28 20-42 30-42s30 14 30 42c0 6-2 12-5 16v-10c0-10-10-20-25-20s-25 10-25 20v10c-3-4-5-10-5-16Z"
+      fill="#052A45"
+    />
+    <!-- hair sides -->
+    <path d="M22 110c5-28 16-40 28-44v40c-10 6-22 6-28 4Z" fill="#052A45" opacity="0.98" />
+    <path d="M106 110c-5-28-16-40-28-44v40c10 6 22 6 28 4Z" fill="#052A45" opacity="0.98" />
+    <!-- middle part -->
+    <path d="M64 44c-5 0-10 2-12 6 2 6 3 10 4 18 2 12 4 20 8 20s6-8 8-20c1-8 2-12 4-18-2-4-7-6-12-6Z" fill="#052A45" opacity="0.55" />
+  </g>
+</svg>

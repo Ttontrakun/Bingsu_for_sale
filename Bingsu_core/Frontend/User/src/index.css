@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sidebar Navigation Styles */
+@layer components {
+  .nav-item {
+    @apply flex items-center gap-3 cursor-pointer transition px-3 py-2 rounded-lg;
+  }
+
+  .nav-item-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-bots-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-bots-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-knowledge-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-knowledge-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-integration-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-integration-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+}
+
+/* Chat animations */
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Toast animations */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.3s ease-out;
+}
+
+.gemini-markdown p:first-child {
+  margin-top: 0.25rem;
+}
+
+.gemini-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.gemini-markdown a {
+  color: #2563eb;
+  text-decoration: underline;
+}
+
+.gemini-markdown hr {
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+  margin: 0.75rem 0;
+}
+
+/* Hide browser-native password reveal/clear icons (Edge/IE) when using custom eye button */
+input.hide-native-password-toggle::-ms-reveal,
+input.hide-native-password-toggle::-ms-clear {
+  display: none;
+}

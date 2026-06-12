@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Sidebar Navigation Styles */
+@layer components {
+  .nav-item {
+    @apply flex items-center gap-3 cursor-pointer transition px-3 py-2 rounded-lg;
+  }
+
+  .nav-item-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-bots-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-bots-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-knowledge-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-knowledge-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+
+  .nav-item-integration-active {
+    @apply text-gray-900 font-semibold bg-gray-300;
+  }
+
+  .nav-item-integration-inactive {
+    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+  }
+}
