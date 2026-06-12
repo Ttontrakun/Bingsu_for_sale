@@ -93,3 +93,12 @@ input.hide-native-password-toggle::-ms-reveal,
 input.hide-native-password-toggle::-ms-clear {
   display: none;
 }
+
+/* Chromium-based browsers (Edge/Chrome) */
+input.hide-native-password-toggle::-webkit-credentials-auto-fill-button,
+input.hide-native-password-toggle::-webkit-password-toggle-button,
+input.hide-native-password-toggle::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+  display: none !important;
+}

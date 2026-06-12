@@ -1,5 +1,5 @@
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { HiOutlineMail } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/NT_Logo.png';
@@ -13,6 +13,12 @@ function Verifying() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [email, setEmail] = useState('');
+  const verifiedTokenRef = useRef('');
+
+  const isInvalidOrExpiredTokenError = (message) => {
+    const text = String(message || '').toLowerCase();
+    return text.includes('invalid or expired token');
+  };
 
   const handleVerifyEmail = useCallback(async (token, userEmail) => {
     if (!token) {
@@ -24,14 +30,42 @@ function Verifying() {
     setSuccess('');
 
     try {
-      await authAPI.verifyEmail(token);
-      // Verification successful - redirect to create password with token
-      navigate(`/create-password?token=${token}`, {
+      const verifyResponse = await authAPI.verifyEmail(token);
+      const passwordSetupToken = verifyResponse?.passwordSetupToken || token;
+      // Verification successful - redirect to create password with setup token
+      navigate(`/create-password?token=${passwordSetupToken}`, {
         state: { email: userEmail || email, verified: true }
       });
     } catch (error) {
       console.error('Error verifying email:', error);
       const errorMessage = getErrorMessage(error) || 'เกิดข้อผิดพลาดในการยืนยันอีเมล';
+      const fallbackEmail = userEmail || email;
+
+      // Handle stale email links more gracefully:
+      // if token is expired/invalid, try to resend and continue automatically.
+      if (fallbackEmail && isInvalidOrExpiredTokenError(errorMessage)) {
+        try {
+          const resend = await authAPI.resendVerification(fallbackEmail);
+          const latestToken = resend?.verificationToken;
+          if (latestToken) {
+            const verifyLatestResponse = await authAPI.verifyEmail(latestToken);
+            const latestPasswordSetupToken = verifyLatestResponse?.passwordSetupToken || latestToken;
+            navigate(`/create-password?token=${latestPasswordSetupToken}`, {
+              state: { email: fallbackEmail, verified: true }
+            });
+            return;
+          }
+
+          setError('ลิงก์ยืนยันหมดอายุแล้ว กรุณาตรวจสอบอีเมลล่าสุดหรือสมัครใหม่อีกครั้ง');
+          return;
+        } catch (resendError) {
+          console.error('Error auto-resending verification:', resendError);
+          const resendErrorMessage = getErrorMessage(resendError) || 'ลิงก์ยืนยันหมดอายุ กรุณาส่งอีเมลยืนยันอีกครั้ง';
+          setError(resendErrorMessage);
+          return;
+        }
+      }
+
       setError(errorMessage);
     }
   }, [navigate, email]);
@@ -49,8 +83,11 @@ function Verifying() {
       setEmail(emailFromParams);
     }
 
-    // If token is provided in URL (from email link), auto-verify
+    // If token is provided in URL (from email link), auto-verify once per token.
+    // Prevent duplicate verify calls in React StrictMode / re-renders.
     if (tokenFromParams) {
+      if (verifiedTokenRef.current === tokenFromParams) return;
+      verifiedTokenRef.current = tokenFromParams;
       handleVerifyEmail(tokenFromParams, emailFromState || emailFromParams);
     } else if (tokenFromState) {
       // For development: show verification link if token is in state

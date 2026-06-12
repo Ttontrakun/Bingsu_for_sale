@@ -117,7 +117,13 @@ async function hasUserExpiresAtColumn() {
 
 supportRouter.get("/pending-users", authenticate, requireRole("support", "admin", "admin_metrics"), async (_req, res) => {
   const users = await prisma.user.findMany({
-    where: { approvalStatus: "pending", role: "user" },
+    // Send to support approval only after user has completed initial password setup.
+    where: {
+      approvalStatus: "pending",
+      role: "user",
+      emailVerifiedAt: { not: null },
+      passwordResetToken: null,
+    },
     orderBy: { createdAt: "desc" },
   });
   res.json(users);

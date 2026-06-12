@@ -125,13 +125,6 @@ export async function signupHandler(req, res) {
         token: verificationToken,
       });
     }
-    if (user.role === "user" && user.approvalStatus === "pending") {
-      await sendSupportPendingApprovalEmail({
-        email: user.email,
-        name: user.name,
-        userId: user.id,
-      });
-    }
   } catch (emailErr) {
     console.error("[auth] signup email failed:", emailErr?.message || emailErr);
     if (isProduction) {
@@ -243,13 +236,27 @@ authRouter.post("/verify-email", async (req, res) => {
   }
 
   const tokenHash = hashToken(token);
+  const now = new Date();
   const user = await prisma.user.findFirst({
-    where: { emailVerificationToken: tokenHash },
+    where: {
+      emailVerificationToken: tokenHash,
+    },
   });
-  if (!user || (user.emailVerificationExpiresAt && user.emailVerificationExpiresAt < new Date())) {
+  if (!user) {
     res.status(400).json({ error: "Invalid or expired token" });
     return;
   }
+
+  const emailTokenValid =
+    user.emailVerificationToken === tokenHash
+    && (!user.emailVerificationExpiresAt || user.emailVerificationExpiresAt >= now);
+
+  if (!emailTokenValid) {
+    res.status(400).json({ error: "Invalid or expired token" });
+    return;
+  }
+
+  const passwordSetupToken = createToken();
 
   await prisma.user.update({
     where: { id: user.id },
@@ -257,8 +264,9 @@ authRouter.post("/verify-email", async (req, res) => {
       emailVerifiedAt: new Date(),
       emailVerificationToken: null,
       emailVerificationExpiresAt: null,
-      // หลังยืนยันเมลแล้ว ให้ token เดิมใช้ตั้งรหัสผ่านครั้งแรกได้ (one-time)
-      passwordResetToken: tokenHash,
+      // Generate a fresh one-time password setup token.
+      // This makes "latest verification link only" behavior explicit.
+      passwordResetToken: hashToken(passwordSetupToken),
       passwordResetExpiresAt: buildExpiryDate(passwordResetTokenTtlHours),
     },
   });
@@ -270,7 +278,7 @@ authRouter.post("/verify-email", async (req, res) => {
     meta: { ...context },
   });
 
-  res.json({ ok: true });
+  res.json({ ok: true, passwordSetupToken });
 });
 
 authRouter.post("/resend-verification", async (req, res) => {
@@ -434,15 +442,31 @@ const consumePasswordToken = async ({
     meta: { ...context },
   });
 
+  if (eventName === "auth.password.set.initial" && user.role === "user" && user.approvalStatus === "pending") {
+    try {
+      await sendSupportPendingApprovalEmail({
+        email: user.email,
+        name: user.name,
+        userId: user.id,
+      });
+    } catch (emailErr) {
+      console.error("[auth] support pending approval email failed:", emailErr?.message || emailErr);
+      if (isProduction) {
+        res.status(500).json({ error: "Password saved but failed to notify support. Please contact support." });
+        return;
+      }
+    }
+  }
+
   res.json({ ok: true });
 };
 
 authRouter.post("/reset-password", async (req, res) => {
-  const { token, newPassword } = req.body ?? {};
+  const { token, newPassword, password } = req.body ?? {};
   const context = getRequestContext(req);
   await consumePasswordToken({
     token,
-    password: newPassword,
+    password: newPassword ?? password,
     eventName: "auth.password.reset",
     context,
     res,

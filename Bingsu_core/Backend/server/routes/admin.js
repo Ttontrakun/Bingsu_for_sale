@@ -16,6 +16,12 @@ export const adminRouter = express.Router();
 
 const HELP_DOC_DISPLAY_NAME = "คู่มือการใช้งาน";
 const HELP_BOT_NAME = "บอทช่วยสอน";
+const pendingApprovalReadyFilter = {
+  approvalStatus: "pending",
+  role: "user",
+  emailVerifiedAt: { not: null },
+  passwordResetToken: null,
+};
 
 async function hasUserExpiresAtColumn() {
   try {
@@ -60,7 +66,7 @@ adminRouter.get("/metrics", authenticate, requireAdminMetrics, async (_req, res)
     prisma.conversation.count(),
     prisma.message.count(),
     prisma.uploadBatch.count(),
-    prisma.user.count({ where: { approvalStatus: "pending", role: "user" } }),
+    prisma.user.count({ where: pendingApprovalReadyFilter }),
     prisma.bot.count(),
   ]);
 
@@ -309,9 +315,7 @@ adminRouter.get("/user-role-distribution", authenticate, requireRole("support", 
         approvalStatus: { in: ["approved", "rejected"] },
       },
     }),
-    prisma.user.count({
-      where: { role: "user", approvalStatus: "pending" },
-    }),
+    prisma.user.count({ where: pendingApprovalReadyFilter }),
     prisma.user.count({ where: { role: "support" } }),
     prisma.user.count({
       where: { role: { in: ["admin", "admin_metrics"] } },

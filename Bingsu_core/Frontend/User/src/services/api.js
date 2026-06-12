@@ -197,6 +197,7 @@ export const authAPI = {
         const response = await api.post('/auth/reset-password', {
             token,
             password,
+            newPassword: password,
         });
         return response.data;
     },

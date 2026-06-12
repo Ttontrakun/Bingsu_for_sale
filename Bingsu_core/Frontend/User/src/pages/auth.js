@@ -158,15 +158,19 @@ function Auth() {
           </div>
           <h2 className="mb-5 text-2xl font-bold text-zinc-800 transition-all duration-500 ease-in-out drop-shadow-lg" style={{ textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)' }}>BingSu</h2>
 
-          <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: isSignIn ? '290px' : '355px' }}>
+          <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: '355px' }}>
             <div 
-              className="transition-all duration-700 ease-in-out"
+              className="transition-all duration-500 ease-in-out"
               style={{
-                transform: isSignIn ? 'translateX(0) scale(1)' : 'translateX(-100%) scale(0.95)',
+                transform: isSignIn ? 'translateX(0)' : 'translateX(-100%)',
                 opacity: isSignIn ? 1 : 0,
-                maxHeight: isSignIn ? '620px' : '0',
-                overflow: 'hidden',
-                transition: 'transform 0.7s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1)'
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                width: '100%',
+                pointerEvents: isSignIn ? 'auto' : 'none',
+                transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
               }}
             >
               {/* Sign In Form */}
@@ -246,18 +250,17 @@ function Auth() {
               </form>
             </div>
             <div 
-              className="transition-all duration-700 ease-in-out"
+              className="transition-all duration-500 ease-in-out"
               style={{
-                transform: !isSignIn ? 'translateX(0) scale(1)' : 'translateX(100%) scale(0.95)',
+                transform: !isSignIn ? 'translateX(0)' : 'translateX(100%)',
                 opacity: !isSignIn ? 1 : 0,
-                maxHeight: !isSignIn ? '620px' : '0',
-                overflow: 'hidden',
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 right: 0,
                 width: '100%',
-                transition: 'transform 0.7s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1)'
+                pointerEvents: !isSignIn ? 'auto' : 'none',
+                transition: 'transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)'
               }}
             >
               {/* Sign Up Form */}

@@ -16,7 +16,7 @@ const isEmailConfigured = () =>
   Boolean(smtpServer && smtpPort && smtpUser && smtpPassword && smtpFrom);
 
 const appBaseUrl = () => frontendUrl || "http://localhost:8083";
-const supportLabel = "ศูนย์ดูแลระบบ BingSu (Magnetolabs)";
+const supportLabel = "ศูนย์ดูแลระบบ BingSu (โทรคมนาคมแห่งชาติ (จำกัด))";
 const buildEmailRef = (prefix) => {
   const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -62,7 +62,7 @@ export const sendVerificationEmail = async ({ email, name, token }) => {
   const text = [
     `เรียน คุณ${name || "ผู้ใช้งาน"}`,
     "",
-    "บริษัท แมกเนโตแล็บส์ จำกัด",
+    "โทรคมนาคมแห่งชาติ (จำกัด)",
     supportLabel,
     `เลขอ้างอิง: ${refCode}`,
     "",
@@ -83,7 +83,7 @@ export const sendVerificationEmail = async ({ email, name, token }) => {
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;background:#f8fafc;padding:20px">
       <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px">
-        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">บริษัท แมกเนโตแล็บส์ จำกัด</p>
+        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">โทรคมนาคมแห่งชาติ (จำกัด)</p>
         <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${supportLabel}</p>
         <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${refCode}</strong></p>
         <p style="margin:0 0 12px">เรียน คุณ${name || "ผู้ใช้งาน"}</p>
@@ -111,7 +111,7 @@ export const sendPasswordResetEmail = async ({ email, name, token }) => {
   const text = [
     `เรียน คุณ${name || "ผู้ใช้งาน"}`,
     "",
-    "บริษัท แมกเนโตแล็บส์ จำกัด",
+    "โทรคมนาคมแห่งชาติ (จำกัด)",
     supportLabel,
     `เลขอ้างอิง: ${refCode}`,
     "",
@@ -132,7 +132,7 @@ export const sendPasswordResetEmail = async ({ email, name, token }) => {
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;background:#f8fafc;padding:20px">
       <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px">
-        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">บริษัท แมกเนโตแล็บส์ จำกัด</p>
+        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">โทรคมนาคมแห่งชาติ (จำกัด)</p>
         <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${supportLabel}</p>
         <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${refCode}</strong></p>
         <p style="margin:0 0 12px">เรียน คุณ${name || "ผู้ใช้งาน"}</p>
