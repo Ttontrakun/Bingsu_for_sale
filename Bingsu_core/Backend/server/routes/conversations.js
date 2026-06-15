@@ -27,6 +27,7 @@ const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
   "- ถ้าคำถามง่าย/ตรง: ให้มีเฉพาะคำตอบสั้น ไม่ต้องขยาย",
   "- ถ้าเป็นคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ให้ตอบรูปแบบนี้ก่อนเสมอ -> 'ผู้อนุมัติ: ...' และบรรทัดถัดไป 'หมายเหตุ: ...' (ถ้ามีเงื่อนไขเช่น ต้องผ่าน PM ก่อน)",
   "- สำหรับคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ห้ามใส่รายละเอียดเพิ่มเกิน 2 บรรทัด เว้นแต่ผู้ใช้ขอรายละเอียดเพิ่ม",
+  "- สำหรับคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ถ้าพบชื่อย่อหรือชื่อเต็ม ให้แสดงทั้งสองแบบในบรรทัดเดียว เช่น 'กจญ. (กรรมการผู้จัดการใหญ่)'",
   "- ถ้าคำถามซับซ้อน: ส่วนรายละเอียดให้จัดเป็นหัวข้อสั้นๆ พร้อม bullet points ที่อ่านง่าย",
   "- ห้ามเกริ่นยาวหรือทวนคำถามผู้ใช้ซ้ำ",
   "- ถ้าเป็นคำแนะนำเชิงขั้นตอน ให้ใช้ลำดับเลข 1) 2) 3)",
@@ -126,7 +127,7 @@ function getHelpBotSystemKnowledge() {
   const tokenLimit = Number.isFinite(FREE_DAILY_TOKEN_LIMIT) ? FREE_DAILY_TOKEN_LIMIT : 50000;
   const chatMessagesLimit = Number.isFinite(MAX_DAILY_CHAT_MESSAGES) ? MAX_DAILY_CHAT_MESSAGES : 2000;
   return `
-คุณคือบอทช่วยสอนการใช้งานระบบบิงซูบอท (Bingsu Bot) คุณรู้จักระบบเกือบทุกอย่าง — ใช้ตอบคำถามวิธีใช้ ขั้นตอน กดตรงไหน เปลี่ยนโปรไฟล์ ลบแชท จำกัดการใช้งาน ได้เสมือนคุณเข้าใจทั้งระบบ
+คุณคือบอทช่วยสอนการใช้งานระบบบิงซูบอท (Enterprise AI Chatbot Bot) คุณรู้จักระบบเกือบทุกอย่าง — ใช้ตอบคำถามวิธีใช้ ขั้นตอน กดตรงไหน เปลี่ยนโปรไฟล์ ลบแชท จำกัดการใช้งาน ได้เสมือนคุณเข้าใจทั้งระบบ
 
 ความรู้เกี่ยวกับระบบ (ใช้ตอบเมื่อผู้ใช้ถามวิธีใช้):
 
@@ -199,6 +200,19 @@ const getUsedTokensFromRow = (row) => {
 };
 
 const normalizeText = (s) => String(s || "").trim().toLowerCase();
+const AUTHORITY_ROLE_MAP = [
+  { abbr: "ผจก.", full: "ผู้จัดการ", re: /(ผจก\.?|ผู้จัดการ)/i },
+  { abbr: "ชจญ.", full: "ผู้ช่วยกรรมการผู้จัดการใหญ่", re: /(ชจญ\.?|ชจรย\.?|ผู้ช่วยกรรมการผู้จัดการใหญ่)/i },
+  { abbr: "รจญ.", full: "รองกรรมการผู้จัดการใหญ่", re: /(รจญ\.?|รองกรรมการผู้จัดการใหญ่)/i },
+  { abbr: "กจญ.", full: "กรรมการผู้จัดการใหญ่", re: /(กจญ\.?|กรรมการผู้จัดการใหญ่)/i },
+];
+const formatAuthorityRole = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return text;
+  const match = AUTHORITY_ROLE_MAP.find((entry) => entry.re.test(text));
+  if (!match) return text;
+  return `${match.abbr} (${match.full})`;
+};
 const isAuthorityDecisionQuery = (message) => {
   const m = normalizeText(message);
   if (!m) return false;
@@ -208,6 +222,15 @@ const isAuthorityDecisionQuery = (message) => {
 const getAuthorityOverrideFromQuestion = (question) => {
   const m = normalizeText(question);
   if (!m) return null;
+  const isNtCorporateDiscountCase =
+    /(nt\s*corporate|ลูกค้าองค์กร|ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร)/.test(m) &&
+    /(floor\s*price|floorprice|เกิน\s*floor|เกินราคาขั้นต่ำ|ต่ำกว่าราคาขั้นต่ำ|ฟลอร์\s*ไพรซ์)/.test(m);
+  if (isNtCorporateDiscountCase) {
+    return {
+      approver: "รจญ.",
+      note: "ต้องผ่านการพิจารณาจากฝ่ายบริหารจัดการผลิตภัณฑ์ (PM) ก่อนเสนออนุมัติ",
+    };
+  }
   if (/(เส้นใยแก้วนำแสง|nt dark fiber)/.test(m) && /(ไม่เกินร้อยละ\s*50|ไม่เกิน\s*50|price list)/.test(m)) {
     return {
       approver: "ชจญ.",
@@ -218,8 +241,8 @@ const getAuthorityOverrideFromQuestion = (question) => {
     /(ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร|นำรายการส่งเสริมการขายไปให้ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร)/.test(m)
   ) {
     return {
-      approver: "กจญ.",
-      note: "ต้องผ่านการพิจารณาจาก PM ที่เกี่ยวข้องก่อน",
+      approver: "รจญ.",
+      note: "ต้องผ่านการพิจารณาจากฝ่ายบริหารจัดการผลิตภัณฑ์ (PM) ก่อนเสนออนุมัติ",
     };
   }
   return null;
@@ -228,25 +251,26 @@ const getAuthorityOverrideFromQuestion = (question) => {
 const getAuthorityOverrideFromReply = (reply) => {
   const r = normalizeText(reply);
   if (!r) return null;
+  const hasFloorPrice = /(floor\s*price|floorprice|เกิน\s*floor|เกินราคาขั้นต่ำ|ต่ำกว่าราคาขั้นต่ำ|ฟลอร์\s*ไพรซ์)/.test(r);
+  const hasCorporateHint = /(nt\s*corporate|ลูกค้าองค์กร|ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร)/.test(r);
+  const hasPmWorkflowHint = /(pm|ผู้จัดการผลิตภัณฑ์|บริหารจัดการผลิตภัณฑ์)/.test(r);
+  const hasRjYHint = /(รจญ\.?|รองกรรมการผู้จัดการใหญ่)/.test(r);
+  if ((hasCorporateHint && hasFloorPrice) || (hasFloorPrice && hasPmWorkflowHint && hasRjYHint)) {
+    return {
+      approver: "รจญ.",
+      note: "ต้องผ่านการพิจารณาจากฝ่ายบริหารจัดการผลิตภัณฑ์ (PM) ก่อนเสนออนุมัติ",
+    };
+  }
   if (
     /(ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร|นำรายการส่งเสริมการขายไปให้ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร)/.test(r) &&
     /(pm|ผู้จัดการผลิตภัณฑ์)/.test(r)
   ) {
     return {
-      approver: "กจญ.",
-      note: "ต้องผ่านการพิจารณาจาก PM ที่เกี่ยวข้องก่อน",
+      approver: "รจญ.",
+      note: "ต้องผ่านการพิจารณาจากฝ่ายบริหารจัดการผลิตภัณฑ์ (PM) ก่อนเสนออนุมัติ",
     };
   }
   return null;
-};
-
-const normalizeApproverToAbbreviation = (value) => {
-  const text = String(value || "").trim();
-  if (!text) return text;
-  if (/^ชจญ\.?$/i.test(text) || /ผู้ช่วยกรรมการผู้จัดการใหญ่/i.test(text)) return "ชจญ.";
-  if (/^รจญ\.?$/i.test(text) || /รองกรรมการผู้จัดการใหญ่/i.test(text)) return "รจญ.";
-  if (/^กจญ\.?$/i.test(text) || /กรรมการผู้จัดการใหญ่/i.test(text)) return "กจญ.";
-  return text;
 };
 
 const toCompactAuthorityReply = (question, reply) => {
@@ -256,7 +280,7 @@ const toCompactAuthorityReply = (question, reply) => {
 
   const override = getAuthorityOverrideFromQuestion(question) || getAuthorityOverrideFromReply(rawReply);
   if (override) {
-    return `ผู้อนุมัติ: ${override.approver}\nหมายเหตุ: ${override.note}`;
+    return `ผู้อนุมัติ: ${formatAuthorityRole(override.approver)}\nหมายเหตุ: ${override.note}`;
   }
 
   const normalizedLines = rawReply
@@ -286,9 +310,11 @@ const toCompactAuthorityReply = (question, reply) => {
     .replace(/^.*?(?:อนุมัติ(?:โดย|จาก)?|มีอำนาจ(?:อนุมัติ)?)(?:\s*[:：])?\s*/i, "")
     .trim();
   if (!approverValue) approverValue = approverLine;
-  if (authorityMatch?.label) approverValue = authorityMatch.label;
   approverValue = approverValue.replace(/^เป็นผู้อนุมัติ\s*/i, "").trim();
-  approverValue = normalizeApproverToAbbreviation(approverValue);
+  approverValue = formatAuthorityRole(approverValue);
+  if (authorityMatch?.label && approverValue === approverLine) {
+    approverValue = formatAuthorityRole(authorityMatch.label);
+  }
   if (approverValue.length > 160) approverValue = `${approverValue.slice(0, 160)}...`;
 
   const noteLine = normalizedLines.find(
@@ -334,6 +360,59 @@ const isLikelyFollowUp = (message) => {
     /หมายถึง/,
   ];
   return patterns.some((re) => re.test(m));
+};
+
+const SEARCH_STOPWORDS = new Set([
+  "คือ", "ที่", "และ", "หรือ", "ของ", "ใน", "กับ", "ว่า", "อะไร", "อย่างไร", "ยังไง", "ทำไม", "ไหม", "มั้ย",
+  "the", "is", "are", "what", "how", "why", "a", "an", "to", "for", "of", "and", "or", "in", "on",
+]);
+
+const extractEvidenceTokens = (message) => {
+  const raw = String(message || "");
+  const normalized = raw.toLowerCase();
+  const words = normalized
+    .split(/[^\p{L}\p{N}%./-]+/u)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !SEARCH_STOPWORDS.has(token));
+  const numeric = raw.match(/\d+(?:[.,]\d+)?%?/g) || [];
+  const unique = new Set(
+    [...words, ...numeric.map((token) => token.replace(",", ".").trim())]
+      .filter(Boolean),
+  );
+  return Array.from(unique).slice(0, 16);
+};
+
+const isPricingIntent = (message) => {
+  const normalized = String(message || "").toLowerCase();
+  return /(ราคา|ค่าบริการ|แพ็กเกจ|โปร|โปรโมชั่น|เท่าไหร่|กี่บาท|เดือนนี้|ต่อเดือน|\/เดือน)/.test(normalized);
+};
+
+const hasSufficientGroundingEvidence = (message, groundingChunks) => {
+  const chunks = Array.isArray(groundingChunks) ? groundingChunks : [];
+  if (chunks.length === 0) return false;
+  const tokens = extractEvidenceTokens(message);
+  if (tokens.length === 0) return true;
+  const contextText = chunks
+    .slice(0, 4)
+    .map((chunk) => String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? "").toLowerCase())
+    .join("\n");
+  if (!contextText.trim()) return false;
+  const numericTokens = tokens.filter((token) => /^\d+(?:\.\d+)?%?$/.test(token));
+  const textTokens = tokens.filter((token) => !/^\d+(?:\.\d+)?%?$/.test(token));
+  const matchedNumeric = numericTokens.filter((token) => contextText.includes(token)).length;
+  const matchedText = textTokens.filter((token) => contextText.includes(token)).length;
+  const hasPriceSignalInContext = /(บาท|บ\.|\/เดือน|ต่อเดือน|ราคา|ค่าบริการ|\d{2,}(?:[.,]\d+)?)/.test(contextText);
+  if (isPricingIntent(message)) {
+    if (numericTokens.length > 0) {
+      return matchedNumeric >= 1 && matchedText >= 2 && hasPriceSignalInContext;
+    }
+    return matchedText >= 2 && hasPriceSignalInContext;
+  }
+  // ถ้าคำถามมีตัวเลข/เปอร์เซ็นต์ ต้อง match อย่างน้อย 1 ตัวเลข + คำหลัก 1 คำ เพื่อกันหยิบบริบทผิดเรื่อง
+  if (numericTokens.length > 0) {
+    return matchedNumeric >= 1 && matchedText >= 1;
+  }
+  return matchedText >= 2;
 };
 
 const isOverviewStyleQuery = (message) => {
@@ -383,7 +462,7 @@ const buildApproverRolesReply = (groundingChunks, contextText = "") => {
     : [];
   const approvers = collectApproverAbbreviations(...chunkTexts, contextText);
   if (approvers.length === 0) return "ผู้อนุมัติ: ไม่พบข้อมูลผู้อนุมัติที่ชัดเจนในบริบทที่ดึงได้";
-  return `ผู้อนุมัติ: ${approvers.join(", ")}`;
+  return `ผู้อนุมัติ: ${approvers.map((approver) => formatAuthorityRole(approver)).join(", ")}`;
 };
 
 const MAX_CONTEXT_CHARS_FOR_MODEL = Number(process.env.MAX_CONTEXT_CHARS_FOR_MODEL || 12000);
@@ -425,7 +504,7 @@ conversationsRouter.post("/", authenticate, async (req, res) => {
         OR: [
           { ownerId: req.user.id },
           { name: "บอทช่วยสอน" },
-          { name: "BingSu Assistant" },
+          { name: "Enterprise AI Chatbot Assistant" },
         ],
       },
     });
@@ -1074,14 +1153,37 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   }
 
   if (isGreetingOnly(message)) {
-    res.json({ reply: GREETING_REPLY, groundingChunks: [] });
-    void (async () => {
-      await prisma.message.create({ data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) } });
-      await prisma.message.create({ data: { conversationId, role: "model", content: GREETING_REPLY, platform: getPlatform(req) } });
-      await prisma.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) } });
-      await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
-      await invalidateConversationCaches(conversation.id, req.user.id);
-    })().catch((e) => console.error("Greeting save failed", e));
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: GREETING_REPLY, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(`data: ${JSON.stringify({ content: GREETING_REPLY })}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: GREETING_REPLY,
+        references: [],
+        groundingChunks: [],
+      })}\n\n`,
+    );
+    res.end();
     return;
   }
 
@@ -1112,7 +1214,9 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
-  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message) && groundingChunks.length === 0;
+  const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
+  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = NO_GROUNDING_REPLY;
     await prisma.message.create({
@@ -1194,7 +1298,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
         "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
       ].join("\n")
     : [
-        "You are BingSu Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
+        "You are Enterprise AI Chatbot Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
         "CAPABILITIES (ทำได้ทั้งหมด):",
         "1) สนทนาทั่วไป: ทักทาย ถาม-ตอบ ให้คำแนะนำทั่วไปได้ตามปกติ",
         "2) Knowledge Analysis: เมื่อมี Context ให้ตอบและวิเคราะห์จาก Context เป็นหลัก (วิเคราะห์ เปรียบเทียบ สรุปได้จาก Context)",
@@ -1298,6 +1402,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     }
 
     replyToSave = stripRedundantShortSummary(replyToSave);
+    replyToSave = toCompactAuthorityReply(message, replyToSave);
 
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     const modelMessage = await prisma.message.create({
@@ -1498,7 +1603,9 @@ chatRouter.post("/", authenticate, async (req, res) => {
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
-  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message) && groundingChunks.length === 0;
+  const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
+  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = NO_GROUNDING_REPLY;
     await prisma.message.create({
@@ -1579,7 +1686,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
         "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
       ].join("\n")
     : [
-        "You are BingSu Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
+        "You are Enterprise AI Chatbot Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
         "CAPABILITIES (ทำได้ทั้งหมด):",
         "1) General chat: ทักทาย สนทนาทั่วไป ถาม-ตอบ ให้คำแนะนำได้ตามปกติ",
         "2) Knowledge Analysis: เมื่อมี Context ให้ตอบและวิเคราะห์จาก Context เป็นหลัก (วิเคราะห์ เปรียบเทียบ สรุปได้จาก Context)",
@@ -1665,6 +1772,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
     }
 
     replyToSave = stripRedundantShortSummary(replyToSave);
+    replyToSave = toCompactAuthorityReply(message, replyToSave);
 
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     const modelMessage = await prisma.message.create({
@@ -1778,7 +1886,9 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   if (!contextText && contextDocuments.length > 0 && overviewRequest) {
     contextText = getFallbackContextFromDocuments(contextDocuments);
   }
-  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message) && groundingChunks.length === 0;
+  const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
+  const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = NO_GROUNDING_REPLY;
     await prisma.message.create({
@@ -1886,6 +1996,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   if (suggestionsMatch) replyToSave = rawReply.slice(0, suggestionsMatch.index).trim();
 
   replyToSave = stripRedundantShortSummary(replyToSave);
+  replyToSave = toCompactAuthorityReply(message, replyToSave);
 
   const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
   await prisma.message.create({
