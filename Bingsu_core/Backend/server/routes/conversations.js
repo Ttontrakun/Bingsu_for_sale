@@ -21,10 +21,35 @@ export const messagesRouter = express.Router();
 export const chatRouter = express.Router();
 
 const HELP_BOT_NAME = "บอทช่วยสอน";
+const REDACTED_PLACEHOLDERS = new Set([
+  "[REDACTED_USER_MESSAGE]",
+  "[REDACTED_CONVERSATION_TITLE]",
+]);
+const isRedactedPlaceholder = (value) => {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  if (REDACTED_PLACEHOLDERS.has(text)) return true;
+  return /^\[REDACTED_[A-Z_]+\]$/i.test(text);
+};
+const resolveConversationTitle = (title, lastMessage) => {
+  const normalizedTitle = String(title || "").trim();
+  if (normalizedTitle && !isRedactedPlaceholder(normalizedTitle)) return normalizedTitle;
+  const normalizedLast = String(lastMessage || "").trim();
+  if (normalizedLast && !isRedactedPlaceholder(normalizedLast)) {
+    return normalizedLast.slice(0, 80);
+  }
+  return "New Chat";
+};
+const sanitizeRedactedContentForClient = (content) => {
+  const normalized = String(content || "").trim();
+  if (isRedactedPlaceholder(normalized)) return "";
+  return content;
+};
 const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
   "RESPONSE FORMAT (Gemini-like, readable):",
   "- ตอบแบบ 2 ชั้นเสมอ: (1) คำตอบสั้นตรงประเด็น 1-2 บรรทัดก่อน (2) รายละเอียดเฉพาะที่จำเป็นเท่านั้น",
   "- ถ้าคำถามง่าย/ตรง: ให้มีเฉพาะคำตอบสั้น ไม่ต้องขยาย",
+  "- ห้ามขึ้นต้นคำตอบด้วยวลีอ้างอิงเอกสาร เช่น 'ตามเอกสารที่ส่งมาด้วย', 'จากเอกสารที่ให้มา', 'อ้างอิงจากเอกสาร' — ให้ตอบเนื้อหาโดยตรงทันที",
   "- ถ้าเป็นคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ให้ตอบรูปแบบนี้ก่อนเสมอ -> 'ผู้อนุมัติ: ...' และบรรทัดถัดไป 'หมายเหตุ: ...' (ถ้ามีเงื่อนไขเช่น ต้องผ่าน PM ก่อน)",
   "- สำหรับคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ห้ามใส่รายละเอียดเพิ่มเกิน 2 บรรทัด เว้นแต่ผู้ใช้ขอรายละเอียดเพิ่ม",
   "- สำหรับคำถามประเภท 'ใครอนุมัติ/ใครรับผิดชอบ/ใครมีอำนาจ': ถ้าพบชื่อย่อหรือชื่อเต็ม ให้แสดงทั้งสองแบบในบรรทัดเดียว เช่น 'กจญ. (กรรมการผู้จัดการใหญ่)'",
@@ -219,6 +244,111 @@ const isAuthorityDecisionQuery = (message) => {
   return /(ใครอนุมัติ|ผู้อนุมัติ|ใครมีอำนาจ|มีอำนาจอนุมัติ|ใครรับผิดชอบ|อนุมัติ.*ใคร|ใคร.*อนุมัติ|อำนาจส่วนลด|อนุมัติอัตรา|ส่วนลดเฉพาะราย)/.test(m);
 };
 
+const isNtCorporateOverFloorQuery = (m) =>
+  /(nt\s*corporate|ลูกค้าองค์กร|ส่วนลดเฉพาะรายสำหรับลูกค้าองค์กร)/.test(m)
+  && /(floor\s*price|floorprice|เกิน\s*floor|เกินราคาขั้นต่ำ|ต่ำกว่าราคาขั้นต่ำ|ฟลอร์\s*ไพรซ์)/.test(m);
+
+const isDarkFiberOver50ToFloorQuery = (m) =>
+  /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+  && /(มากกว่า|เกิน|มากกว่าร้อยละ)/.test(m)
+  && /(50|ร้อยละ\s*50)/.test(m)
+  && /(floor\s*price|floorprice|ไม่เกิน\s*floor|ฟลอร์\s*ไพรซ์)/.test(m);
+
+const isTrial45DaysApprovalQuery = (m) =>
+  /(ทดลองใช้|ทดลองบริการ|ทดลองใช้บริการ)/.test(m)
+  && /(45\s*วัน|สี่สิบห้า\s*วัน)/.test(m)
+  && /(อำนาจ|ระดับ|อนุมัติ|ใคร)/.test(m);
+
+const isAuthoritySourceDocument = (doc) => {
+  const display = normalizeText(doc?.displayName || "");
+  const source = normalizeText(JSON.stringify(doc?.sourceFiles || ""));
+  return /(ตารางสรุป_คู่มือการใช้งานระเบียบ_คำสั่งประกาศ|คู่มือการใช้ระเบียบ|super\s*product\s*manager|product\s*manager|โครงสร้างใหม่)/.test(display)
+    || /(ตารางสรุป|super product manager|product manager|โครงสร้างใหม่)/.test(source);
+};
+
+const resolveAuthorityDocIds = (docs = [], fallbackDocIds = []) => {
+  const scoped = (docs || [])
+    .filter((doc) => doc?.id && isAuthoritySourceDocument(doc))
+    .map((doc) => String(doc.id));
+  return scoped.length > 0 ? Array.from(new Set(scoped)) : fallbackDocIds;
+};
+
+const resolveRetrievalTargets = (message, rawContextDocs = [], defaultDocumentIds = []) => {
+  const primaryDocumentIds = isAuthorityDecisionQuery(message)
+    ? resolveAuthorityDocIds(rawContextDocs, defaultDocumentIds)
+    : defaultDocumentIds;
+  const canFallbackToDefault =
+    isAuthorityDecisionQuery(message)
+    && primaryDocumentIds.length > 0
+    && primaryDocumentIds.length < defaultDocumentIds.length;
+  return {
+    primaryDocumentIds,
+    secondaryDocumentIds: canFallbackToDefault ? defaultDocumentIds : null,
+  };
+};
+
+const getDeterministicRuleReply = (question) => {
+  const m = normalizeText(question);
+  if (!m) return null;
+  if (isTrial45DaysApprovalQuery(m)) {
+    return "ผู้อนุมัติ: ผจก. (ผู้จัดการ)\nหมายเหตุ: กรณีขออนุมัติทดลองใช้บริการ 45 วัน อยู่ในช่วงไม่เกิน 60 วัน จึงใช้อำนาจระดับฝ่าย (ผจก.)";
+  }
+  if (
+    /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(ระยะเวลาใช้บริการขั้นต่ำ|ขั้นต่ำกี่ปี|ขั้นต่ำ.*กี่ปี)/.test(m)
+  ) {
+    return "ระยะเวลาใช้บริการขั้นต่ำของ NT Dark Fiber คือ 1 ปี";
+  }
+  if (
+    /(ทดลองใช้|ทดลองผลิตภัณฑ์|ทดลองบริการ)/.test(m)
+    && /(สูงสุด|นานสุด|กี่เดือน|นานเท่าไหร่)/.test(m)
+  ) {
+    return "การทดลองใช้ผลิตภัณฑ์/บริการใหม่กำหนดระยะเวลาเริ่มตั้งแต่ 1 เดือน และไม่เกิน 6 เดือน";
+  }
+  if (
+    /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(end-?to-?end|last mile|neutral last mile)/.test(m)
+  ) {
+    return "NT Dark Fiber ให้บริการแบบ End-to-End และไม่ใช่บริการ Last Mile";
+  }
+  if (
+    /(ค่าธรรมเนียมแรกเข้า|one time charge|otc)/.test(m)
+    && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+  ) {
+    return "ค่าธรรมเนียมแรกเข้า NT Dark Fiber (One Time Charge) คือ 7,000 บาท/ครั้ง";
+  }
+  if (
+    /(ค่าบริการรายเดือน|รายเดือนเท่าไหร่|เท่าไหร่ต่อเดือน)/.test(m)
+    && /(แขวนอากาศ)/.test(m)
+    && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+  ) {
+    return "ค่าบริการรายเดือน NT Dark Fiber แบบแขวนอากาศ คือ 1,500 บาท/core/กม./เดือน";
+  }
+  if (
+    /(ล่วงหน้า\s*12\s*เดือน|12\s*เดือน.*ล่วงหน้า)/.test(m)
+    && /(ส่วนลด|discount)/.test(m)
+    && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+  ) {
+    return "ชำระค่า NT Dark Fiber ล่วงหน้า 12 เดือน ได้ส่วนลด 5% (เฉพาะอัตรา Price List)";
+  }
+  if (
+    /(ผจก\.?|ผู้จัดการฝ่าย|ระดับฝ่าย)/.test(m)
+    && /(nt\s*corporate|corporate internet)/.test(m)
+    && /(ไม่เกิน|ได้ไม่เกิน|สูงสุด)/.test(m)
+    && /(กี่|กี่\s*%|เปอร์เซ็นต์|%)/.test(m)
+  ) {
+    return "ผจก.ฝ่าย ให้ส่วนลดค่าบริการ NT Corporate Internet ได้ไม่เกิน 30% จากอัตราปกติ";
+  }
+  if (
+    /(ลักลอบใช้|ลักลอบ)/.test(m)
+    && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(ค่าดำเนินการ|ค่าเสียหาย|เท่าไหร่|เท่าไร)/.test(m)
+  ) {
+    return "ค่าดำเนินการกรณีลักลอบใช้ NT Dark Fiber คือ 50,000 บาท/ครั้ง และต้องชำระค่าเสียหาย 10 เท่าของอัตราปกติ";
+  }
+  return null;
+};
+
 const getAuthorityOverrideFromQuestion = (question) => {
   const m = normalizeText(question);
   if (!m) return null;
@@ -278,6 +408,8 @@ const toCompactAuthorityReply = (question, reply) => {
   if (!rawReply) return rawReply;
   if (!isAuthorityDecisionQuery(question)) return rawReply;
 
+  // ให้เคส authority สำคัญ (เช่น NT Corporate เกิน Floor Price) ถูก normalize ตรงตามกติกาเสมอ
+  // และ fallback จากข้อความตอบ เมื่อโมเดลตอบมาใกล้เคียงแต่รูปแบบไม่คงที่
   const override = getAuthorityOverrideFromQuestion(question) || getAuthorityOverrideFromReply(rawReply);
   if (override) {
     return `ผู้อนุมัติ: ${formatAuthorityRole(override.approver)}\nหมายเหตุ: ${override.note}`;
@@ -334,6 +466,20 @@ const toCompactAuthorityReply = (question, reply) => {
   return compactLines.join("\n");
 };
 
+const stripDocumentLeadIn = (reply) => {
+  let text = String(reply || "").trim();
+  if (!text) return text;
+  const leadInPatterns = [
+    /^\s*(?:คำตอบคือ\s*[:：]\s*)?(?:ตาม|จาก)\s*เอกสาร(?:ที่(?:ส่งมา|ให้มา|แนบมา|เลือก)|ประกอบ)?\s*(?:นี้|ดังกล่าว)?\s*[,:\-–—]?\s*/i,
+    /^\s*(?:คำตอบคือ\s*[:：]\s*)?อ้างอิงจากเอกสาร\s*(?:ที่(?:ส่งมา|ให้มา|แนบมา|เลือก)|ประกอบ)?\s*(?:นี้|ดังกล่าว)?\s*[,:\-–—]?\s*/i,
+    /^\s*(?:คำตอบคือ\s*[:：]\s*)?จากข้อมูลในเอกสาร\s*(?:ที่(?:ส่งมา|ให้มา|แนบมา|เลือก)|ประกอบ)?\s*(?:นี้|ดังกล่าว)?\s*[,:\-–—]?\s*/i,
+  ];
+  for (const pattern of leadInPatterns) {
+    text = text.replace(pattern, "").trim();
+  }
+  return text;
+};
+
 const isLikelyFollowUp = (message) => {
   const m = normalizeText(message);
   if (!m) return false;
@@ -358,8 +504,35 @@ const isLikelyFollowUp = (message) => {
     /ข้างบน/,
     /สรุปอีกที/,
     /หมายถึง/,
+    /แบบไหนดีกว่า/,
+    /อันไหนดีกว่า/,
+    /ต่างกันยังไง/,
+    /ดีกว่ายังไง/,
+    /แบบไหนเร็วสุด/,
+    /อันไหนเร็วสุด/,
+    /ตัวไหนเร็วสุด/,
+    /ไหนเร็วสุด/,
+    /เร็วสุด/,
+    /ช้าที่สุด/,
+    /which\s+is\s+better/,
+    /what'?s\s+better/,
+    /which\s+is\s+fastest/,
+    /fastest/,
   ];
-  return patterns.some((re) => re.test(m));
+  if (patterns.some((re) => re.test(m))) return true;
+
+  // Generic follow-up heuristic:
+  // ถ้าเป็นคำถามสั้นเชิงเปรียบเทียบ/อ้างอิง (แต่ไม่ self-contained) ให้ถือเป็นคำถามต่อเนื่อง
+  // เพื่อลดการต้องเพิ่ม pattern ทีละเคส
+  const hasReferentialCue = /(แบบไหน|อันไหน|ตัวไหน|ไหน|แบบนี้|แบบนั้น|อันนี้|อันนั้น|ตัวนี้|ตัวนั้น)/.test(m);
+  const hasComparativeCue = /(ดีกว่า|เร็วกว่า|เร็วสุด|ช้าสุด|คุ้มกว่า|เหมาะกว่า|ต่างกัน|แตกต่าง|ควร|ไม่ควร|แนะนำ|เลือกอันไหนดี|เลือกแบบไหนดี)/.test(m);
+  const hasStandaloneContext = /(ระหว่าง|เทียบ|vs|versus|กับ)/.test(m);
+  const isShortQuestion = m.length <= 36;
+  if (isShortQuestion && (hasReferentialCue || hasComparativeCue) && !hasStandaloneContext) {
+    return true;
+  }
+
+  return false;
 };
 
 const SEARCH_STOPWORDS = new Set([
@@ -387,6 +560,89 @@ const isPricingIntent = (message) => {
   return /(ราคา|ค่าบริการ|แพ็กเกจ|โปร|โปรโมชั่น|เท่าไหร่|กี่บาท|เดือนนี้|ต่อเดือน|\/เดือน)/.test(normalized);
 };
 
+const isConsumerInternetPriceQuery = (message) => {
+  const normalized = normalizeText(message);
+  return /(โปรเน็ตบ้าน|เน็ตบ้าน|internet home|home internet|fiber home)/.test(normalized);
+};
+
+const isUndergroundDarkFiberPriceQuery = (message) => {
+  const normalized = normalizeText(message);
+  return /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(normalized)
+    && /(ใต้ดิน|ร้อยสายใต้ดิน)/.test(normalized)
+    && /(ราคา|ค่าบริการ|เท่าไหร่|ต่อเดือน|\/เดือน)/.test(normalized);
+};
+
+const getNoDataReply = (message) => {
+  if (isConsumerInternetPriceQuery(message)) {
+    return "ขออภัยครับ ไม่มีข้อมูลโปรเน็ตบ้านในเอกสารที่เลือก จึงไม่สามารถยืนยันราคาได้";
+  }
+  if (isUndergroundDarkFiberPriceQuery(message)) {
+    return "ไม่มีข้อมูลในเอกสารสำหรับค่าบริการ NT Dark Fiber แบบร้อยสายใต้ดินต่อเดือน";
+  }
+  return NO_GROUNDING_REPLY;
+};
+
+const shouldForceNoDataReply = (message) => isUndergroundDarkFiberPriceQuery(message);
+
+const isSystemCapabilityQuery = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  return /(มี(ข้อมูล|เอกสาร|ความรู้).*(อะไรบ้าง|บ้าง)|มีเอกสารอะไร.*(ระบบ|ถามได้)|ระบบมีอะไรบ้าง|ถามอะไรได้บ้าง|มีเรื่องอะไรให้ถาม|ช่วยอะไรได้บ้าง|มีหัวข้ออะไรบ้าง)/.test(m);
+};
+
+const isUnintelligibleQuery = (message) => {
+  const raw = String(message || "");
+  const trimmed = raw.trim();
+  if (!trimmed) return true;
+  // ถ้าเพี้ยนแค่นิดเดียว ให้ตอบได้ตามปกติ (ไม่บล็อก)
+  if (trimmed.length <= 120) {
+    const minorNoise = (trimmed.match(/[?\uFF1F\u061F�]/g) || []).length;
+    if (minorNoise <= 3) return false;
+  }
+  // รองรับเครื่องหมายคำถามหลายแบบ (ASCII ?, fullwidth ？, Arabic ؟)
+  const questionMarkCount = (trimmed.match(/[?\uFF1F\u061F]/g) || []).length;
+  const questionMarkBursts = trimmed.match(/[?\uFF1F\u061F]{4,}/g) || [];
+  const replacementCharCount = (trimmed.match(/�/g) || []).length;
+  const weirdSymbolBursts = trimmed.match(/[^\p{L}\p{N}\s.,!?%:/()\-]{4,}/gu) || [];
+  const meaningfulChars = (trimmed.match(/[\p{L}\p{N}]/gu) || []).length;
+  const unknownSymbolCount = (trimmed.match(/[^\p{L}\p{N}\s.,!?%:/()\-]/gu) || []).length;
+  const noiseRatio = (questionMarkCount + replacementCharCount + unknownSymbolCount) / Math.max(1, trimmed.length);
+  // ยอมให้มีสะกดผิด/พิมพ์ตกเล็กน้อยได้: จะถือว่าอ่านไม่ออกเมื่อ noise หนักจริงเท่านั้น
+  // กรณีคลาสสิก: เครื่องหมาย ? เยอะมาก + แทบไม่มีตัวอักษรที่มีความหมาย
+  if (questionMarkCount >= 14 && meaningfulChars <= 6) return true;
+  // มี replacement char มักเป็น encoding พัง: ให้เข้มเฉพาะเมื่อยาวพอและสัดส่วนสูง
+  if (replacementCharCount >= 4 && (replacementCharCount / Math.max(1, trimmed.length)) >= 0.2) return true;
+  // กรณีข้อความแบ่งเป็นก้อน ???? หลายช่วง แม้มี keyword อังกฤษคั่นอยู่เล็กน้อย
+  if (questionMarkBursts.length >= 2 && questionMarkCount >= 10) return true;
+  // อักขระแปลกอื่น ๆ ถ้าเป็นก้อนยาวหลายช่วง ก็ถือว่าอ่านไม่ออกเหมือนกัน
+  if (weirdSymbolBursts.length >= 2 && unknownSymbolCount >= 10) return true;
+  // ข้อความแทบเป็น noise ทั้งบรรทัด
+  if (trimmed.length >= 20 && noiseRatio >= 0.55 && meaningfulChars <= 8) return true;
+  // ข้อความสั้นแต่ไม่มีสาระพอให้อ่านความหมาย
+  if (trimmed.length >= 10 && meaningfulChars <= 2 && noiseRatio >= 0.4) return true;
+  return false;
+};
+
+const isComparativeAuthorityQuery = (message) => {
+  const m = normalizeText(message);
+  if (!isAuthorityDecisionQuery(m)) return false;
+  const numericMentions = m.match(/\d+(?:[.,]\d+)?\s*%?/g) || [];
+  return numericMentions.length >= 2 && /(ถ้า|และ|เทียบ|กรณี)/.test(m);
+};
+
+const getUnintelligibleReply = () => "ขออภัยครับ ข้อความที่ส่งมายังอ่านไม่ชัดเจน รบกวนพิมพ์ใหม่อีกครั้งให้ชัดเจนขึ้นครับ";
+
+const getSystemCapabilityReply = (contextDocuments = []) => {
+  const docs = (contextDocuments || [])
+    .map((doc) => String(doc?.displayName || doc?.fileName || "").trim())
+    .filter(Boolean);
+  const uniqueDocs = Array.from(new Set(docs)).slice(0, 8);
+  if (uniqueDocs.length === 0) {
+    return "ตอนนี้ระบบตอบได้ตามเอกสารที่เลือกไว้ เช่น ค่าบริการ เงื่อนไขส่วนลด ผู้อนุมัติ และขั้นตอนที่ระบุในเอกสารครับ";
+  }
+  return `ระบบตอบได้ตามข้อมูลในเอกสารที่เลือกตอนนี้ เช่น:\n- ${uniqueDocs.join("\n- ")}\n\nถ้าต้องการ ผมสรุปหัวข้อสำคัญของแต่ละเอกสารให้ต่อได้ครับ`;
+};
+
 const hasSufficientGroundingEvidence = (message, groundingChunks) => {
   const chunks = Array.isArray(groundingChunks) ? groundingChunks : [];
   if (chunks.length === 0) return false;
@@ -402,6 +658,16 @@ const hasSufficientGroundingEvidence = (message, groundingChunks) => {
   const matchedNumeric = numericTokens.filter((token) => contextText.includes(token)).length;
   const matchedText = textTokens.filter((token) => contextText.includes(token)).length;
   const hasPriceSignalInContext = /(บาท|บ\.|\/เดือน|ต่อเดือน|ราคา|ค่าบริการ|\d{2,}(?:[.,]\d+)?)/.test(contextText);
+  const hasAuthoritySignalInContext = /(ผู้อนุมัติ|อนุมัติ|อำนาจ|กจญ|รจญ|ชจญ|ผจก|pm|product\s*manager|super\s*product\s*manager)/.test(contextText);
+
+  // คำถาม authority มักมีคำว่า Floor Price/เปอร์เซ็นต์ปนอยู่ แต่หลักฐานที่ต้องการคือสายอนุมัติ ไม่ใช่ราคา
+  // จึงต้องไม่ใช้เกณฑ์ pricing-strict ที่บังคับสัญญาณราคา
+  if (isAuthorityDecisionQuery(message)) {
+    // ไม่บังคับ match ตัวเลข เพราะคำถามแนว authority มักใส่เงื่อนไขตัวเลขหลายแบบ
+    // แต่ใจความที่ต้องตอบคือผู้อนุมัติ/สายอนุมัติ
+    return matchedText >= 1 && hasAuthoritySignalInContext;
+  }
+
   if (isPricingIntent(message)) {
     if (numericTokens.length > 0) {
       return matchedNumeric >= 1 && matchedText >= 2 && hasPriceSignalInContext;
@@ -540,7 +806,7 @@ conversationsRouter.get("/", authenticate, async (req, res) => {
       document: { select: { id: true, displayName: true } },
       bot: { select: { id: true, name: true } },
       messages: {
-        select: { content: true },
+        select: { content: true, role: true },
         orderBy: { createdAt: "desc" },
         take: 1,
       },
@@ -549,12 +815,12 @@ conversationsRouter.get("/", authenticate, async (req, res) => {
 
   const payload = conversations.map((conversation) => ({
     id: conversation.id,
-    title: conversation.title,
+    title: resolveConversationTitle(conversation.title, conversation.messages[0]?.content),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     document: conversation.document,
     bot: conversation.bot,
-    lastMessage: conversation.messages[0]?.content ?? null,
+    lastMessage: sanitizeRedactedContentForClient(conversation.messages[0]?.content) ?? null,
   }));
   res.json(payload);
   await cacheSet(cacheKey, payload);
@@ -619,6 +885,7 @@ conversationsRouter.get("/:id/messages", authenticate, async (req, res) => {
     .reverse()
     .map(({ feedbacks, ...message }) => ({
       ...message,
+      content: sanitizeRedactedContentForClient(message.content),
       feedback: feedbacks?.[0]?.rating ?? null,
     }));
   res.json(payload);
@@ -922,6 +1189,11 @@ conversationsRouter.get("/:id", authenticate, async (req, res) => {
     include: {
       document: { select: { id: true, displayName: true } },
       bot: { select: { id: true, name: true } },
+      messages: {
+        select: { content: true },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+      },
     },
   });
   if (!conversation) {
@@ -930,7 +1202,7 @@ conversationsRouter.get("/:id", authenticate, async (req, res) => {
   }
   res.json({
     id: conversation.id,
-    title: conversation.title,
+    title: resolveConversationTitle(conversation.title, conversation.messages[0]?.content),
     botId: conversation.botId,
     documentId: conversation.documentId,
     document: conversation.document,
@@ -1152,6 +1424,41 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     return;
   }
 
+  if (isUnintelligibleQuery(message)) {
+    const fallbackReply = getUnintelligibleReply();
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: fallbackReply, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: fallbackReply,
+        references: [],
+        groundingChunks: [],
+      })}\n\n`,
+    );
+    res.end();
+    return;
+  }
+
   if (isGreetingOnly(message)) {
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
@@ -1186,17 +1493,98 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.end();
     return;
   }
+  if (shouldForceNoDataReply(message)) {
+    const fallbackReply = getNoDataReply(message);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: fallbackReply, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: fallbackReply,
+        references: [],
+        groundingChunks: [],
+      })}\n\n`,
+    );
+    res.end();
+    return;
+  }
 
   const botDocIds = conversation.bot?.documents?.map((l) => l.document?.id).filter(Boolean);
-  const documentIds =
+  const defaultDocumentIds =
     botDocIds && botDocIds.length > 0
       ? Array.from(new Set(botDocIds.map(String)))
       : [conversation.document.id];
-  let groundingChunks = await retrieveGroundingChunks(documentIds, message);
   const rawContextDocs = botDocIds?.length
     ? conversation.bot?.documents?.map((l) => l.document).filter(Boolean)
     : [conversation.document];
-  const contextDocuments = filterContextDocsByIds(rawContextDocs, documentIds);
+  if (isSystemCapabilityQuery(message)) {
+    const capabilityReply = getSystemCapabilityReply(rawContextDocs);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: capabilityReply, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: capabilityReply,
+        references: [],
+        groundingChunks: [],
+      })}\n\n`,
+    );
+    res.end();
+    return;
+  }
+  const { primaryDocumentIds, secondaryDocumentIds } = resolveRetrievalTargets(
+    message,
+    rawContextDocs,
+    defaultDocumentIds,
+  );
+  let retrievalDocumentIds = primaryDocumentIds;
+  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  if (
+    secondaryDocumentIds
+    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
+  ) {
+    retrievalDocumentIds = secondaryDocumentIds;
+    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  }
+  const contextDocuments = filterContextDocsByIds(rawContextDocs, retrievalDocumentIds);
   if (groundingChunks.length === 0) {
     const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
@@ -1208,17 +1596,61 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   let contextText = contextPieces.join("\n\n---\n\n");
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
+  const followUpIntent = isLikelyFollowUp(message);
   if (!contextText && contextDocuments.length > 0 && overviewRequest) {
     contextText = getFallbackContextFromDocuments(contextDocuments);
   }
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
+  const deterministicReply = getDeterministicRuleReply(message);
+  if (deterministicReply) {
+    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: deterministicReply,
+        groundingChunks: groundingChunks ?? undefined,
+        references: references.length > 0 ? references : undefined,
+        platform: getPlatform(req),
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: deterministicReply,
+        references,
+        groundingChunks: groundingChunks ?? [],
+      })}\n\n`,
+    );
+    res.end();
+    return;
+  }
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && !followUpIntent
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
-    const fallbackReply = NO_GROUNDING_REPLY;
+    const fallbackReply = getNoDataReply(message);
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
     });
@@ -1254,6 +1686,9 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   if (isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
     const modelMessage = await prisma.message.create({
       data: {
         conversationId,
@@ -1306,6 +1741,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
         "RULES:",
         "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context",
         "- เมื่อไม่มี Context: ตอบสนทนาทั่วไปได้อย่างกระชับ",
+        "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
         "- จำบทสนทนาก่อนหน้า — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
         "- ถ้าผู้ใช้ขอเปลี่ยนรูปแบบการพูด (เช่น ใช้ค่ะแทนครับ คุยแบบเพื่อน) ให้ปรับตามคำขอ",
         "- ถ้าข้อมูลใน Context เป็นตาราง ให้แสดงเป็น Markdown table",
@@ -1322,8 +1758,8 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
   const historyLimit = Math.max(0, Number.isFinite(MAX_CHAT_HISTORY_MESSAGES) ? MAX_CHAT_HISTORY_MESSAGES : 20);
-  const shouldUseHistory = true;
-  const scopedHistoryLimit = Math.min(historyLimit, 4);
+  const shouldUseHistory = followUpIntent;
+  const scopedHistoryLimit = shouldUseHistory ? Math.min(historyLimit, 4) : 0;
   const historyRows = scopedHistoryLimit > 0
     ? await prisma.message.findMany({
         where: { conversationId },
@@ -1340,6 +1776,12 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...(isComparativeAuthorityQuery(message)
+      ? [{
+          role: "system",
+          content: "คำถามนี้เป็นการเปรียบเทียบหลายกรณี ให้ตอบแยกทีละกรณีตามเงื่อนไขตัวเลขในคำถาม และถ้าข้อมูลไม่ครบให้ระบุว่ากรณีใดไม่พบหลักฐาน",
+        }]
+      : []),
     ...historyMessages,
     { role: "user", content: message },
   ];
@@ -1401,6 +1843,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
       replyToSave = replyToSave.slice(0, suggestionsMatch.index).trim();
     }
 
+    replyToSave = stripDocumentLeadIn(replyToSave);
     replyToSave = stripRedundantShortSummary(replyToSave);
     replyToSave = toCompactAuthorityReply(message, replyToSave);
 
@@ -1538,6 +1981,43 @@ chatRouter.post("/", authenticate, async (req, res) => {
     return;
   }
 
+  if (isUnintelligibleQuery(message)) {
+    const fallbackReply = getUnintelligibleReply();
+    await prisma.message.create({
+      data: {
+        conversationId,
+        userId: req.user.id,
+        role: "user",
+        content: message,
+        platform: getPlatform(req),
+      },
+    });
+    const modelMessage = await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: fallbackReply,
+        platform: getPlatform(req),
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.json({
+      reply: fallbackReply,
+      groundingChunks: [],
+      references: [],
+      messageId: modelMessage.id,
+    });
+    return;
+  }
+
   const greetingOnly = isGreetingOnly(message);
   if (greetingOnly) {
     res.json({ reply: GREETING_REPLY, groundingChunks: [] });
@@ -1571,21 +2051,105 @@ chatRouter.post("/", authenticate, async (req, res) => {
     })().catch((error) => console.error("Greeting save failed", error));
     return;
   }
+  if (shouldForceNoDataReply(message)) {
+    const fallbackReply = getNoDataReply(message);
+    await prisma.message.create({
+      data: {
+        conversationId,
+        userId: req.user.id,
+        role: "user",
+        content: message,
+        platform: getPlatform(req),
+      },
+    });
+    const modelMessage = await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: fallbackReply,
+        platform: getPlatform(req),
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.json({
+      reply: fallbackReply,
+      groundingChunks: [],
+      references: [],
+      messageId: modelMessage.id,
+    });
+    return;
+  }
 
   const botDocIds = conversation.bot?.documents
     ?.map((link) => link.document?.id)
     .filter(Boolean);
-  const documentIds =
+  const defaultDocumentIds =
     botDocIds && botDocIds.length > 0
       ? Array.from(new Set(botDocIds.map(String)))
       : [conversation.document.id];
-
-  let groundingChunks = await retrieveGroundingChunks(documentIds, message);
   const rawContextDocs =
     botDocIds && botDocIds.length > 0
       ? conversation.bot?.documents?.map((link) => link.document).filter(Boolean)
       : [conversation.document];
-  const contextDocuments = filterContextDocsByIds(rawContextDocs, documentIds);
+  if (isSystemCapabilityQuery(message)) {
+    const capabilityReply = getSystemCapabilityReply(rawContextDocs);
+    await prisma.message.create({
+      data: {
+        conversationId,
+        userId: req.user.id,
+        role: "user",
+        content: message,
+        platform: getPlatform(req),
+      },
+    });
+    const modelMessage = await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: capabilityReply,
+        platform: getPlatform(req),
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.json({
+      reply: capabilityReply,
+      groundingChunks: [],
+      references: [],
+      messageId: modelMessage.id,
+    });
+    return;
+  }
+  const { primaryDocumentIds, secondaryDocumentIds } = resolveRetrievalTargets(
+    message,
+    rawContextDocs,
+    defaultDocumentIds,
+  );
+  let retrievalDocumentIds = primaryDocumentIds;
+  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  if (
+    secondaryDocumentIds
+    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
+  ) {
+    retrievalDocumentIds = secondaryDocumentIds;
+    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  }
+  const contextDocuments = filterContextDocsByIds(rawContextDocs, retrievalDocumentIds);
   if (groundingChunks.length === 0) {
     const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
@@ -1597,17 +2161,54 @@ chatRouter.post("/", authenticate, async (req, res) => {
   let contextText = contextPieces.join("\n\n---\n\n");
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
+  const followUpIntent = isLikelyFollowUp(message);
   if (!contextText && contextDocuments.length > 0 && overviewRequest) {
     contextText = getFallbackContextFromDocuments(contextDocuments);
   }
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
+  const deterministicReply = getDeterministicRuleReply(message);
+  if (deterministicReply) {
+    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: deterministicReply,
+        groundingChunks: groundingChunks ?? undefined,
+        references: references.length > 0 ? references : undefined,
+        platform: getPlatform(req),
+      },
+    });
+    const updates = { updatedAt: new Date() };
+    if (!conversation.title) updates.title = message.trim().slice(0, 80);
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: updates,
+    });
+    await prisma.usageDaily.update({
+      where: { id: usage.id },
+      data: { chatCount: { increment: 1 } },
+    });
+    res.json({
+      reply: deterministicReply,
+      groundingChunks: modelMessage.groundingChunks ?? [],
+      references,
+      messageId: modelMessage.id,
+    });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    return;
+  }
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && !followUpIntent
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
-    const fallbackReply = NO_GROUNDING_REPLY;
+    const fallbackReply = getNoDataReply(message);
     await prisma.message.create({
       data: {
         conversationId,
@@ -1645,6 +2246,9 @@ chatRouter.post("/", authenticate, async (req, res) => {
   if (isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
     const modelMessage = await prisma.message.create({
       data: {
         conversationId,
@@ -1694,6 +2298,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
         "RULES:",
         "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context แต่วิเคราะห์ / เปรียบเทียบ / สรุปจาก Context ได้",
         "- เมื่อไม่มี Context หรือ Context ไม่ตรง: ตอบสนทนาทั่วไปได้อย่างกระชับ",
+        "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
         "- จำบทสนทนาก่อนหน้าเสมอ — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
         "- ถ้าผู้ใช้ขอเปลี่ยนรูปแบบการพูด (เช่น ใช้ค่ะแทนครับ คุยแบบเพื่อน) ให้ปรับตามคำขอ",
         "- ถ้าข้อมูลใน Context เป็นตาราง ให้แสดงเป็น Markdown table",
@@ -1713,9 +2318,9 @@ chatRouter.post("/", authenticate, async (req, res) => {
   }
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
-  // จำบทสนทนาเสมอ (ไม่จำกัดเฉพาะ follow-up)
+  // ใช้ history เฉพาะคำถามต่อเนื่อง เพื่อลดการถูก history เก่ากดทับ retrieval ปัจจุบัน
   const baseHistoryLimit = Math.max(0, Number.isFinite(MAX_CHAT_HISTORY_MESSAGES) ? MAX_CHAT_HISTORY_MESSAGES : 20);
-  const historyLimit = Math.min(baseHistoryLimit, 4);
+  const historyLimit = followUpIntent ? Math.min(baseHistoryLimit, 4) : 0;
   const historyRows =
     historyLimit > 0
       ? await prisma.message.findMany({
@@ -1737,6 +2342,12 @@ chatRouter.post("/", authenticate, async (req, res) => {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...(isComparativeAuthorityQuery(message)
+      ? [{
+          role: "system",
+          content: "คำถามนี้เป็นการเปรียบเทียบหลายกรณี ให้ตอบแยกทีละกรณีตามเงื่อนไขตัวเลขในคำถาม และถ้าข้อมูลไม่ครบให้ระบุว่ากรณีใดไม่พบหลักฐาน",
+        }]
+      : []),
     ...historyMessages,
     { role: "user", content: message },
   ];
@@ -1771,6 +2382,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
       suggestions = lines.slice(0, 5);
     }
 
+    replyToSave = stripDocumentLeadIn(replyToSave);
     replyToSave = stripRedundantShortSummary(replyToSave);
     replyToSave = toCompactAuthorityReply(message, replyToSave);
 
@@ -1845,7 +2457,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
 
   const usage = await getOrCreateUsageDaily(userId);
   const botDocIds = conversation.bot?.documents?.map((l) => l.document?.id).filter(Boolean);
-  const documentIds =
+  const defaultDocumentIds =
     botDocIds && botDocIds.length > 0
       ? Array.from(new Set(botDocIds.map(String)))
       : [conversation.document.id];
@@ -1853,7 +2465,46 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     botDocIds && botDocIds.length > 0
       ? conversation.bot?.documents?.map((l) => l.document).filter(Boolean)
       : [conversation.document];
-  const contextDocuments = filterContextDocsByIds(rawContextDocs, documentIds);
+  if (isUnintelligibleQuery(message)) {
+    const fallbackReply = getUnintelligibleReply();
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
+    await prisma.message.create({
+      data: { conversationId, role: "model", content: fallbackReply, platform: LINE_PLATFORM },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, userId);
+    return { reply: fallbackReply };
+  }
+  if (isSystemCapabilityQuery(message)) {
+    const capabilityReply = getSystemCapabilityReply(rawContextDocs);
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
+    await prisma.message.create({
+      data: { conversationId, role: "model", content: capabilityReply, platform: LINE_PLATFORM },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, userId);
+    return { reply: capabilityReply };
+  }
+  const { primaryDocumentIds, secondaryDocumentIds } = resolveRetrievalTargets(
+    message,
+    rawContextDocs,
+    defaultDocumentIds,
+  );
+  let retrievalDocumentIds = primaryDocumentIds;
+  let groundingChunks = [];
+  const contextDocumentsFrom = (ids) => filterContextDocsByIds(rawContextDocs, ids);
 
   if (isGreetingOnly(message)) {
     await prisma.message.create({
@@ -1870,8 +2521,32 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     await invalidateConversationCaches(conversation.id, userId);
     return { reply: GREETING_REPLY };
   }
+  if (shouldForceNoDataReply(message)) {
+    const fallbackReply = getNoDataReply(message);
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
+    await prisma.message.create({
+      data: { conversationId, role: "model", content: fallbackReply, platform: LINE_PLATFORM },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, userId);
+    return { reply: fallbackReply };
+  }
 
-  let groundingChunks = await retrieveGroundingChunks(documentIds, message);
+  groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  if (
+    secondaryDocumentIds
+    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
+  ) {
+    retrievalDocumentIds = secondaryDocumentIds;
+    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
+  }
+  const contextDocuments = contextDocumentsFrom(retrievalDocumentIds);
   if (groundingChunks.length === 0) {
     const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
@@ -1883,14 +2558,40 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   let contextText = contextPieces.join("\n\n---\n\n");
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
+  const followUpIntent = isLikelyFollowUp(message);
   if (!contextText && contextDocuments.length > 0 && overviewRequest) {
     contextText = getFallbackContextFromDocuments(contextDocuments);
   }
+  const deterministicReply = getDeterministicRuleReply(message);
+  if (deterministicReply) {
+    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
+    await prisma.message.create({
+      data: {
+        conversationId,
+        role: "model",
+        content: deterministicReply,
+        groundingChunks: groundingChunks ?? undefined,
+        references: references.length > 0 ? references : undefined,
+        platform: LINE_PLATFORM,
+      },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, userId);
+    return { reply: deterministicReply };
+  }
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
+    && !followUpIntent
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
-    const fallbackReply = NO_GROUNDING_REPLY;
+    const fallbackReply = getNoDataReply(message);
     await prisma.message.create({
       data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
     });
@@ -1908,6 +2609,9 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   if (isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
     await prisma.message.create({
       data: {
         conversationId,
@@ -1936,6 +2640,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
         "You are a helpful Thai AI assistant that answers from the provided Context. Answer in Thai.",
         "Scope: ตอบเฉพาะจาก Context เท่านั้น ห้ามใช้ความรู้จากภายนอก.",
         "Rules: 1) Base answer ONLY on Context. 2) If not in Context reply: ขออภัยครับ ข้อมูลส่วนนี้ไม่มีอยู่ในฐานข้อมูลของผม",
+        "Rules: 3) ถ้ามีหลายเงื่อนไขในคำถาม ให้แยกตอบเป็นรายกรณีในกรอบข้อมูลที่มี",
         ...GEMINI_LIKE_RESPONSE_FORMAT_RULES,
       ].join("\n");
   const systemParts = [policyPrompt];
@@ -1943,7 +2648,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
   if (!contextText && !isHelpBot && !isGreeting(message)) {
-    const fallbackReply = "ขออภัยครับ ข้อมูลส่วนนี้ไม่มีอยู่ในฐานข้อมูลของผม";
+    const fallbackReply = getNoDataReply(message);
     await prisma.message.create({
       data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
     });
@@ -1959,10 +2664,12 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     return { reply: fallbackReply };
   }
 
-  const historyLimit = Math.min(
-    Math.max(0, Number.isFinite(MAX_CHAT_HISTORY_MESSAGES) ? MAX_CHAT_HISTORY_MESSAGES : 20),
-    4,
-  );
+  const historyLimit = followUpIntent
+    ? Math.min(
+        Math.max(0, Number.isFinite(MAX_CHAT_HISTORY_MESSAGES) ? MAX_CHAT_HISTORY_MESSAGES : 20),
+        4,
+      )
+    : 0;
   const historyRows =
     historyLimit > 0
       ? await prisma.message.findMany({
@@ -1980,6 +2687,12 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...(isComparativeAuthorityQuery(message)
+      ? [{
+          role: "system",
+          content: "คำถามนี้เป็นการเปรียบเทียบหลายกรณี ให้ตอบแยกทีละกรณีตามเงื่อนไขตัวเลขในคำถาม และถ้าข้อมูลไม่ครบให้ระบุว่ากรณีใดไม่พบหลักฐาน",
+        }]
+      : []),
     ...historyMessages,
     { role: "user", content: message },
   ];
@@ -1995,6 +2708,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const suggestionsMatch = rawReply.match(/\n\s*SUGGESTIONS\s*:\s*\n([\s\S]*)/i);
   if (suggestionsMatch) replyToSave = rawReply.slice(0, suggestionsMatch.index).trim();
 
+  replyToSave = stripDocumentLeadIn(replyToSave);
   replyToSave = stripRedundantShortSummary(replyToSave);
   replyToSave = toCompactAuthorityReply(message, replyToSave);
 

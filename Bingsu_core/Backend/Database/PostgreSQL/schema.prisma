@@ -1,4 +1,4 @@
-// Prisma schema for Bingsu - Combined best practices
+// Prisma schema for Enterprise AI Chatbot - Combined best practices
 // User and Credential models follow Backend/website pattern (Int ID, separated tables)
 // Enhanced with Enums and features from askaa_backend
 

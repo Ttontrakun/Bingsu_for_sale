@@ -8,6 +8,8 @@ import {
   gatewayBaseUrl,
   openaiDeploymentRetryAttempts,
   openaiDeploymentRetryBaseDelayMs,
+  openaiFallbackBaseUrl,
+  openaiFallbackKey,
   openaiFallbackModel,
   openaiKey,
   openaiModel,
@@ -17,8 +19,10 @@ import {
   ocrLlmProvider,
   ollamaBaseUrl,
   ollamaOcrModel,
+  strictPrivacyMode,
 } from "../config.js";
 import { Agent } from "undici";
+import { redactSensitiveText } from "../lib/privacy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /** โหลดรายการคำผิด→คำถูกจาก server/ocr-word-fixes.json (ใส่เป็นข้อความ literal ไม่ต้องใช้ regex) แก้ไฟล์แล้ว request ถัดไปใช้รายการล่าสุด */
@@ -157,63 +161,108 @@ const normalizeOcrHtmlTables = (text) => {
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const sanitizeTextForProvider = (text) => (strictPrivacyMode ? redactSensitiveText(text) : text);
+const sanitizeMessagesForProvider = (messages = []) =>
+  Array.isArray(messages)
+    ? messages.map((message) => ({
+        ...message,
+        content:
+          typeof message?.content === "string"
+            ? sanitizeTextForProvider(message.content)
+            : message?.content,
+      }))
+    : messages;
 const isDeploymentUnavailable429 = (status, errorText) =>
   status === 429 && /No deployments available|cooldown_list|selected model/i.test(String(errorText || ""));
 
-const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride }) => {
+const buildChatTargets = (modelOverride) => {
   const primaryModel = modelOverride || openaiModel;
-  const fallbackModel = openaiFallbackModel && openaiFallbackModel !== primaryModel ? openaiFallbackModel : null;
-  const modelsToTry = fallbackModel ? [primaryModel, fallbackModel] : [primaryModel];
+  const targets = [{ baseUrl: gatewayBaseUrl, apiKey: openaiKey, model: primaryModel, label: "primary" }];
+  if (!openaiFallbackModel) return targets;
+
+  const duplicateTarget =
+    openaiFallbackBaseUrl === gatewayBaseUrl
+    && openaiFallbackKey === openaiKey
+    && openaiFallbackModel === primaryModel;
+  if (!duplicateTarget) {
+    targets.push({
+      baseUrl: openaiFallbackBaseUrl,
+      apiKey: openaiFallbackKey,
+      model: openaiFallbackModel,
+      label: "fallback",
+    });
+  }
+  return targets.filter((target) => target.baseUrl && target.apiKey);
+};
+
+const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride }) => {
+  const providerMessages = sanitizeMessagesForProvider(messages);
+  const targets = buildChatTargets(modelOverride);
+  if (targets.length === 0) {
+    throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
+  }
+
   let lastError = null;
+  const retries = Math.max(0, openaiDeploymentRetryAttempts);
 
-  for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex += 1) {
-    const modelToUse = modelsToTry[modelIndex];
-    const retries = Math.max(0, openaiDeploymentRetryAttempts);
+  for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
+    const target = targets[targetIndex];
+    const hasAnotherTarget = targetIndex < targets.length - 1;
+
     for (let attempt = 0; attempt <= retries; attempt += 1) {
-      const response = await fetch(`${gatewayBaseUrl}/chat/completions`, {
-        method: "POST",
-        dispatcher: gatewayDispatcher,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${openaiKey}`,
-        },
-        body: JSON.stringify({
-          model: modelToUse,
-          messages,
-          temperature: CHAT_TEMPERATURE,
-          max_tokens: CHAT_MAX_TOKENS,
-          ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
-        }),
-        signal,
-      });
+      try {
+        const response = await fetch(`${target.baseUrl}/chat/completions`, {
+          method: "POST",
+          dispatcher: gatewayDispatcher,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${target.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: target.model,
+            messages: providerMessages,
+            temperature: CHAT_TEMPERATURE,
+            max_tokens: CHAT_MAX_TOKENS,
+            ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
+          }),
+          signal,
+        });
 
-      if (response.ok) return response;
+        if (response.ok) {
+          if (targetIndex > 0) {
+            console.warn(`[chat] using fallback LLM (${target.model} @ ${target.baseUrl}) after primary failed`);
+          }
+          return response;
+        }
 
-      const errorText = await response.text();
-      const unavailable = isDeploymentUnavailable429(response.status, errorText);
-      lastError = new Error(errorText || response.statusText);
+        const errorText = await response.text();
+        lastError = new Error(errorText || response.statusText);
+        const unavailable = isDeploymentUnavailable429(response.status, errorText);
 
-      if (!unavailable) throw lastError;
+        if (unavailable && attempt < retries) {
+          const baseDelay = Math.max(500, openaiDeploymentRetryBaseDelayMs);
+          const jitter = Math.floor(Math.random() * 400);
+          const waitMs = baseDelay * (2 ** attempt) + jitter;
+          await sleep(waitMs);
+          continue;
+        }
 
-      const isLastRetry = attempt >= retries;
-      const hasAnotherModel = modelIndex < modelsToTry.length - 1;
-      if (!isLastRetry) {
-        const baseDelay = Math.max(500, openaiDeploymentRetryBaseDelayMs);
-        const jitter = Math.floor(Math.random() * 400);
-        const waitMs = baseDelay * (2 ** attempt) + jitter;
-        await sleep(waitMs);
-        continue;
+        if (hasAnotherTarget) break;
+        throw lastError;
+      } catch (error) {
+        if (error?.name === "AbortError") throw error;
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (hasAnotherTarget) break;
+        throw lastError;
       }
-      if (!hasAnotherModel) throw lastError;
-      // switch to fallback model on next loop
-      break;
     }
   }
+
   throw lastError || new Error("Chat request failed");
 };
 
 export const callOpenAiGateway = async (messages, modelOverride) => {
-  if (!openaiKey) {
+  if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
 
@@ -246,7 +295,7 @@ export const callOpenAiGateway = async (messages, modelOverride) => {
 
 /** เรียก gateway แบบ streaming — คืนค่า ReadableStream ของ response body (สำหรับ SSE) */
 export const callOpenAiGatewayStream = async (messages, modelOverride) => {
-  if (!openaiKey) {
+  if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
 
@@ -462,7 +511,7 @@ export const cleanOcrTextWithLlm = async (rawText) => {
 
   try {
     if (useOllama) {
-      const content = await callOllamaChat(systemPrompt, afterRules, controller.signal);
+      const content = await callOllamaChat(systemPrompt, sanitizeTextForProvider(afterRules), controller.signal);
       clearTimeout(timeoutId);
       if (content) return { text: postProcessOcrText(content), cleaned: true };
       console.warn("OCR LLM cleanup: Ollama returned empty. Check ollama serve and OLLAMA_OCR_MODEL. Using rule-cleaned text.");
@@ -479,7 +528,7 @@ export const cleanOcrTextWithLlm = async (rawText) => {
         model: ocrLlmModel,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: afterRules },
+          { role: "user", content: sanitizeTextForProvider(afterRules) },
         ],
         temperature: 0.1,
         max_tokens: 16000,
@@ -551,7 +600,7 @@ export const structureOcrTextWithLlm = async (text) => {
 
   try {
     if (useOllama) {
-      const content = await callOllamaChat(systemPrompt, sourceText, controller.signal);
+      const content = await callOllamaChat(systemPrompt, sanitizeTextForProvider(sourceText), controller.signal);
       clearTimeout(timeoutId);
       if (content) return postProcessOcrText(content.trim());
       return sourceText;
@@ -567,7 +616,7 @@ export const structureOcrTextWithLlm = async (text) => {
         model: ocrLlmModel,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: sourceText },
+          { role: "user", content: sanitizeTextForProvider(sourceText) },
         ],
         temperature: 0.1,
         max_tokens: 16000,

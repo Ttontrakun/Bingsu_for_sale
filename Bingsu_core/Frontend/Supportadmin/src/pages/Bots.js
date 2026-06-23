@@ -9,7 +9,7 @@ function Bots({ userRole = 'support' }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const itemsPerPage = 12;
-  const canToggleBot = userRole === 'admin' || userRole === 'support';
+  const canToggleBot = userRole === 'admin';
   const canDeleteBot = userRole === 'admin';
   const HELP_BOT_NAME = 'บอทช่วยสอน';
   const pinHelpBotFirst = useCallback((list) => {

@@ -79,6 +79,55 @@ const parseMarkdownTableSheets = (inputText = '') => {
   return sheets;
 };
 
+const parseLegacyExcelRowSheets = (inputText = '') => {
+  const text = String(inputText || '');
+  if (!text.trim()) return [];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return [];
+
+  const sheetMap = new Map();
+  lines.forEach((line) => {
+    const m = line.match(/^Sheet\s+(.+?)\s*\|\s*Row\s+\d+\s*\|\s*(.+)$/i);
+    if (!m) return;
+    const sheetName = String(m[1] || '').trim() || 'Sheet 1';
+    const pairsPart = String(m[2] || '').trim();
+    if (!pairsPart) return;
+    const pairs = pairsPart
+      .split('|')
+      .map((chunk) => String(chunk || '').trim())
+      .filter(Boolean);
+    if (!pairs.length) return;
+
+    const row = {};
+    pairs.forEach((pair) => {
+      const colonIdx = pair.indexOf(':');
+      if (colonIdx <= 0) return;
+      const key = pair.slice(0, colonIdx).trim();
+      const value = pair.slice(colonIdx + 1).trim();
+      if (!key) return;
+      row[key] = value;
+    });
+    if (!Object.keys(row).length) return;
+
+    if (!sheetMap.has(sheetName)) {
+      sheetMap.set(sheetName, { name: sheetName, columns: [], rows: [] });
+    }
+    const sheet = sheetMap.get(sheetName);
+    Object.keys(row).forEach((col) => {
+      if (!sheet.columns.includes(col)) sheet.columns.push(col);
+    });
+    sheet.rows.push(row);
+  });
+
+  return Array.from(sheetMap.values()).filter((sheet) => Array.isArray(sheet.columns) && sheet.columns.length > 0);
+};
+
+const recoverExcelPreviewSheets = (inputText = '') => {
+  const fromMarkdown = parseMarkdownTableSheets(inputText);
+  if (fromMarkdown.length > 0) return fromMarkdown;
+  return parseLegacyExcelRowSheets(inputText);
+};
+
 function SupportAddKnowledgeData() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -136,7 +185,7 @@ function SupportAddKnowledgeData() {
           const text = fileText.trim() ? fileText : fromBlocks;
           const metadata = file.metadata && typeof file.metadata === 'object' ? { ...file.metadata } : {};
           if (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0) {
-            const recoveredSheets = parseMarkdownTableSheets(text);
+            const recoveredSheets = recoverExcelPreviewSheets(text);
             if (recoveredSheets.length > 0) {
               metadata.previewSheets = recoveredSheets;
             }
@@ -269,6 +318,13 @@ function SupportAddKnowledgeData() {
         const text = (result.text || '').trim() || (result.blocks || []).map(b => b.text || '').join('\n\n').trim();
         const pageCount = result.pages && Array.isArray(result.pages) ? result.pages.length : null;
         const blocks = result.blocks && result.blocks.length > 0 ? result.blocks : (text ? [{ text, label: 'Content' }] : []);
+        const metadata = result.metadata && typeof result.metadata === 'object' ? { ...result.metadata } : {};
+        if (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0) {
+          const recoveredSheets = recoverExcelPreviewSheets(text);
+          if (recoveredSheets.length > 0) {
+            metadata.previewSheets = recoveredSheets;
+          }
+        }
 
         setUploadedFiles(prevFiles =>
           prevFiles.map(f =>
@@ -279,7 +335,7 @@ function SupportAddKnowledgeData() {
                   text,
                   blocks,
                   pages: result.pages || f.pages,
-                  metadata: result.metadata || f.metadata,
+                  metadata,
                   needsOCR: false,
                   processingOCR: false,
                   processingTime: processingTime,

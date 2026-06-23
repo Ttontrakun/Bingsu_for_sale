@@ -26,6 +26,7 @@ import {
   ocrLlmProvider,
   ocrLlmStructure,
   pdfProvider,
+  strictPrivacyMode,
 } from "../config.js";
 import { spawn } from "child_process";
 
@@ -40,7 +41,7 @@ const OCR_MIN_TEXT_CHARS = Number(process.env.OCR_MIN_TEXT_CHARS || 400);
 const OCR_MIN_TEXT_CHARS_PER_PAGE = Number(process.env.OCR_MIN_TEXT_CHARS_PER_PAGE || 50);
 /** Open Typhoon OCR (api.opentyphoon.ai/v1/ocr): ต้องตั้ง TYPHOON_OCR_API_KEY. ตัวเลือก: TYPHOON_OCR_API_URL, TYPHOON_OCR_MODEL, TYPHOON_OCR_TASK_TYPE, TYPHOON_OCR_MAX_TOKENS, TYPHOON_OCR_TEMPERATURE, TYPHOON_OCR_TOP_P, TYPHOON_OCR_REPETITION_PENALTY */
 const TYPHOON_OCR_API_URL = (process.env.TYPHOON_OCR_API_URL || "https://api.opentyphoon.ai/v1/ocr").replace(/\/+$/, "");
-const TYPHOON_OCR_API_KEY = (process.env.TYPHOON_OCR_API_KEY || "").trim();
+const TYPHOON_OCR_API_KEY = (process.env.TYPHOON_OCR_API_KEY || process.env.OPENAI_API_KEY || "").trim();
 const TYPHOON_OCR_MODEL = process.env.TYPHOON_OCR_MODEL || "typhoon-ocr";
 const TYPHOON_OCR_TASK_TYPE = process.env.TYPHOON_OCR_TASK_TYPE || "default";
 const TYPHOON_OCR_MAX_TOKENS = Number(process.env.TYPHOON_OCR_MAX_TOKENS || 16384);
@@ -520,6 +521,12 @@ export const runOcrExtract = async ({
   const name = fileName || "document.pdf";
   const type = contentType || "application/pdf";
   const isPdfUpload = String(type).toLowerCase().includes("pdf") || /\.pdf$/i.test(String(name));
+  if (strictPrivacyMode && (provider === "typhoon" || provider === "paddle" || provider == null)) {
+    throw new Error("STRICT_PRIVACY_MODE=true: external OCR is blocked. Use text extraction only or internal OCR service.");
+  }
+  if (isPdfUpload && (provider === "typhoon" || provider == null) && !TYPHOON_OCR_API_KEY) {
+    throw new Error("PDF สแกนต้องใช้ Typhoon OCR: กรุณาตั้ง TYPHOON_OCR_API_KEY ใน Backend/.env");
+  }
 
   // PDF: ลองดึง text layer ก่อน (pdfplumber ถ้ามีสคริปต์ → ไม่เช่นนั้น pdf.js) ถ้าได้ข้อความเพียงพอจะไม่เรียก Typhoon (เอกสารที่พิมพ์/มีเลเยอร์ข้อความ)
   const pdfTryNativeBeforeTyphoon =

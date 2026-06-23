@@ -1,7 +1,7 @@
 {
   "name": "bingsu-database-postgresql",
   "version": "1.0.0",
-  "description": "Bingsu PostgreSQL Database - PostgreSQL with Prisma",
+  "description": "Enterprise AI Chatbot PostgreSQL Database - PostgreSQL with Prisma",
   "scripts": {
     "prisma": "node_modules/.bin/prisma",
     "db:push": "node_modules/.bin/prisma db push",

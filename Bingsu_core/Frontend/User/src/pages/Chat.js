@@ -326,6 +326,10 @@ function Chat() {
   
   const [messages, setMessages] = useState([]);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const getDraftKey = useCallback((id) => {
+    const chatKey = id != null ? String(id).trim() : '';
+    return chatKey ? `chat:draft:${chatKey}` : null;
+  }, []);
 
   const flushStreamText = useCallback(() => {
     if (streamFlushTimerRef.current) {
@@ -398,6 +402,33 @@ function Chat() {
     timeoutRefs.current = {};
   }, [chatId]);
 
+  // โหลด draft ข้อความที่พิมพ์ค้างไว้ของแต่ละห้องแชท
+  useEffect(() => {
+    const key = getDraftKey(chatId);
+    if (!key) return;
+    try {
+      const savedDraft = localStorage.getItem(key);
+      setChatInput(savedDraft || '');
+    } catch {
+      setChatInput('');
+    }
+  }, [chatId, getDraftKey]);
+
+  // บันทึก draft ระหว่างพิมพ์ เพื่อกันข้อความหายเมื่อเปลี่ยนห้อง/รีเฟรช
+  useEffect(() => {
+    const key = getDraftKey(chatId);
+    if (!key) return;
+    try {
+      if (chatInput && chatInput.trim()) {
+        localStorage.setItem(key, chatInput);
+      } else {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // ignore storage errors (private mode / quota)
+    }
+  }, [chatId, chatInput, getDraftKey]);
+
   // โหลด messages จาก API
   const loadMessages = useCallback(async () => {
     // ป้องกันการโหลดซ้ำ
@@ -427,34 +458,28 @@ function Chat() {
       }
 
       const messageMap = new Map();
-      const seenMessages = new Set();
 
       list.forEach(msg => {
         // Backend (conversations) ใช้ content + role (user/model)
         const text = msg.content ?? msg.message ?? '';
         const isBot = msg.role === 'model' || msg.isAiGenerated === true;
         const timestamp = new Date(msg.createdAt || 0);
-        const messageKey = `${text}|${Math.floor(timestamp.getTime() / 1000)}`;
-
-        if (!seenMessages.has(messageKey)) {
-          seenMessages.add(messageKey);
-          const groundingNorm = parseStoredJsonArray(msg.groundingChunks);
-          const storedRefs = parseStoredJsonArray(msg.references);
-          const references = isBot
-            ? storedRefs.length > 0
-              ? storedRefs
-              : buildReferencesFromGroundingChunks(groundingNorm)
-            : undefined;
-          messageMap.set(msg.id, {
-            id: msg.id,
-            text,
-            sender: isBot ? 'bot' : (msg.userId === currentUserId ? 'user' : 'user'),
-            timestamp,
-            ...(references?.length ? { references } : {}),
-            ...(groundingNorm.length ? { groundingChunks: groundingNorm } : {}),
-            ...(msg.feedback ? { feedback: msg.feedback } : {}),
-          });
-        }
+        const groundingNorm = parseStoredJsonArray(msg.groundingChunks);
+        const storedRefs = parseStoredJsonArray(msg.references);
+        const references = isBot
+          ? storedRefs.length > 0
+            ? storedRefs
+            : buildReferencesFromGroundingChunks(groundingNorm)
+          : undefined;
+        messageMap.set(msg.id, {
+          id: msg.id,
+          text,
+          sender: isBot ? 'bot' : (msg.userId === currentUserId ? 'user' : 'user'),
+          timestamp,
+          ...(references?.length ? { references } : {}),
+          ...(groundingNorm.length ? { groundingChunks: groundingNorm } : {}),
+          ...(msg.feedback ? { feedback: msg.feedback } : {}),
+        });
       });
       
       // แปลง Map เป็น Array และเรียงลำดับตามเวลา (เก่าที่สุดก่อน) — ถ้าเวลาเท่ากัน user ก่อน bot
@@ -621,8 +646,17 @@ function Chat() {
               setTimeout(() => navigate('/homepage'), 1200);
               return;
             }
-            setMessages(prev => prev.filter(m => m.id !== tempUserId));
-            setErrorMessage(getErrorMessage(fallbackErr));
+            const safeErr = getErrorMessage(fallbackErr);
+            setErrorMessage(safeErr);
+            setMessages(prev => [
+              ...prev,
+              {
+                id: `temp-bot-error-${Date.now()}`,
+                text: `ขออภัย ระบบประมวลผลไม่สำเร็จ (${safeErr})`,
+                sender: 'bot',
+                timestamp: new Date(),
+              },
+            ]);
             const timeoutId = setTimeout(() => setErrorMessage(null), 5000);
             timeoutRefs.current['botError'] = timeoutId;
           }
@@ -792,6 +826,7 @@ function Chat() {
 
   const handleSendMessage = async (e, overrideMessage = null) => {
     e.preventDefault();
+    const shouldClearComposer = overrideMessage == null;
     const messageText = (overrideMessage != null && String(overrideMessage).trim() !== '')
       ? String(overrideMessage).trim()
       : chatInput.trim();
@@ -801,14 +836,14 @@ function Chat() {
     if (!finalText.trim()) return;
     if (isTyping) return;
     const { outboundText } = buildStyledPrompt(finalText);
-
-    setChatInput('');
-    setAttachedFile(null);
-    
-    // Reset textarea height
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-    }
+    const shouldRestoreInputOnError = overrideMessage == null;
+    const restoreInputOnError = () => {
+      if (!shouldRestoreInputOnError) return;
+      setChatInput(messageText);
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    };
     
     // Clear previous timeout if exists
     if (typingTimeoutRef.current) {
@@ -818,9 +853,19 @@ function Chat() {
     
     const id = chatId != null ? String(chatId).trim() : '';
     if (!id || id === 'undefined' || id === 'null') {
-      console.error('Invalid chat ID');
+      setErrorMessage('ไม่พบห้องแชท — กรุณาเริ่มแชทใหม่จากหน้าแรก');
       return;
     }
+    if (shouldClearComposer) {
+      setChatInput('');
+      setAttachedFile(null);
+
+      // Reset textarea height after we've confirmed message can be sent
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+    }
+    const draftKey = getDraftKey(id);
 
     // คำสั่ง "X เปลี่ยนเป็น Y" / "ช่วยเปลี่ยน X เป็น Y" — แก้ข้อความบอทล่าสุด
     const replaceCmd = tryApplyReplaceCommand(finalText);
@@ -865,6 +910,7 @@ function Chat() {
 
       setMessages(prev => [...prev, { ...userMsgForReplace, text: finalText }]);
       setErrorMessage('ไม่พบข้อความบอทล่าสุดที่จะแก้ — ให้บอทตอบก่อน แล้วค่อยใช้คำสั่ง  X เปลี่ยนเป็น Y');
+      restoreInputOnError();
       const t = setTimeout(() => setErrorMessage(null), 5000);
       timeoutRefs.current['replaceError'] = t;
       return;
@@ -913,11 +959,19 @@ function Chat() {
           }
           streamBotIdRef.current = null;
           streamAbortControllerRef.current = null;
+          if (draftKey && shouldClearComposer) {
+            try {
+              localStorage.removeItem(draftKey);
+            } catch {
+              // ignore storage errors
+            }
+          }
           loadMessages();
         },
       });
     } catch (botError) {
       if (isAbortError(botError)) {
+        restoreInputOnError();
         streamAbortControllerRef.current = null;
         streamBotIdRef.current = null;
         return;
@@ -932,6 +986,13 @@ function Chat() {
       setMessages(prev => prev.filter(m => m.id !== tempBotId));
       try {
         await chatMessageAPI.createBotResponse(chatId, outboundText);
+        if (draftKey && shouldClearComposer) {
+          try {
+            localStorage.removeItem(draftKey);
+          } catch {
+            // ignore storage errors
+          }
+        }
         await loadMessages();
       } catch (fallbackErr) {
         if (isConversationNotFoundError(fallbackErr) && !missingConversationHandledRef.current) {
@@ -940,8 +1001,18 @@ function Chat() {
           setTimeout(() => navigate('/homepage'), 1200);
           return;
         }
-        setMessages(prev => prev.filter(m => m.id !== tempUserId));
-        setErrorMessage(getErrorMessage(fallbackErr));
+        const safeErr = getErrorMessage(fallbackErr);
+        restoreInputOnError();
+        setErrorMessage(safeErr);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `temp-bot-error-${Date.now()}`,
+            text: `ขออภัย ระบบประมวลผลไม่สำเร็จ (${safeErr})`,
+            sender: 'bot',
+            timestamp: new Date(),
+          },
+        ]);
         const timeoutId = setTimeout(() => setErrorMessage(null), 5000);
         timeoutRefs.current['botError'] = timeoutId;
       }
@@ -1184,6 +1255,37 @@ function Chat() {
     return ['อธิบายเพิ่มเติม', 'ขออ้างอิงที่มา'];
   };
 
+  const buildFollowUpPrompt = (label, botText, userQuestion = '') => {
+    const q = String(userQuestion || '').trim();
+    if (label === 'อธิบายเพิ่มเติม') {
+      return `จากคำตอบก่อนหน้า ช่วยอธิบายเพิ่มเติมให้เข้าใจง่ายขึ้น${q ? ` โดยยึดคำถามเดิม: ${q}` : ''}`;
+    }
+    if (label === 'ดูรายละเอียดเพิ่มเติม') {
+      return `จากคำตอบก่อนหน้า ช่วยอธิบายรายละเอียดเพิ่มเติมแบบเป็นข้อ พร้อมยกตัวอย่างที่เข้าใจง่าย${q ? ` โดยอ้างอิงจากคำถามเดิม: ${q}` : ''}`;
+    }
+    if (label === 'ขออ้างอิงที่มา') {
+      return `จากคำตอบก่อนหน้า ช่วยระบุแหล่งที่มาจากเอกสารที่ใช้ตอบให้ชัดเจน${q ? ` สำหรับคำถาม: ${q}` : ''}`;
+    }
+    if (label === 'ขออ้างอิงข้อที่เกี่ยวข้อง') {
+      return `จากคำตอบก่อนหน้า ช่วยระบุข้ออ้างอิง/แหล่งข้อมูลที่เกี่ยวข้องให้ชัดเจน${q ? ` สำหรับคำถาม: ${q}` : ''}`;
+    }
+    return label;
+  };
+
+  const handleSuggestedFollowUpClick = (label, message, messageIndex) => {
+    if (!label || isTyping || (selectedBot && selectedBot.enabled === false)) return;
+    if (label === 'ขออ้างอิงข้อที่เกี่ยวข้อง' || label === 'ขออ้างอิงที่มา') {
+      if (Array.isArray(message?.references) && message.references.length > 0) {
+        openSourceReference(message, message.references[0]);
+        return;
+      }
+      // ถ้ายังไม่มี references ใน message นี้ ให้ fallback เป็นคำถาม follow-up เพื่อให้ backend ดึงแหล่งที่มาเพิ่ม
+    }
+    const previousQuestion = getPreviousUserQuestion(messageIndex);
+    const prompt = buildFollowUpPrompt(label, message?.text || '', previousQuestion);
+    handleSendMessage({ preventDefault: () => {} }, prompt);
+  };
+
   const tokenUsageRatio =
     tokenQuota && !tokenQuota.unlimited
       ? Number(tokenQuota.usedTokens || 0) / Math.max(1, Number(tokenQuota.limitTokens || 0))
@@ -1239,7 +1341,7 @@ function Chat() {
               <HiArrowLeft className='text-xl' />
             </button>
             <div className='flex items-center gap-2'>
-              <img src={bingsuLogo} alt="BingSu" className='w-7 h-7 rounded-full object-cover' />
+              <img src={bingsuLogo} alt="Enterprise AI Chatbot" className='w-7 h-7 rounded-full object-cover' />
               <h1 className='text-base font-medium text-gray-800'>{chatName}</h1>
             </div>
           </div>
@@ -1266,9 +1368,14 @@ function Chat() {
             ) : null}
 
           {selectedBot ? (
-            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700'>
-              <span className='font-medium'>{typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}</span>
-              <span className='text-xs text-gray-500'>(ไม่สามารถเปลี่ยนได้)</span>
+            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 max-w-[320px] min-w-0'>
+              <span
+                className='font-medium truncate min-w-0'
+                title={typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+              >
+                {typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+              </span>
+              <span className='text-xs text-gray-500 shrink-0'>(ไม่สามารถเปลี่ยนได้)</span>
             </div>
           ) : null}
           </div>
@@ -1281,10 +1388,10 @@ function Chat() {
               // Empty state — ใช้ชื่อและคำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท)
               <div className='flex flex-col items-center justify-center h-full min-h-[60vh]'>
                 <div className='mb-6'>
-                  <img src={bingsuLogo} alt="BingSu" className='w-20 h-20 rounded-full object-cover shadow-lg' />
+                  <img src={bingsuLogo} alt="Enterprise AI Chatbot" className='w-20 h-20 rounded-full object-cover shadow-lg' />
                 </div>
                 <h2 className='text-2xl font-semibold text-gray-800 mb-2'>
-                  Welcome to {selectedBot?.name || 'BingSu Chat'}
+                  Welcome to {selectedBot?.name || 'Enterprise AI Chatbot Chat'}
                 </h2>
                 <p className='text-gray-500 text-center mb-8 max-w-2xl'>
                   {selectedBot?.description && !isCorruptedText(selectedBot.description)
@@ -1293,7 +1400,7 @@ function Chat() {
                 </p>
               </div>
             ) : (
-              <div className='space-y-4'>
+              <div className='space-y-8'>
                 {messages.map((message, index) => {
                   const showTimestamp = index === 0 || 
                     new Date(message.timestamp) - new Date(messages[index - 1].timestamp) > 300000;
@@ -1614,7 +1721,7 @@ function Chat() {
                                       <button
                                         key={q}
                                         type='button'
-                                        onClick={() => handleSendMessage({ preventDefault: () => {} }, q)}
+                                        onClick={() => handleSuggestedFollowUpClick(q, message, index)}
                                         disabled={isTyping || (selectedBot && selectedBot.enabled === false)}
                                         className='px-3 py-1.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 disabled:opacity-50'
                                       >
@@ -1728,6 +1835,14 @@ function Chat() {
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
+                      const hasMultipleLines = String(chatInput || '').includes('\n');
+                      const explicitSend = e.ctrlKey || e.metaKey;
+                      // Safety for long multi-line test text:
+                      // - Enter keeps editing
+                      // - Ctrl/Cmd+Enter sends
+                      if (hasMultipleLines && !explicitSend) {
+                        return;
+                      }
                       e.preventDefault();
                       handleSendMessage(e);
                     } else {
@@ -1771,7 +1886,7 @@ function Chat() {
               </div>
             </form>
             <p className='text-xs text-gray-400 text-center mt-2'>
-              BingSu อาจทำผิดพลาดได้ กรุณาตรวจสอบข้อมูลสำคัญ
+              Enterprise AI Chatbot อาจทำผิดพลาดได้ กรุณาตรวจสอบข้อมูลสำคัญ
             </p>
           </div>
         </div>

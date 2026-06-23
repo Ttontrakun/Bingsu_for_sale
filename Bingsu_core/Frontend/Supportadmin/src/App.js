@@ -13,18 +13,17 @@ import ActivityLogs from './pages/ActivityLogs';
 import Login from './pages/Login';
 import Navbar from './components/Navbar';
 import NotificationBell from './components/NotificationBell';
-import { api, getStoredUser, mapAdminUserToDisplay } from './services/api';
+import { api, getStoredUser, mapAdminUserToDisplay, normalizeDashboardRole } from './services/api';
 
 function AppContent() {
+  const USERS_POLL_MS = 10000;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const storedUser = getStoredUser();
-  const userRole = storedUser?.role || 'support';
+  const userRole = normalizeDashboardRole(storedUser?.role || 'support');
   const [users, setUsers] = useState([]);
-  const [groups, setGroups] = useState([]);
 
   const loadUsers = useCallback(async () => {
-    const sessionRole = getStoredUser()?.role || '';
-    if (!sessionRole) return;
+    const sessionRole = normalizeDashboardRole(getStoredUser()?.role || userRole || 'support');
     try {
       if (sessionRole === 'admin' || sessionRole === 'admin_metrics') {
         const list = await api.getAdminUsers();
@@ -36,44 +35,20 @@ function AppContent() {
     } catch {
       setUsers([]);
     }
-  }, []);
+  }, [userRole]);
 
   useEffect(() => {
     if (getStoredUser()) loadUsers();
   }, [loadUsers]);
 
   useEffect(() => {
-    let cancelled = false;
-    const loadGroups = async () => {
-      if (!getStoredUser()) return;
-      try {
-        const list = await api.getAdminGroups();
-        if (!cancelled) {
-          const normalized = (Array.isArray(list) ? list : []).map((group) => {
-            const name = String(group?.name || 'กลุ่ม').trim() || 'กลุ่ม';
-            const members = Array.isArray(group?.members) ? group.members.map((id) => String(id)).filter(Boolean) : [];
-            return {
-              ...group,
-              id: String(group?.id || ''),
-              roomId: String(group?.roomId || group?.id || ''),
-              name,
-              description: String(group?.description || ''),
-              members,
-              memberCount: Number.isFinite(Number(group?.memberCount)) ? Number(group.memberCount) : members.length,
-              avatar: (name[0] || 'ก').toUpperCase(),
-            };
-          });
-          setGroups(normalized);
-        }
-      } catch {
-        if (!cancelled) setGroups([]);
-      }
-    };
-    loadGroups();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (!getStoredUser()) return undefined;
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      loadUsers();
+    }, USERS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [loadUsers]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') window.userRole = userRole;
@@ -87,7 +62,7 @@ function AppContent() {
   const isAdminMetrics = userRole === 'admin_metrics';
   const canSeeDashboard = isAdmin || isAdminMetrics;
   const canSeeLogs = isAdmin || isAdminMetrics;
-  const canSeeBots = userRole === 'support' || isAdmin;
+  const canSeeBots = isAdmin || userRole === 'support';
   const defaultPath = canSeeDashboard ? '/dashboard' : '/knowledge';
 
   return (
@@ -103,7 +78,7 @@ function AppContent() {
         </div>
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
-          <Route path="/dashboard" element={canSeeDashboard ? <Dashboard users={users} groups={groups} userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
+          <Route path="/dashboard" element={canSeeDashboard ? <Dashboard users={users} groups={[]} userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
           <Route path="/Dashboard " element={<Navigate to={defaultPath} replace />} />
           <Route path="/homepage" element={<Home />} />
           <Route path="/home" element={<Navigate to="/homepage" replace />} />
@@ -113,7 +88,7 @@ function AppContent() {
           <Route path="/knowledge" element={<Knowledge userRole={userRole} />} />
           <Route path="/knowledge/create" element={<SupportCreateKnowledge />} />
           <Route path="/knowledge/:id/add-data" element={<KnowledgeDocumentRoute />} />
-          <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} groups={groups} setGroups={setGroups} onRefreshPending={loadUsers} />} />
+          <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} groups={[]} setGroups={() => {}} onRefreshPending={loadUsers} />} />
           <Route path="/logs" element={canSeeLogs ? <ActivityLogs userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
         </Routes>
       </main>

@@ -1,4 +1,4 @@
-# Bingsu Redis Service
+# Enterprise AI Chatbot Redis Service
 
 Redis service สำหรับ queue และ caching
 

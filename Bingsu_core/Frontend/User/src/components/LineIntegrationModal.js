@@ -380,7 +380,7 @@ function LineIntegrationModal({ isOpen, onClose }) {
                       <div className='flex gap-3'>
                         <span className='font-semibold text-gray-800'>Step 2:</span>
                         <p className='text-sm text-gray-700'>
-                          Select the LINE account you want to connect with Bingsu.
+                          Select the LINE account you want to connect with Enterprise AI Chatbot.
                         </p>
                       </div>
                       <div className='flex gap-3'>

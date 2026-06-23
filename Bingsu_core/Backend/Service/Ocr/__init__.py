@@ -1,3 +1,3 @@
 """
-Bingsu OCR Service
+Enterprise AI Chatbot OCR Service
 """

@@ -1,7 +1,7 @@
 {
   "name": "bingsu-database-redis",
   "version": "1.0.0",
-  "description": "Bingsu Redis Database - Redis service",
+  "description": "Enterprise AI Chatbot Redis Database - Redis service",
   "scripts": {
     "start": "docker compose up -d",
     "stop": "docker compose down",

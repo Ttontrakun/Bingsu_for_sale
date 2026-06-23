@@ -108,6 +108,40 @@ docker compose up -d --build
 | **http://localhost:3014** | หน้าแอดมิน (Supportadmin) |
 | **http://localhost:5052** | API (Legacy Backend) |
 
+### (Optional) Prisma Studio แบบไม่ expose ออกนอก
+
+> ใช้เฉพาะ dev/staging เท่านั้น
+
+1. สร้าง hash สำหรับ Basic Auth password:
+
+```bash
+docker run --rm caddy:2-alpine caddy hash-password --plaintext "your-strong-password"
+```
+
+2. ตั้งค่า env ก่อนรัน (PowerShell):
+
+```powershell
+$env:PRISMA_STUDIO_BASIC_AUTH_USER="admin"
+$env:PRISMA_STUDIO_BASIC_AUTH_HASH="ใส่ค่า hash จากคำสั่งด้านบน"
+```
+
+3. เปิด Prisma Studio ผ่าน reverse proxy:
+
+```bash
+docker compose -f Docker-compose.yml -f docker-compose.prisma-studio.yml up -d prisma-studio prisma-studio-proxy
+```
+
+4. เข้าใช้งาน:
+
+- URL: `http://127.0.0.1:5556`
+- ต้องผ่าน Basic Auth ก่อน และพอร์ตเปิดเฉพาะ localhost เท่านั้น
+
+5. ปิดเมื่อไม่ใช้:
+
+```bash
+docker compose -f Docker-compose.yml -f docker-compose.prisma-studio.yml stop prisma-studio prisma-studio-proxy
+```
+
 **6. (ครั้งแรกเท่านั้น) สร้าง user แอดมิน**
 
 ```bash

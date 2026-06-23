@@ -13,7 +13,7 @@ const projectRoot = path.resolve(__dirname, "..", "..");
 
 export const botsRouter = express.Router();
 const HELP_BOT_NAME = "บอทช่วยสอน";
-const DEFAULT_BOT_NAME = "BingSu Assistant";
+const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const normalizeName = (value) => String(value || "").trim();
 
 /** รายการที่เปลี่ยนในฟอร์มแก้ไขบอท — ใช้ใน log ให้แอดมินอ่านง่าย */

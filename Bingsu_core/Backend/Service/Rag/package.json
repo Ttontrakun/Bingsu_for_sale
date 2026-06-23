@@ -1,7 +1,7 @@
 {
   "name": "bingsu-rag",
   "version": "1.0.0",
-  "description": "Bingsu RAG - Configuration and services",
+  "description": "Enterprise AI Chatbot RAG - Configuration and services",
   "type": "module",
   "main": "config.js",
   "scripts": {

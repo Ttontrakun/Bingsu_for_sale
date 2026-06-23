@@ -38,7 +38,7 @@ function TestWidget() {
         {/* Header */}
         <div className='mb-8'>
           <h1 className='text-3xl font-bold text-gray-800 mb-2'>Test Widget Page</h1>
-          <p className='text-gray-600'>หน้านี้ใช้สำหรับทดสอบ BingSu Chat Widget</p>
+          <p className='text-gray-600'>หน้านี้ใช้สำหรับทดสอบ Enterprise AI Chatbot Chat Widget</p>
         </div>
 
         {/* Content Area */}
@@ -89,7 +89,7 @@ function TestWidget() {
               <h2 className='text-xl font-semibold text-gray-800 mb-4'>เนื้อหาทดสอบ</h2>
               <div className='space-y-4 text-gray-700'>
                 <p>
-                  นี่คือหน้า test สำหรับทดสอบ BingSu Chat Widget คุณสามารถเลื่อนหน้าลงไปเพื่อดูเนื้อหาอื่นๆ 
+                  นี่คือหน้า test สำหรับทดสอบ Enterprise AI Chatbot Chat Widget คุณสามารถเลื่อนหน้าลงไปเพื่อดูเนื้อหาอื่นๆ 
                   และทดสอบว่า widget ยังคงแสดงผลที่มุมล่างขวาได้ถูกต้อง
                 </p>
                 <p>

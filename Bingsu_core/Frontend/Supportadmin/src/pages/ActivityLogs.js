@@ -15,6 +15,8 @@ const EVENT_LABEL_TH = {
   'user.signup.pending': 'สมัครสมาชิก',
   'user.approval.updated': 'อนุมัติ/ปฏิเสธบัญชี',
   'user.expiry.renewed': 'ต่ออายุการใช้งาน',
+  'user.status.updated': 'เปลี่ยนสถานะผู้ใช้',
+  'user.role.updated': 'เปลี่ยนบทบาทผู้ใช้',
   'http.error': 'ข้อผิดพลาดระบบ (HTTP)',
   'http.exception': 'ข้อผิดพลาดระบบ (Exception)',
   'integration.line.updated': 'ตั้งค่า LINE Integration',
@@ -26,6 +28,7 @@ const EVENT_LABEL_TH = {
   'document.deleted': 'ลบเอกสาร',
   'upload.batch.completed': 'อัปโหลดไฟล์ (ครบชุด)',
   'admin.user.deleted': 'ลบผู้ใช้ (แอดมิน)',
+  'support.user.deleted': 'ลบผู้ใช้ (ซัพพอร์ต)',
   'bot.created': 'สร้างบอท',
   'bot.updated': 'แก้ไขบอท',
   'admin.bot.updated': 'แก้ไขบอท (แอดมิน)',
@@ -139,6 +142,17 @@ function formatAdminSummary(eventMessage, meta) {
       const dayStr = days != null && Number.isFinite(days) ? ` (+${days} วัน)` : '';
       return who ? `ต่ออายุการใช้งาน ${who}${dayStr}${to}` : `ต่ออายุการใช้งาน${dayStr}${to}`;
     }
+    case 'user.status.updated': {
+      const who = [m.name, m.email].filter(Boolean).join(' · ');
+      const to = m.to === true ? 'เปิดใช้งาน' : m.to === false ? 'ปิดใช้งาน' : 'อัปเดตสถานะ';
+      return who ? `เปลี่ยนสถานะผู้ใช้ ${who} → ${to}` : `เปลี่ยนสถานะผู้ใช้ → ${to}`;
+    }
+    case 'user.role.updated': {
+      const who = [m.name, m.email].filter(Boolean).join(' · ');
+      const fromRole = ROLE_TH[m.from] || m.from || '—';
+      const toRole = ROLE_TH[m.to] || m.to || '—';
+      return who ? `เปลี่ยนบทบาทผู้ใช้ ${who} จาก ${fromRole} เป็น ${toRole}` : `เปลี่ยนบทบาทผู้ใช้ ${fromRole} → ${toRole}`;
+    }
     case 'http.error': {
       const status = m.status != null ? Number(m.status) : null;
       const method = m.method ? String(m.method).toUpperCase() : '';
@@ -222,6 +236,10 @@ function formatAdminSummary(eventMessage, meta) {
       const who = [m.name, m.email].filter(Boolean).join(' · ');
       return who ? `ลบบัญชีผู้ใช้ ${who} ออกจากระบบ` : 'ลบบัญชีผู้ใช้ออกจากระบบ';
     }
+    case 'support.user.deleted': {
+      const who = [m.name, m.email].filter(Boolean).join(' · ');
+      return who ? `ซัพพอร์ตลบบัญชีผู้ใช้ ${who}` : 'ซัพพอร์ตลบบัญชีผู้ใช้';
+    }
     case 'admin.guide.updated':
       return know
         ? `อัปเดตเนื้อหาคู่มือ — เอกสาร ${q(know)}`
@@ -277,6 +295,10 @@ const EVENT_FILTER_GROUPS = [
     keys: ['user.signup.pending', 'user.approval.updated', 'user.expiry.renewed'],
   },
   {
+    label: 'จัดการผู้ใช้',
+    keys: ['user.status.updated', 'user.role.updated', 'admin.user.deleted', 'support.user.deleted'],
+  },
+  {
     label: 'Knowledge และการอัปโหลด',
     keys: ['document.created', 'document.updated', 'document.vectorize.failed', 'document.deleted', 'upload.batch.completed'],
   },
@@ -291,7 +313,6 @@ const EVENT_FILTER_GROUPS = [
       'bot.updated',
       'admin.bot.updated',
       'bot.deleted',
-      'admin.user.deleted',
       'admin.guide.updated',
       'admin.restore',
       'admin.restore.failed',
@@ -335,6 +356,7 @@ function ActivityLogs({ userRole }) {
       try {
         const data = await api.getLogs({
           take: 500,
+          mask: false,
           event: String(event || '').trim() || undefined,
           q: String(q || '').trim() || undefined,
           from: String(from || '').trim() || undefined,
@@ -376,9 +398,16 @@ function ActivityLogs({ userRole }) {
     if (!allowed) return;
     load({ silent: false });
     const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') load({ silent: true });
+      load({ silent: true });
     }, POLL_MS);
-    return () => clearInterval(timer);
+    const onFocus = () => load({ silent: true });
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
+    };
   }, [allowed, load]);
 
   if (!allowed) {

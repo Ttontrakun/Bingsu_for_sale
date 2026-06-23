@@ -1,4 +1,4 @@
-# Bingsu Qdrant Database
+# Enterprise AI Chatbot Qdrant Database
 
 Qdrant service for storing and searching vectors.
 

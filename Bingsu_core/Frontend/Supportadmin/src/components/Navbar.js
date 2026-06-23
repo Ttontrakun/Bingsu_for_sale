@@ -57,7 +57,7 @@ function Navbar({ onCollapseChange, userRole }) {
   };
 
   const canSeeDashboard = userRole === 'admin' || userRole === 'admin_metrics';
-  const canSeeBots = userRole === 'support' || userRole === 'admin';
+  const canSeeBots = userRole === 'admin' || userRole === 'support';
   const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
 
   return (
@@ -95,7 +95,10 @@ function Navbar({ onCollapseChange, userRole }) {
         onClick={() => navigate('/homepage')}
       >
         <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
-        <span className='text-orange-500 font-bold text-lg whitespace-nowrap'>BingSu</span>
+        <span className='text-orange-500 font-bold text-base leading-tight'>
+          <span className='block'>Enterprise AI</span>
+          <span className='block'>Chatbot</span>
+        </span>
       </div>
 
       {/* Navigation */}

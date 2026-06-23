@@ -19,10 +19,8 @@ import {
 } from 'react-icons/hi';
 import { api, mapAdminUserToDisplay, getStoredUser, normalizeDashboardRole } from '../services/api';
 
-const BOT_LIMIT_PER_USER = 3;
-const KNOWLEDGE_LIMIT_PER_USER = 5;
-
 function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) {
+  const isEnabledFlag = (value) => value === true;
   const normalizeGroup = (group) => {
     const name = String(group?.name || 'กลุ่ม').trim() || 'กลุ่ม';
     const members = Array.isArray(group?.members) ? group.members.map((id) => String(id)).filter(Boolean) : [];
@@ -72,6 +70,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [extendDays, setExtendDays] = useState('30');
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDescription, setNewGroupDescription] = useState('');
@@ -83,50 +82,30 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const navigate = useNavigate();
   const itemsPerPage = 10;
 
-  const [botCountByUserId, setBotCountByUserId] = useState({});
-  const [knowledgeCountByUserId, setKnowledgeCountByUserId] = useState({});
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadUsageCounts = async () => {
-      try {
-        const [bots, docs] = await Promise.all([
-          api.getAdminBots(),
-          api.getAdminDocuments(),
-        ]);
-        const botCounts = (bots || []).reduce((acc, bot) => {
-          const ownerId = bot?.owner?.id;
-          if (!ownerId) return acc;
-          acc[ownerId] = (acc[ownerId] || 0) + 1;
-          return acc;
-        }, {});
-        const docCounts = (docs || []).reduce((acc, doc) => {
-          const ownerId = doc?.owner?.id;
-          if (!ownerId) return acc;
-          acc[ownerId] = (acc[ownerId] || 0) + 1;
-          return acc;
-        }, {});
-        if (!cancelled) {
-          setBotCountByUserId(botCounts);
-          setKnowledgeCountByUserId(docCounts);
-        }
-      } catch {
-        if (!cancelled) {
-          setBotCountByUserId({});
-          setKnowledgeCountByUserId({});
-        }
-      }
-    };
-    loadUsageCounts();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleToggleStatus = (userId) => {
-    setUsers(users.map(user => 
-      user.id === userId ? { ...user, isEnabled: !user.isEnabled } : user
-    ));
+  const handleToggleStatus = async (userId) => {
+    const sessionRole = getSessionRole();
+    const canToggleStatus = ['support', 'admin', 'admin_metrics'].includes(sessionRole);
+    if (!canToggleStatus) {
+      alert('คุณไม่มีสิทธิ์เปลี่ยนสถานะผู้ใช้');
+      return;
+    }
+    const target = users.find((user) => String(user.id) === String(userId));
+    if (!target) return;
+    const nextIsActive = !isEnabledFlag(target.isEnabled);
+    try {
+      const updated = await api.patchAdminUser(userId, { isActive: nextIsActive });
+      const mapped = mapAdminUserToDisplay(updated);
+      setUsers((prev) =>
+        prev.map((user) =>
+          String(user.id) === String(userId)
+            ? { ...user, ...mapped, lastActive: user.lastActive }
+            : user
+        )
+      );
+      if (typeof onRefreshPending === 'function') onRefreshPending();
+    } catch (err) {
+      alert(err?.message || 'อัปเดตสถานะผู้ใช้ไม่สำเร็จ');
+    }
   };
 
   /** เลือกได้เฉพาะ 3 บทบาทหลัก (ไม่รวม admin_metrics ใน UI) */
@@ -136,8 +115,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     { value: 'admin', label: 'แอดมิน', Icon: HiShieldCheck },
   ];
 
-  /** บทบาทจริงจาก session (login) — ไม่ใช่ค่า "Support/Admin" ใน Profile ที่ใช้สลับมุมมองรายการ */
-  const getSessionRole = () => getStoredUser()?.role || '';
+  /** บทบาทจริงจาก session (normalize ให้เหลือคีย์มาตรฐานเสมอ) */
+  const getSessionRole = () => normalizeDashboardRole(getStoredUser()?.role || '');
 
   const roleBadgeClickable = (user) => {
     const sessionRole = getSessionRole();
@@ -468,6 +447,16 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     admin: 'จัดการระบบเต็มรูปแบบ รวมเปลี่ยนบทบาทและลบบัญชี',
   };
 
+  const canDeleteUserFromSupport = useCallback((user) => {
+    const sessionRole = getSessionRole();
+    const me = getStoredUser();
+    const roleType = String(user?.roleType || '');
+    const isSelf = String(user?.id || '') === String(me?.id || '');
+    if (isSelf) return false;
+    if (sessionRole === 'admin') return ['user', 'pending'].includes(roleType);
+    return ['support', 'admin_metrics'].includes(sessionRole) && roleType === 'pending';
+  }, []);
+
   const filteredUsers = useMemo(() => {
     const filtered = users.filter(user => {
       const matchesSearch = user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -616,6 +605,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   const handleOpenExtendModal = (userId) => {
+    const sessionRole = getSessionRole();
+    if (!['support', 'admin', 'admin_metrics'].includes(sessionRole)) return;
     setTargetUserId(userId);
     setExtendDays('30');
     setOpenActionMenuUserId(null);
@@ -623,7 +614,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     setShowExtendModal(true);
   };
 
-  const handleConfirmPasswordChange = () => {
+  const handleConfirmPasswordChange = async () => {
     if (!newPassword || !confirmNewPassword) {
       setPasswordError('กรุณากรอกรหัสผ่านให้ครบทั้งสองช่อง');
       return;
@@ -634,9 +625,27 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
       return;
     }
 
+    if (!targetUserId) {
+      setPasswordError('ไม่พบบัญชีผู้ใช้ที่ต้องการแก้ไข');
+      return;
+    }
+
     setPasswordError('');
-    setShowPasswordModal(false);
-    setTargetUserId(null);
+    setPasswordSubmitting(true);
+    try {
+      await api.resetAdminUserPassword(targetUserId, newPassword);
+      setShowPasswordModal(false);
+      setTargetUserId(null);
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setShowNewPassword(false);
+      setShowConfirmPassword(false);
+      alert('รีเซ็ตรหัสผ่านสำเร็จ');
+    } catch (err) {
+      setPasswordError(err?.message || 'รีเซ็ตรหัสผ่านไม่สำเร็จ');
+    } finally {
+      setPasswordSubmitting(false);
+    }
   };
 
   const handleConfirmExtendExpiry = () => {
@@ -677,7 +686,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     }
     setDeleteUserSubmitting(true);
     try {
-      await api.deleteAdminUser(confirmDeleteUserId);
+      await api.deleteSupportUser(confirmDeleteUserId);
       setUsers((prev) => prev.filter((user) => String(user.id) !== String(confirmDeleteUserId)));
       setConfirmDeleteUserId(null);
       if (typeof onRefreshPending === 'function') onRefreshPending();
@@ -825,19 +834,6 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
             </svg>
             <span className="font-medium">Overview</span>
           </button>
-          <button
-            onClick={() => setActiveTab('groups')}
-            className={`flex items-center space-x-2 pb-2 border-b-2 transition-colors ${
-              activeTab === 'groups'
-                ? 'border-gray-900 text-gray-900'
-                : 'border-transparent text-gray-400'
-            }`}
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-3a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v3h-3zM4.75 12.094A5.973 5.973 0 004 15v3H1v-3a3 3 0 013.75-2.906z" />
-            </svg>
-            <span className="font-medium">Groups</span>
-          </button>
         </div>
       </div>
 
@@ -916,8 +912,6 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
               </th>
               <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">ชื่อ</th>
               <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">อีเมล</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">Bot</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">Knowledge</th>
               <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">
                 <span className="block">ใช้งานล่าสุด</span>
               </th>
@@ -966,8 +960,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                   )}
                 </div>
               </th>
-              <th className="px-4 py-3"></th>
-              <th className="px-4 py-3"></th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">สถานะ</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">การจัดการ</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -978,7 +972,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                 className={`hover:bg-gray-50 transition-colors ${
                   highlightedUserId === user.id
                     ? 'bg-red-50 animate-pulse'
-                    : user.roleType === 'user' && !user.isEnabled
+                    : user.roleType === 'user' && !isEnabledFlag(user.isEnabled)
                       ? 'opacity-50'
                       : ''
                 }`}
@@ -1030,12 +1024,6 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                 </td>
                 <td className="px-4 py-4 text-gray-600">{user.email}</td>
                 <td className="px-4 py-4 text-gray-600">
-                  {user.roleType === 'user' ? `${botCountByUserId[user.id] || 0}/${BOT_LIMIT_PER_USER}` : '-'}
-                </td>
-                <td className="px-4 py-4 text-gray-600">
-                  {user.roleType === 'user' ? `${knowledgeCountByUserId[user.id] || 0}/${KNOWLEDGE_LIMIT_PER_USER}` : '-'}
-                </td>
-                <td className="px-4 py-4 text-gray-600">
                   {user.roleType !== 'pending' ? (
                     <span className="text-sm text-gray-800 tabular-nums">{user.lastActive}</span>
                   ) : (
@@ -1065,20 +1053,24 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                   {(user.roleType === 'user' || user.roleType === 'pending') && (
                     <button
                       onClick={() => user.roleType === 'user' && handleToggleStatus(user.id)}
-                      disabled={user.roleType === 'pending'}
+                      disabled={user.roleType === 'pending' || !['support', 'admin', 'admin_metrics'].includes(getSessionRole())}
                       className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${
                         user.roleType === 'pending'
-                          ? 'bg-gray-300 cursor-not-allowed'
-                          : user.isEnabled
+                          ? 'bg-gray-300'
+                          : isEnabledFlag(user.isEnabled)
                             ? 'bg-green-500'
                             : 'bg-gray-300'
+                      } ${
+                        user.roleType === 'pending' || !['support', 'admin', 'admin_metrics'].includes(getSessionRole())
+                          ? 'cursor-not-allowed opacity-70'
+                          : ''
                       }`}
                     >
                       <span
                         className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${
                           user.roleType === 'pending'
                             ? 'translate-x-1'
-                            : user.isEnabled
+                            : isEnabledFlag(user.isEnabled)
                               ? 'translate-x-6'
                               : 'translate-x-1'
                         }`}
@@ -1089,15 +1081,12 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                 <td className="px-4 py-4">
                   {(() => {
                     const sessionRole = getSessionRole();
-                    const isFullAdmin = sessionRole === 'admin';
-                    const me = getStoredUser();
-                    const canShowDelete = isFullAdmin && String(user.id) !== String(me?.id ?? '');
-                    const hasMenuItems = user.roleType !== 'pending' || canShowDelete;
-                    const canOpenUserActionMenu =
-                      (isFullAdmin && hasMenuItems) ||
-                      (['support', 'admin_metrics'].includes(sessionRole) &&
-                        user.roleType !== 'pending' &&
-                        user.isEnabled);
+                    const isStaff = ['support', 'admin', 'admin_metrics'].includes(sessionRole);
+                    const canRenew = isStaff && user.roleType === 'user';
+                    const canEditPassword = sessionRole === 'admin' && user.roleType !== 'pending';
+                    const canShowDelete = canDeleteUserFromSupport(user);
+                    const hasMenuItems = canRenew || canEditPassword || canShowDelete;
+                    const canOpenUserActionMenu = hasMenuItems;
                     const menuOpen = openActionMenuUserId === user.id && canOpenUserActionMenu;
                     return (
                       <div className="relative" ref={openActionMenuUserId === user.id ? actionMenuRef : null}>
@@ -1121,7 +1110,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
 
                         {menuOpen && (
                           <div className="absolute right-0 mt-2 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-[110] overflow-hidden">
-                            {user.roleType !== 'pending' && (
+                            {canEditPassword && (
                               <>
                                 <button
                                   type="button"
@@ -1131,10 +1120,16 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                                   <HiOutlineKey className="w-4 h-4" />
                                   แก้ไขรหัสผ่าน
                                 </button>
+                              </>
+                            )}
+                            {canRenew && (
+                              <>
                                 <button
                                   type="button"
                                   onClick={() => handleOpenExtendModal(user.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 border-t border-gray-100 inline-flex items-center gap-2"
+                                  className={`w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2 ${
+                                    canEditPassword ? 'border-t border-gray-100' : ''
+                                  }`}
                                 >
                                   <HiOutlineClock className="w-4 h-4" />
                                   ต่อวันหมดอายุ
@@ -1146,7 +1141,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                                 type="button"
                                 onClick={() => handleDeleteUser(user.id)}
                                 className={`w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 inline-flex items-center gap-2 ${
-                                  user.roleType !== 'pending' ? 'border-t border-gray-100' : ''
+                                  canRenew || canEditPassword ? 'border-t border-gray-100' : ''
                                 }`}
                               >
                                 <HiTrash className="w-4 h-4" />
@@ -1510,18 +1505,21 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
             <div className="flex justify-end gap-2 mt-6">
               <button
                 onClick={() => {
+                  if (passwordSubmitting) return;
                   setShowPasswordModal(false);
                   setTargetUserId(null);
                 }}
+                disabled={passwordSubmitting}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
               >
                 ยกเลิก
               </button>
               <button
                 onClick={handleConfirmPasswordChange}
+                disabled={passwordSubmitting}
                 className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-lg hover:bg-yellow-500 transition-colors"
               >
-                ยืนยัน
+                {passwordSubmitting ? 'กำลังบันทึก...' : 'ยืนยัน'}
               </button>
             </div>
           </div>

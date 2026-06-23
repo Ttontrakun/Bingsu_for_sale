@@ -1,4 +1,5 @@
 import express from "express";
+import bcrypt from "bcryptjs";
 import { prisma } from "../db.js";
 import { authenticate, requireAdmin, requireAdminMetrics, requireRole, sanitizeUser } from "../lib/auth.js";
 import { getRequestContext } from "../lib/requestContext.js";
@@ -20,7 +21,9 @@ const pendingApprovalReadyFilter = {
   approvalStatus: "pending",
   role: "user",
   emailVerifiedAt: { not: null },
+  emailVerificationToken: null,
   passwordResetToken: null,
+  passwordResetExpiresAt: null,
 };
 
 async function hasUserExpiresAtColumn() {
@@ -412,6 +415,10 @@ adminRouter.get("/users", authenticate, requireAdminMetrics, async (_req, res) =
       role: true,
       approvalStatus: true,
       isActive: true,
+      emailVerifiedAt: true,
+      emailVerificationToken: true,
+      passwordResetToken: true,
+      passwordResetExpiresAt: true,
       createdAt: true,
       updatedAt: true,
       ...(hasExpiry ? { expiresAt: true } : {}),
@@ -439,6 +446,13 @@ adminRouter.get("/users", authenticate, requireAdminMetrics, async (_req, res) =
           ? new Date(new Date(user.createdAt).getTime() + 30 * 24 * 60 * 60 * 1000)
           : null;
       return {
+        approvalReady:
+          user.approvalStatus === "pending" &&
+          user.role === "user" &&
+          !!user.emailVerifiedAt &&
+          user.emailVerificationToken === null &&
+          user.passwordResetToken === null &&
+          user.passwordResetExpiresAt === null,
         id: user.id,
         name: user.name,
         email: user.email,
@@ -457,7 +471,7 @@ adminRouter.get("/users", authenticate, requireAdminMetrics, async (_req, res) =
 const ALLOWED_ROLES = ["user", "support", "admin_metrics", "admin"];
 const GROUP_CHAT_KIND = "group";
 
-adminRouter.patch("/users/:id", authenticate, requireAdmin, async (req, res) => {
+adminRouter.patch("/users/:id", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {
   const { role, isActive } = req.body ?? {};
   if (role === undefined && isActive === undefined) {
     res.status(400).json({ error: "role or isActive is required" });
@@ -473,6 +487,21 @@ adminRouter.patch("/users/:id", authenticate, requireAdmin, async (req, res) => 
     res.status(404).json({ error: "User not found" });
     return;
   }
+  const actorRole = String(req.user?.role || "");
+  const actorIsAdmin = actorRole === "admin";
+  const actorIsStaff = ["support", "admin_metrics"].includes(actorRole);
+  if (role !== undefined && !actorIsAdmin) {
+    res.status(403).json({ error: "Only admin can change role" });
+    return;
+  }
+  if (actorIsStaff && target.role !== "user") {
+    res.status(403).json({ error: "Support can update only role=user accounts" });
+    return;
+  }
+  if (isActive !== undefined && typeof isActive !== "boolean") {
+    res.status(400).json({ error: "isActive must be boolean" });
+    return;
+  }
   const updated = await prisma.user.update({
     where: { id: req.params.id },
     data: {
@@ -482,7 +511,94 @@ adminRouter.patch("/users/:id", authenticate, requireAdmin, async (req, res) => 
     },
   });
 
+  const metaBase = {
+    email: updated.email,
+    name: updated.name,
+    ...getRequestContext(req),
+  };
+  if (typeof isActive === "boolean" && isActive !== target.isActive) {
+    await logEvent({
+      event: "user.status.updated",
+      actorId: req.user.id,
+      targetType: "user",
+      targetId: updated.id,
+      meta: {
+        ...metaBase,
+        from: target.isActive,
+        to: isActive,
+      },
+    });
+  }
+  if (typeof role === "string" && role !== target.role) {
+    await logEvent({
+      event: "user.role.updated",
+      actorId: req.user.id,
+      targetType: "user",
+      targetId: updated.id,
+      meta: {
+        ...metaBase,
+        from: target.role,
+        to: role,
+      },
+    });
+  }
+
   res.json(sanitizeUser(updated));
+});
+
+adminRouter.post("/users/:id/reset-password", authenticate, requireAdmin, async (req, res) => {
+  const { newPassword, password } = req.body ?? {};
+  const nextPassword = String(newPassword ?? password ?? "");
+  if (!nextPassword) {
+    res.status(400).json({ error: "newPassword is required" });
+    return;
+  }
+  if (nextPassword.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+
+  const target = await prisma.user.findUnique({
+    where: { id: req.params.id },
+    select: { id: true, email: true, name: true, role: true },
+  });
+  if (!target) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  if (String(req.user?.id || "") === String(target.id || "")) {
+    res.status(400).json({ error: "Cannot reset your own password from this action" });
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash(nextPassword, 10);
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: target.id },
+      data: {
+        passwordHash,
+        passwordResetToken: null,
+        passwordResetExpiresAt: null,
+      },
+    }),
+    prisma.session.deleteMany({ where: { userId: target.id } }),
+  ]);
+
+  await logEvent({
+    event: "admin.user.password.reset",
+    actorId: req.user.id,
+    targetType: "user",
+    targetId: target.id,
+    meta: {
+      email: target.email,
+      name: target.name,
+      role: target.role,
+      ...getRequestContext(req),
+    },
+  });
+  await invalidateUserCaches(target.id);
+
+  res.json({ ok: true });
 });
 
 adminRouter.delete("/users/:id", authenticate, requireAdmin, async (req, res) => {
@@ -518,118 +634,24 @@ const toGroupDto = (chat) => ({
   updatedAt: chat.updatedAt,
 });
 
-adminRouter.get("/groups", authenticate, requireRole("support", "admin"), async (_req, res) => {
-  const groups = await prisma.chat.findMany({
-    where: { kind: GROUP_CHAT_KIND },
-    include: { users: { select: { userId: true } } },
-    orderBy: { updatedAt: "desc" },
-  });
-  res.json(groups.map(toGroupDto));
+adminRouter.get("/groups", authenticate, requireRole("admin"), async (_req, res) => {
+  res.status(410).json({ error: "Group feature has been removed" });
 });
 
-adminRouter.post("/groups", authenticate, requireRole("support", "admin"), async (req, res) => {
-  const name = String(req.body?.name || "").trim();
-  const description = String(req.body?.description || "").trim();
-  const memberIdsRaw = Array.isArray(req.body?.memberIds) ? req.body.memberIds : [];
-  const memberIds = Array.from(new Set(memberIdsRaw.map((id) => String(id || "").trim()).filter(Boolean)));
-  if (!name) {
-    res.status(400).json({ error: "name is required" });
-    return;
-  }
-  const users = memberIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: memberIds }, role: "user" },
-        select: { id: true },
-      })
-    : [];
-  const validMemberIds = users.map((user) => user.id);
-  const created = await prisma.chat.create({
-    data: {
-      name: name.slice(0, 120),
-      description: description.slice(0, 500),
-      kind: GROUP_CHAT_KIND,
-      users: validMemberIds.length
-        ? { create: validMemberIds.map((userId) => ({ userId, role: "member" })) }
-        : undefined,
-    },
-    include: { users: { select: { userId: true } } },
-  });
-  res.status(201).json(toGroupDto(created));
+adminRouter.post("/groups", authenticate, requireRole("admin"), async (_req, res) => {
+  res.status(410).json({ error: "Group feature has been removed" });
 });
 
-adminRouter.patch("/groups/:id", authenticate, requireRole("support", "admin"), async (req, res) => {
-  const groupId = String(req.params.id || "").trim();
-  const name = req.body?.name;
-  const description = req.body?.description;
-  if (!groupId) {
-    res.status(400).json({ error: "Invalid group id" });
-    return;
-  }
-  const group = await prisma.chat.findFirst({ where: { id: groupId, kind: GROUP_CHAT_KIND }, select: { id: true } });
-  if (!group) {
-    res.status(404).json({ error: "Group not found" });
-    return;
-  }
-  const updated = await prisma.chat.update({
-    where: { id: group.id },
-    data: {
-      ...(name !== undefined ? { name: String(name || "").trim().slice(0, 120) || "กลุ่ม" } : {}),
-      ...(description !== undefined ? { description: String(description || "").trim().slice(0, 500) } : {}),
-    },
-    include: { users: { select: { userId: true } } },
-  });
-  res.json(toGroupDto(updated));
+adminRouter.patch("/groups/:id", authenticate, requireRole("admin"), async (_req, res) => {
+  res.status(410).json({ error: "Group feature has been removed" });
 });
 
-adminRouter.put("/groups/:id/members", authenticate, requireRole("support", "admin"), async (req, res) => {
-  const groupId = String(req.params.id || "").trim();
-  const memberIdsRaw = Array.isArray(req.body?.memberIds) ? req.body.memberIds : [];
-  const memberIds = Array.from(new Set(memberIdsRaw.map((id) => String(id || "").trim()).filter(Boolean)));
-  if (!groupId) {
-    res.status(400).json({ error: "Invalid group id" });
-    return;
-  }
-  const group = await prisma.chat.findFirst({ where: { id: groupId, kind: GROUP_CHAT_KIND }, select: { id: true } });
-  if (!group) {
-    res.status(404).json({ error: "Group not found" });
-    return;
-  }
-  const users = memberIds.length
-    ? await prisma.user.findMany({
-        where: { id: { in: memberIds }, role: "user" },
-        select: { id: true },
-      })
-    : [];
-  const validMemberIds = users.map((user) => user.id);
-  const updated = await prisma.$transaction(async (tx) => {
-    await tx.chatUser.deleteMany({ where: { chatId: group.id } });
-    if (validMemberIds.length) {
-      await tx.chatUser.createMany({
-        data: validMemberIds.map((userId) => ({ chatId: group.id, userId, role: "member" })),
-        skipDuplicates: true,
-      });
-    }
-    return tx.chat.findUnique({
-      where: { id: group.id },
-      include: { users: { select: { userId: true } } },
-    });
-  });
-  res.json(toGroupDto(updated));
+adminRouter.put("/groups/:id/members", authenticate, requireRole("admin"), async (_req, res) => {
+  res.status(410).json({ error: "Group feature has been removed" });
 });
 
-adminRouter.delete("/groups/:id", authenticate, requireRole("support", "admin"), async (req, res) => {
-  const groupId = String(req.params.id || "").trim();
-  if (!groupId) {
-    res.status(400).json({ error: "Invalid group id" });
-    return;
-  }
-  const group = await prisma.chat.findFirst({ where: { id: groupId, kind: GROUP_CHAT_KIND }, select: { id: true } });
-  if (!group) {
-    res.status(404).json({ error: "Group not found" });
-    return;
-  }
-  await prisma.chat.delete({ where: { id: group.id } });
-  res.json({ ok: true });
+adminRouter.delete("/groups/:id", authenticate, requireRole("admin"), async (_req, res) => {
+  res.status(410).json({ error: "Group feature has been removed" });
 });
 
 adminRouter.get("/documents", authenticate, requireRole("support", "admin"), async (_req, res) => {
@@ -751,7 +773,7 @@ adminRouter.post("/bots", authenticate, requireAdmin, async (req, res) => {
   });
 });
 
-adminRouter.patch("/bots/:id", authenticate, requireRole("support", "admin"), async (req, res) => {
+adminRouter.patch("/bots/:id", authenticate, requireAdmin, async (req, res) => {
   const { name, prompt, description, enabled, model, avatarUrl, documentIds } = req.body ?? {};
   if (
     name === undefined &&

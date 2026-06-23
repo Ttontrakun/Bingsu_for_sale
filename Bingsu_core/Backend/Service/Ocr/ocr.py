@@ -20,7 +20,7 @@ from config import (
     MAX_FILE_SIZE_MB,
 )
 
-app = FastAPI(title="Bingsu OCR Service", version="1.0.0")
+app = FastAPI(title="Enterprise AI Chatbot OCR Service", version="1.0.0")
 
 # Global OCR instance
 _ocr_instance: Any | None = None

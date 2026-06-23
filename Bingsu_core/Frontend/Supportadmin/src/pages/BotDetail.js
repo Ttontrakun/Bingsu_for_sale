@@ -14,8 +14,8 @@ function BotDetail() {
   const normalizedRole = normalizeDashboardRole(storedUser?.role);
   const isAdmin = normalizedRole === 'admin';
   const isCreateMode = !routeBotId;
-  // ถ้าเข้าหน้าบอทรายตัวได้ ให้เห็นปุ่มจัดการความรู้เสมอ (backend ตรวจสิทธิ์ตอนบันทึกอีกชั้น)
-  const canEdit = isCreateMode ? isAdmin : true;
+  // Support ดูบอทได้ แต่แก้ไขได้เฉพาะ admin
+  const canEdit = isAdmin;
 
   const [isEditing, setIsEditing] = useState(isCreateMode);
   const [saving, setSaving] = useState(false);
@@ -320,7 +320,7 @@ function BotDetail() {
             value={botData.basicInfo}
             readOnly
             className='w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 cursor-default text-gray-700'
-            placeholder='BingSu & Timsum'
+            placeholder='Enterprise AI Chatbot & Timsum'
           />
         </div>
 

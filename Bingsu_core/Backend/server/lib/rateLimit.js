@@ -6,33 +6,39 @@ const MAX_PER_WINDOW = Number.isFinite(RATE_LIMIT_MAX) && RATE_LIMIT_MAX > 0 ? R
 
 const memoryStore = new Map();
 
-function memoryIncr(key) {
+const safePositiveNumber = (value, fallback) =>
+  Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
+
+function memoryIncr(key, windowMs, maxPerWindow) {
   const now = Date.now();
   let entry = memoryStore.get(key);
-  if (!entry || entry.windowStart < now - WINDOW_MS) {
+  if (!entry || entry.windowStart < now - windowMs) {
     entry = { count: 0, windowStart: now };
     memoryStore.set(key, entry);
   }
   entry.count += 1;
-  return entry.count <= MAX_PER_WINDOW;
+  return entry.count <= maxPerWindow;
 }
 
 /**
  * Check rate limit for key. Returns true if allowed, false if rate limited.
  * @param {string} key - e.g. "auth:1.2.3.4" or "chat:userId"
+ * @param {{ windowMs?: number, max?: number }} [opts]
  * @returns {Promise<boolean>}
  */
-export async function rateLimit(key) {
-  const fullKey = `${rateLimitRedisPrefix}:${key}`;
+export async function rateLimit(key, opts = {}) {
+  const windowMs = safePositiveNumber(opts.windowMs, WINDOW_MS);
+  const maxPerWindow = safePositiveNumber(opts.max, MAX_PER_WINDOW);
+  const fullKey = `${rateLimitRedisPrefix}:${key}:${windowMs}:${maxPerWindow}`;
   if (isRedisReady()) {
     try {
       const redis = getRedisClient();
       const count = await redis.incr(fullKey);
-      if (count === 1) await redis.pExpire(fullKey, WINDOW_MS);
-      return count <= MAX_PER_WINDOW;
+      if (count === 1) await redis.pExpire(fullKey, windowMs);
+      return count <= maxPerWindow;
     } catch (err) {
       console.warn("Redis rate limit fallback to memory:", err.message);
     }
   }
-  return memoryIncr(fullKey);
+  return memoryIncr(fullKey, windowMs, maxPerWindow);
 }

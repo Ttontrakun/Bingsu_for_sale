@@ -28,18 +28,20 @@ export const getErrorMessage = (error) => {
 
     // Handle 429 Too Many Requests (Rate Limiting)
     if (error.response?.status === 429) {
+        const retryAfter = error.response.headers['retry-after'];
+        if (retryAfter) {
+            const seconds = parseInt(retryAfter, 10);
+            if (Number.isFinite(seconds) && seconds > 0) {
+                const minutes = Math.ceil(seconds / 60);
+                return `ส่งคำขอบ่อยเกินไป — กรุณารอ ${minutes} นาที แล้วลองอีกครั้ง`;
+            }
+        }
         const data = error.response?.data;
         if (data?.error && typeof data.error === 'string') {
             const msg = data.error.toLowerCase();
             if (msg.includes('chat quota') || msg.includes('daily chat')) return 'โควต้าแชทรายวันหมดแล้ว — ลองใหม่พรุ่งนี้';
             if (msg.includes('token quota') || msg.includes('daily token')) return 'โควต้าโทเค็นรายวันหมดแล้ว — ลองใหม่พรุ่งนี้';
             if (msg.includes('rate limit')) return 'ส่งข้อความบ่อยเกินไป — กรุณารอสักครู่แล้วลองอีกครั้ง';
-        }
-        const retryAfter = error.response.headers['retry-after'];
-        if (retryAfter) {
-            const seconds = parseInt(retryAfter, 10);
-            const minutes = Math.ceil(seconds / 60);
-            return `คุณพยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอ ${minutes} นาที แล้วลองอีกครั้ง`;
         }
         return 'ส่งคำขอบ่อยเกินไป — กรุณารอสักครู่แล้วลองอีกครั้ง';
     }
@@ -477,6 +479,22 @@ export const chatMessageAPI = {
         if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
             throw new Error(errData.error || res.statusText || 'Stream failed');
+        }
+        const contentType = String(res.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('application/json')) {
+            const data = await res.json().catch(() => ({}));
+            const reply = data?.reply != null ? String(data.reply) : '';
+            if (reply && typeof onChunk === 'function') onChunk(reply);
+            if (typeof onDone === 'function') {
+                onDone({
+                    done: true,
+                    reply,
+                    references: data?.references,
+                    groundingChunks: data?.groundingChunks,
+                    messageId: data?.messageId,
+                });
+            }
+            return;
         }
         const reader = res.body.getReader();
         const decoder = new TextDecoder();

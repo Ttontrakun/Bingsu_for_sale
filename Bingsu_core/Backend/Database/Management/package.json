@@ -1,7 +1,7 @@
 {
   "name": "bingsu-database-management",
   "version": "1.0.0",
-  "description": "Bingsu Database Management - Orchestrator for PostgreSQL and Qdrant databases",
+  "description": "Enterprise AI Chatbot Database Management - Orchestrator for PostgreSQL and Qdrant databases",
   "scripts": {
     "start": "docker compose up -d",
     "stop": "docker compose down",

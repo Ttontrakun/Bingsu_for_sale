@@ -1,6 +1,6 @@
-# Bingsu Backend
+# Enterprise AI Chatbot Backend
 
-Backend services for Bingsu application - FastAPI, PostgreSQL, Qdrant, Redis, and supporting services.
+Backend services for Enterprise AI Chatbot application - FastAPI, PostgreSQL, Qdrant, Redis, and supporting services.
 
 ## 📁 โครงสร้าง
 

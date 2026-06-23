@@ -190,7 +190,7 @@ function Homepage() {
 
         {/* Title — Welcome to + ชื่อบอทที่เลือก */}
         <h1 className='text-2xl font-semibold text-gray-800 mb-4'>
-          Welcome to {selectedBotObject?.name || 'BingSu LLM'}
+          Welcome to {selectedBotObject?.name || 'Enterprise AI Chatbot LLM'}
         </h1>
 
         {/* Description — ใช้คำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท) หรือข้อความเริ่มต้น */}

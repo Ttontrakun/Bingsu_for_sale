@@ -62,6 +62,37 @@ const buildSessionCookieOptions = (expiresAt) => ({
   ...(sessionCookieDomain ? { domain: sessionCookieDomain } : {}),
 });
 
+const AUTH_RATE_LIMITS = {
+  signupByIp: { windowMs: 15 * 60 * 1000, max: 10 },
+  signupByEmail: { windowMs: 60 * 60 * 1000, max: 5 },
+  loginByIp: { windowMs: 15 * 60 * 1000, max: 40 },
+  verifyEmailByIp: { windowMs: 15 * 60 * 1000, max: 40 },
+  verifyEmailByToken: { windowMs: 30 * 60 * 1000, max: 20 },
+  resendVerificationByIp: { windowMs: 15 * 60 * 1000, max: 8 },
+  resendVerificationByEmail: { windowMs: 30 * 60 * 1000, max: 5 },
+  forgotPasswordByIp: { windowMs: 15 * 60 * 1000, max: 8 },
+  forgotPasswordByEmail: { windowMs: 30 * 60 * 1000, max: 3 },
+  resetPasswordByIp: { windowMs: 15 * 60 * 1000, max: 20 },
+  resetPasswordByToken: { windowMs: 30 * 60 * 1000, max: 12 },
+};
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+const emailKey = (value) => hashToken(normalizeEmail(value)).slice(0, 16);
+const tokenKey = (value) => hashToken(String(value || "")).slice(0, 16);
+const ipKey = (value) => String(value || "unknown").trim() || "unknown";
+
+const ensureRateLimit = async (res, key, limitConfig, message = "Too many requests") => {
+  const allowed = await rateLimit(key, limitConfig);
+  if (allowed) return true;
+  const retryAfterSeconds = Math.max(
+    1,
+    Math.ceil((Number(limitConfig?.windowMs) || 60_000) / 1000),
+  );
+  res.setHeader("Retry-After", String(retryAfterSeconds));
+  res.status(429).json({ error: message });
+  return false;
+};
+
 /** Handler สำหรับสมัครสมาชิก — ใช้ได้ทั้ง POST /api/auth/signup และ POST /api/users/register */
 export async function signupHandler(req, res) {
   const body = req.body ?? {};
@@ -78,8 +109,11 @@ export async function signupHandler(req, res) {
     res.status(400).json({ error: "You must accept terms before registering" });
     return;
   }
-  if (!(await rateLimit(`auth:${context.ip || "unknown"}`))) {
-    res.status(429).json({ error: "Too many requests" });
+  const normEmail = normalizeEmail(email);
+  if (!(await ensureRateLimit(res, `auth:signup:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.signupByIp))) {
+    return;
+  }
+  if (!(await ensureRateLimit(res, `auth:signup:email:${emailKey(normEmail)}`, AUTH_RATE_LIMITS.signupByEmail))) {
     return;
   }
   const rawPassword = password != null && String(password).trim() !== "" ? String(password) : null;
@@ -87,11 +121,94 @@ export async function signupHandler(req, res) {
     res.status(400).json({ error: "Password must be at least 8 characters" });
     return;
   }
+  if (isProduction && requireEmailVerification && !emailFeatures.isConfigured()) {
+    res.status(503).json({
+      error: "Email verification is enabled but SMTP is not configured. Please contact support.",
+    });
+    return;
+  }
   const passwordToUse = rawPassword ?? crypto.randomBytes(16).toString("hex");
-  const verificationToken = createToken();
+  const verificationToken = requireEmailVerification ? createToken() : null;
 
-  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const existingUser = await prisma.user.findUnique({ where: { email: normEmail } });
   if (existingUser) {
+    if (existingUser.role === "user" && existingUser.approvalStatus === "pending") {
+      // Recovery flow: user already exists but has not finished onboarding.
+      // Instead of rejecting with duplicate email, continue from the right step.
+      if (requireEmailVerification && !existingUser.emailVerifiedAt) {
+        const token = createToken();
+        await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            emailVerificationToken: hashToken(token),
+            emailVerificationExpiresAt: buildExpiryDate(emailVerificationTokenTtlHours),
+          },
+        });
+        try {
+          await sendVerificationEmail({
+            email: existingUser.email,
+            name: existingUser.name,
+            token,
+          });
+        } catch (emailErr) {
+          console.error("[auth] resend verification during signup recovery failed:", emailErr?.message || emailErr);
+        }
+        res.status(200).json({
+          user: sanitizeUser(existingUser),
+          pending: true,
+          verificationRequired: true,
+          verificationEmailSent: emailFeatures.isConfigured(),
+          verificationToken: !isProduction ? token : undefined,
+          onboardingState: "email_verification_pending",
+        });
+        return;
+      }
+
+      if (existingUser.emailVerifiedAt && existingUser.passwordResetToken) {
+        const passwordSetupToken = createToken();
+        await prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            passwordResetToken: hashToken(passwordSetupToken),
+            passwordResetExpiresAt: buildExpiryDate(passwordResetTokenTtlHours),
+          },
+        });
+        try {
+          await sendPasswordResetEmail({
+            email: existingUser.email,
+            name: existingUser.name,
+            token: passwordSetupToken,
+          });
+        } catch (emailErr) {
+          console.error("[auth] resend setup-password during signup recovery failed:", emailErr?.message || emailErr);
+        }
+        res.status(200).json({
+          user: sanitizeUser(existingUser),
+          pending: true,
+          verificationRequired: false,
+          passwordSetupRequired: true,
+          resetEmailSent: emailFeatures.isConfigured(),
+          passwordSetupToken: !isProduction ? passwordSetupToken : undefined,
+          onboardingState: "password_setup_pending",
+        });
+        return;
+      }
+
+      res.status(200).json({
+        user: sanitizeUser(existingUser),
+        pending: true,
+        verificationRequired: false,
+        onboardingState: "approval_pending",
+      });
+      return;
+    }
+
+    await logEvent({
+      event: "user.signup.rejected.duplicate_email",
+      targetType: "user",
+      targetId: existingUser.id,
+      meta: { email: normEmail, ...context },
+    });
     res.status(409).json({ error: "Email already in use" });
     return;
   }
@@ -99,18 +216,20 @@ export async function signupHandler(req, res) {
   const passwordHash = await bcrypt.hash(passwordToUse, 10);
   const user = await prisma.user.create({
     data: {
-      email,
+      email: normEmail,
       passwordHash,
       name,
-      approvalStatus: isProduction && !allowSignupAutoApprove ? "pending" : "approved",
+      // หลักการทำงาน: สมัครใหม่ต้องรออนุมัติจาก Support เสมอ
+      // ถ้าเปิด auto-approve และไม่ต้อง verify email ค่อยอนุมัติอัตโนมัติ
+      approvalStatus: allowSignupAutoApprove && !requireEmailVerification ? "approved" : "pending",
       emailVerifiedAt: requireEmailVerification ? null : new Date(),
-      emailVerificationToken: hashToken(verificationToken),
-      emailVerificationExpiresAt: buildExpiryDate(emailVerificationTokenTtlHours),
+      emailVerificationToken: verificationToken ? hashToken(verificationToken) : null,
+      emailVerificationExpiresAt: verificationToken ? buildExpiryDate(emailVerificationTokenTtlHours) : null,
     },
   });
 
   await logEvent({
-    event: "user.signup.pending",
+    event: user.approvalStatus === "approved" ? "user.signup.approved" : "user.signup.pending",
     actorId: user.id,
     targetType: "user",
     targetId: user.id,
@@ -118,15 +237,29 @@ export async function signupHandler(req, res) {
   });
 
   try {
-    if (requireEmailVerification) {
+    if (requireEmailVerification && verificationToken) {
       await sendVerificationEmail({
         email: user.email,
         name: user.name,
         token: verificationToken,
       });
+      await logEvent({
+        event: "auth.email.verification.sent",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
     }
   } catch (emailErr) {
     console.error("[auth] signup email failed:", emailErr?.message || emailErr);
+    await logEvent({
+      event: "auth.email.verification.failed",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: { email: user.email, reason: emailErr?.message || String(emailErr), ...context },
+    });
     if (isProduction) {
       res.status(500).json({ error: "Cannot send verification email. Please contact support." });
       return;
@@ -153,26 +286,51 @@ authRouter.post("/login", async (req, res) => {
       res.status(400).json({ error: "email and password are required" });
       return;
     }
-    const allowed = await rateLimit(`auth:${context.ip || "unknown"}`);
-    if (!allowed) {
-      res.status(429).json({ error: "Too many requests" });
+    const normalizedEmail = normalizeEmail(email);
+    if (!(await ensureRateLimit(res, `auth:login:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.loginByIp))) {
       return;
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
     if (!user) {
+      await logEvent({
+        event: "auth.login.rejected.invalid_user",
+        targetType: "user",
+        meta: { email: normalizedEmail, ...context },
+      });
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
     if (user.isActive === false) {
-      res.status(403).json({ error: "Account is disabled" });
+      await logEvent({
+        event: "auth.login.rejected.disabled",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
+      res.status(403).json({ error: "บัญชีของคุณถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ" });
       return;
     }
     if (requireEmailVerification && user.role === "user" && !user.emailVerifiedAt) {
+      await logEvent({
+        event: "auth.login.rejected.email_not_verified",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
       res.status(403).json({ error: "Email not verified" });
       return;
     }
     if (user.role === "user" && user.approvalStatus !== "approved") {
+      await logEvent({
+        event: "auth.login.rejected.pending_approval",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, approvalStatus: user.approvalStatus, ...context },
+      });
       res.status(403).json({
         error: user.approvalStatus === "rejected" ? "Account rejected" : "Account pending approval",
       });
@@ -181,18 +339,32 @@ authRouter.post("/login", async (req, res) => {
 
     const lockState = await isLoginLocked(email, context.ip || "unknown");
     if (lockState.locked) {
+      await logEvent({
+        event: "auth.login.rejected.locked",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
       res.status(429).json({ error: "Too many login attempts. Please try again later." });
       return;
     }
 
     const validPassword = await bcrypt.compare(password, user.passwordHash);
     if (!validPassword) {
-      await recordFailedLogin(email, context.ip || "unknown");
+      await recordFailedLogin(normalizedEmail, context.ip || "unknown");
+      await logEvent({
+        event: "auth.login.rejected.invalid_password",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
 
-    await clearLoginLock(email, context.ip || "unknown");
+    await clearLoginLock(normalizedEmail, context.ip || "unknown");
 
     const session = await createSession(user.id);
 
@@ -230,8 +402,10 @@ authRouter.post("/verify-email", async (req, res) => {
     res.status(400).json({ error: "token is required" });
     return;
   }
-  if (!(await rateLimit(`auth:${context.ip || "unknown"}`))) {
-    res.status(429).json({ error: "Too many requests" });
+  if (!(await ensureRateLimit(res, `auth:verify-email:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.verifyEmailByIp))) {
+    return;
+  }
+  if (!(await ensureRateLimit(res, `auth:verify-email:token:${tokenKey(token)}`, AUTH_RATE_LIMITS.verifyEmailByToken))) {
     return;
   }
 
@@ -243,6 +417,11 @@ authRouter.post("/verify-email", async (req, res) => {
     },
   });
   if (!user) {
+    await logEvent({
+      event: "auth.email.verify.rejected.invalid_token",
+      targetType: "user",
+      meta: { ...context },
+    });
     res.status(400).json({ error: "Invalid or expired token" });
     return;
   }
@@ -252,6 +431,13 @@ authRouter.post("/verify-email", async (req, res) => {
     && (!user.emailVerificationExpiresAt || user.emailVerificationExpiresAt >= now);
 
   if (!emailTokenValid) {
+    await logEvent({
+      event: "auth.email.verify.rejected.expired_token",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: { email: user.email, ...context },
+    });
     res.status(400).json({ error: "Invalid or expired token" });
     return;
   }
@@ -284,18 +470,27 @@ authRouter.post("/verify-email", async (req, res) => {
 authRouter.post("/resend-verification", async (req, res) => {
   const { email } = req.body ?? {};
   const context = getRequestContext(req);
+  const normalizedEmail = normalizeEmail(email);
 
   if (!email) {
     res.status(400).json({ error: "email is required" });
     return;
   }
-  if (!(await rateLimit(`auth:${context.ip || "unknown"}`))) {
-    res.status(429).json({ error: "Too many requests" });
+  if (!(await ensureRateLimit(res, `auth:resend-verification:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.resendVerificationByIp))) {
+    return;
+  }
+  if (!(await ensureRateLimit(res, `auth:resend-verification:email:${emailKey(normalizedEmail)}`, AUTH_RATE_LIMITS.resendVerificationByEmail))) {
     return;
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (!user || user.emailVerifiedAt) {
+    await logEvent({
+      event: "auth.email.resend.ignored",
+      targetType: "user",
+      targetId: user?.id,
+      meta: { email: normalizedEmail, alreadyVerified: !!user?.emailVerifiedAt, ...context },
+    });
     res.json({ ok: true });
     return;
   }
@@ -322,8 +517,22 @@ authRouter.post("/resend-verification", async (req, res) => {
       name: user.name,
       token,
     });
+    await logEvent({
+      event: "auth.email.verification.resent",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: { email: user.email, ...context },
+    });
   } catch (emailErr) {
     console.error("[auth] resend verification email failed:", emailErr?.message || emailErr);
+    await logEvent({
+      event: "auth.email.verification.resend.failed",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: { email: user.email, reason: emailErr?.message || String(emailErr), ...context },
+    });
     if (isProduction) {
       res.status(500).json({ error: "Cannot send verification email. Please contact support." });
       return;
@@ -340,17 +549,20 @@ authRouter.post("/resend-verification", async (req, res) => {
 const handleRequestPasswordReset = async (req, res) => {
   const { email } = req.body ?? {};
   const context = getRequestContext(req);
+  const normalizedEmail = normalizeEmail(email);
 
   if (!email) {
     res.status(400).json({ error: "email is required" });
     return;
   }
-  if (!(await rateLimit(`auth:${context.ip || "unknown"}`))) {
-    res.status(429).json({ error: "Too many requests" });
+  if (!(await ensureRateLimit(res, `auth:forgot-password:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.forgotPasswordByIp))) {
+    return;
+  }
+  if (!(await ensureRateLimit(res, `auth:forgot-password:email:${emailKey(normalizedEmail)}`, AUTH_RATE_LIMITS.forgotPasswordByEmail))) {
     return;
   }
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
   if (user) {
     const token = createToken();
     await prisma.user.update({
@@ -373,8 +585,22 @@ const handleRequestPasswordReset = async (req, res) => {
         name: user.name,
         token,
       });
+      await logEvent({
+        event: "auth.password.reset.email.sent",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, ...context },
+      });
     } catch (emailErr) {
       console.error("[auth] password reset email failed:", emailErr?.message || emailErr);
+      await logEvent({
+        event: "auth.password.reset.email.failed",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, reason: emailErr?.message || String(emailErr), ...context },
+      });
       if (isProduction) {
         res.status(500).json({ error: "Cannot send reset email. Please contact support." });
         return;
@@ -388,6 +614,11 @@ const handleRequestPasswordReset = async (req, res) => {
     return;
   }
 
+  await logEvent({
+    event: "auth.password.reset.request.ignored",
+    targetType: "user",
+    meta: { email: normalizedEmail, ...context },
+  });
   res.json({ ok: true });
 };
 
@@ -410,8 +641,10 @@ const consumePasswordToken = async ({
     res.status(400).json({ error: "Password must be at least 8 characters" });
     return;
   }
-  if (!(await rateLimit(`auth:${context.ip || "unknown"}`))) {
-    res.status(429).json({ error: "Too many requests" });
+  if (!(await ensureRateLimit(res, `auth:password-token:ip:${ipKey(context.ip)}`, AUTH_RATE_LIMITS.resetPasswordByIp))) {
+    return;
+  }
+  if (!(await ensureRateLimit(res, `auth:password-token:token:${tokenKey(token)}`, AUTH_RATE_LIMITS.resetPasswordByToken))) {
     return;
   }
 
@@ -420,6 +653,11 @@ const consumePasswordToken = async ({
     where: { passwordResetToken: tokenHash },
   });
   if (!user || (user.passwordResetExpiresAt && user.passwordResetExpiresAt < new Date())) {
+    await logEvent({
+      event: `${eventName}.rejected.invalid_token`,
+      targetType: "user",
+      meta: { ...context },
+    });
     res.status(400).json({ error: "Invalid or expired token" });
     return;
   }
@@ -443,6 +681,13 @@ const consumePasswordToken = async ({
   });
 
   if (eventName === "auth.password.set.initial" && user.role === "user" && user.approvalStatus === "pending") {
+    await logEvent({
+      event: "user.approval.request.submitted",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: { email: user.email, ...context },
+    });
     try {
       await sendSupportPendingApprovalEmail({
         email: user.email,
@@ -451,6 +696,13 @@ const consumePasswordToken = async ({
       });
     } catch (emailErr) {
       console.error("[auth] support pending approval email failed:", emailErr?.message || emailErr);
+      await logEvent({
+        event: "support.pending_approval.email.failed",
+        actorId: user.id,
+        targetType: "user",
+        targetId: user.id,
+        meta: { email: user.email, reason: emailErr?.message || String(emailErr), ...context },
+      });
       if (isProduction) {
         res.status(500).json({ error: "Password saved but failed to notify support. Please contact support." });
         return;

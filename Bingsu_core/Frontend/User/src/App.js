@@ -7,6 +7,7 @@ import CreatePassword from './pages/CreatePassword';
 import ResetPassword from './pages/ResetPassword';
 import Approval from './pages/Approval';
 import Chat from './pages/Chat';
+import PrivacyPolicy from './pages/PrivacyPolicy';
 import ToastContainer from './components/ToastNotification';
 
 function App() {
@@ -23,6 +24,7 @@ function App() {
         <Route path="/verifying" element={<Verifying />} />
         <Route path="/create-password" element={<CreatePassword />} />
         <Route path="/approval" element={<Approval />} />
+        <Route path="/privacy-policy" element={<PrivacyPolicy />} />
         <Route path="/chat/:chatId" element={<Chat />} />
         {/* redirect เส้นทางเก่าที่ user ไม่ควรเข้าได้อีก */}
         <Route path="*" element={<Navigate to="/homepage" replace />} />

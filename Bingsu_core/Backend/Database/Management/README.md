@@ -1,4 +1,4 @@
-# Bingsu Database Management
+# Enterprise AI Chatbot Database Management
 
 Orchestrator สำหรับจัดการทั้ง Relation Database (PostgreSQL) และ Vector Database (Qdrant) พร้อมกัน
 

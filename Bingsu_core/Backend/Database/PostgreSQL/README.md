@@ -1,4 +1,4 @@
-# Bingsu PostgreSQL Database
+# Enterprise AI Chatbot PostgreSQL Database
 
 PostgreSQL relational database with Prisma ORM.
 

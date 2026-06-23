@@ -1,4 +1,4 @@
-# Bingsu Embeddings Service
+# Enterprise AI Chatbot Embeddings Service
 
 Embedding service สำหรับสร้าง vectors จากข้อความ (รองรับ OpenAI และ Gemini)
 

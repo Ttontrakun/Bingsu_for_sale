@@ -17,10 +17,10 @@ function Approval() {
 
       {/* กลางจอ */}
       <div className="relative w-full max-w-[420px] m-4">
-        {/* BingSu Logo at center top above card */}
+        {/* Enterprise AI Chatbot Logo at center top above card */}
         <div className="flex items-center justify-center gap-3 mb-4">
-          <img src={bingsuLogo} alt="BingSu Logo" className="h-12 w-12 object-cover rounded-full" />
-          <h2 className="text-2xl font-bold text-zinc-800">BingSu</h2>
+          <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="h-12 w-12 object-cover rounded-full" />
+          <h2 className="text-2xl font-bold text-zinc-800">Enterprise AI Chatbot</h2>
         </div>
 
         {/* Card */}

@@ -24,6 +24,50 @@ const AVATAR_SRC_BY_KEY = {
   'preset:user_female': avatarFemale,
 };
 const getPresetAvatarSrc = (v) => AVATAR_SRC_BY_KEY[String(v || '')] || null;
+const THAI_CHAR_RE = /[\u0E00-\u0E7F]/;
+const THAI_NAME_PREFIXES = [
+  // civil/common
+  'เด็กหญิง', 'เด็กชาย', 'นางสาว', 'นาย', 'นาง', 'น.ส.', 'น.ส', 'นส.', 'ด.ช.', 'ด.ช', 'ดช.', 'ด.ญ.', 'ด.ญ', 'ดญ.',
+  // academic/professional
+  'ศาสตราจารย์', 'รองศาสตราจารย์', 'ผู้ช่วยศาสตราจารย์', 'ศ.', 'รศ.', 'ผศ.', 'ดร.',
+  'นายแพทย์', 'แพทย์หญิง', 'นพ.', 'พญ.',
+  // military
+  'พลเอก', 'พลโท', 'พลตรี', 'พล.อ.', 'พล.ท.', 'พล.ต.',
+  'พันเอก', 'พันโท', 'พันตรี', 'พ.อ.', 'พ.ท.', 'พ.ต.',
+  'ร้อยเอก', 'ร้อยโท', 'ร้อยตรี', 'ร.อ.', 'ร.ท.', 'ร.ต.',
+  'สิบเอก', 'สิบโท', 'สิบตรี', 'ส.อ.', 'ส.ท.', 'ส.ต.',
+  // police
+  'พลตำรวจเอก', 'พลตำรวจโท', 'พลตำรวจตรี', 'พล.ต.อ.', 'พล.ต.ท.', 'พล.ต.ต.',
+  'พันตำรวจเอก', 'พันตำรวจโท', 'พันตำรวจตรี', 'พ.ต.อ.', 'พ.ต.ท.', 'พ.ต.ต.',
+  'ร้อยตำรวจเอก', 'ร้อยตำรวจโท', 'ร้อยตำรวจตรี', 'ร.ต.อ.', 'ร.ต.ท.', 'ร.ต.ต.',
+  'สิบตำรวจเอก', 'สิบตำรวจโท', 'สิบตำรวจตรี', 'ส.ต.อ.', 'ส.ต.ท.', 'ส.ต.ต.',
+];
+const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const buildThaiPrefixRegex = () => {
+  const sorted = [...THAI_NAME_PREFIXES].sort((a, b) => b.length - a.length);
+  return new RegExp(`^(?:${sorted.map((v) => escapeRegExp(v)).join('|')})\\s*`, 'i');
+};
+const THAI_PREFIX_RE = buildThaiPrefixRegex();
+const stripThaiNamePrefix = (name) => {
+  let text = String(name || '').trim();
+  if (!text) return text;
+  let previous = '';
+  while (text && text !== previous) {
+    previous = text;
+    text = text.replace(THAI_PREFIX_RE, '').trim();
+  }
+  return text;
+};
+const getSidebarFirstName = (fullName) => {
+  const raw = String(fullName || '').trim();
+  if (!raw) return 'โปรไฟล์';
+  // ชื่อภาษาอังกฤษหรือภาษาอื่น: แสดงเต็ม แล้วให้ UI truncate กันล้นเมนู
+  if (!THAI_CHAR_RE.test(raw)) return raw;
+  // ตัดคำนำหน้าที่ใช้บ่อยในข้อมูลบุคลากรไทย
+  const withoutTitle = stripThaiNamePrefix(raw);
+  const firstToken = withoutTitle.split(/\s+/).filter(Boolean)[0];
+  return firstToken || withoutTitle || raw;
+};
 
 function Sidebar({ onCollapseChange }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -237,7 +281,10 @@ function Sidebar({ onCollapseChange }) {
         onClick={() => navigate('/homepage')}
       >
         <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
-        <span className='text-orange-500 font-bold text-lg whitespace-nowrap'>BingSu</span>
+        <span className='text-orange-500 font-bold text-base leading-tight'>
+          <span className='block'>Enterprise AI</span>
+          <span className='block'>Chatbot</span>
+        </span>
       </div>
 
       {/* Navigation */}
@@ -377,8 +424,8 @@ function Sidebar({ onCollapseChange }) {
           )}
         </div>
         {!isCollapsed && (
-          <span className='text-gray-700 whitespace-nowrap'>
-            {me?.name ? me.name : 'โปรไฟล์'}
+          <span className='text-gray-700 flex-1 min-w-0 truncate'>
+            {getSidebarFirstName(me?.name)}
           </span>
         )}
       </div>

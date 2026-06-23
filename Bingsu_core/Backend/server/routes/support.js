@@ -3,10 +3,12 @@ import { prisma } from "../db.js";
 import { authenticate, requireRole } from "../lib/auth.js";
 import { logEvent } from "../lib/logging.js";
 import { getLastActivityByUserIds } from "../lib/lastUserActivity.js";
+import { getRequestContext } from "../lib/requestContext.js";
+import { maskLogForExport } from "../lib/privacy.js";
 
-const DEFAULT_BOT_NAME = "BingSu Assistant";
+const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const DEFAULT_BOT_PROMPT = [
-  "คุณคือ BingSu Assistant — ผู้ช่วย AI อัจฉริยะที่เป็นมิตรและฉลาด",
+  "คุณคือ Enterprise AI Chatbot Assistant — ผู้ช่วย AI อัจฉริยะที่เป็นมิตรและฉลาด",
   "",
   "สิ่งที่ทำได้:",
   "- ทักทาย สนทนาทั่วไป และให้คำแนะนำได้ตามปกติ",
@@ -117,12 +119,15 @@ async function hasUserExpiresAtColumn() {
 
 supportRouter.get("/pending-users", authenticate, requireRole("support", "admin", "admin_metrics"), async (_req, res) => {
   const users = await prisma.user.findMany({
-    // Send to support approval only after user has completed initial password setup.
+    // Send to support approval only after user has verified email
+    // and completed initial password setup.
     where: {
       approvalStatus: "pending",
       role: "user",
       emailVerifiedAt: { not: null },
+      emailVerificationToken: null,
       passwordResetToken: null,
+      passwordResetExpiresAt: null,
     },
     orderBy: { createdAt: "desc" },
   });
@@ -147,7 +152,19 @@ supportRouter.get("/customers", authenticate, requireRole("support", "admin", "a
   }
 
   const users = await prisma.user.findMany({
-    where: { role: "user" },
+    where: {
+      role: "user",
+      OR: [
+        { approvalStatus: "approved" },
+        {
+          approvalStatus: "pending",
+          emailVerifiedAt: { not: null },
+          emailVerificationToken: null,
+          passwordResetToken: null,
+          passwordResetExpiresAt: null,
+        },
+      ],
+    },
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -192,6 +209,7 @@ supportRouter.get("/customers", authenticate, requireRole("support", "admin", "a
 
 supportRouter.patch("/pending-users/:id", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {
   const { approvalStatus } = req.body ?? {};
+  const context = getRequestContext(req);
   if (!approvalStatus || !["approved", "rejected"].includes(approvalStatus)) {
     res.status(400).json({ error: "approvalStatus must be approved or rejected" });
     return;
@@ -199,10 +217,36 @@ supportRouter.patch("/pending-users/:id", authenticate, requireRole("support", "
   const hasExpiry = await hasUserExpiresAtColumn();
   const target = await prisma.user.findUnique({
     where: { id: req.params.id },
-    select: { id: true, email: true, name: true, role: true, approvalStatus: true, ...(hasExpiry ? { expiresAt: true } : {}) },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: true,
+      approvalStatus: true,
+      emailVerifiedAt: true,
+      emailVerificationToken: true,
+      passwordResetToken: true,
+      passwordResetExpiresAt: true,
+      ...(hasExpiry ? { expiresAt: true } : {}),
+    },
   });
   if (!target) {
     res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const isApprovalReady =
+    target.role === "user" &&
+    target.approvalStatus === "pending" &&
+    !!target.emailVerifiedAt &&
+    target.emailVerificationToken === null &&
+    target.passwordResetToken === null &&
+    target.passwordResetExpiresAt === null;
+
+  if (approvalStatus === "approved" && !isApprovalReady) {
+    res.status(400).json({
+      error: "User is not ready for approval yet (must verify email and complete initial password setup first)",
+    });
     return;
   }
 
@@ -235,6 +279,7 @@ supportRouter.patch("/pending-users/:id", authenticate, requireRole("support", "
       name: updated.name,
       approvalStatus: updated.approvalStatus,
       expiresAt: hasExpiry && updated.expiresAt ? updated.expiresAt.toISOString() : null,
+      ...context,
     },
   });
   res.json(updated);
@@ -245,6 +290,7 @@ supportRouter.post(
   authenticate,
   requireRole("support", "admin", "admin_metrics"),
   async (req, res) => {
+    const context = getRequestContext(req);
     const hasExpiry = await hasUserExpiresAtColumn();
     if (!hasExpiry) {
       res.status(500).json({ error: "expiresAt column not available yet - run prisma migrate deploy" });
@@ -287,10 +333,62 @@ supportRouter.post(
         extendDays,
         from: user.expiresAt ? user.expiresAt.toISOString() : null,
         to: updated.expiresAt ? updated.expiresAt.toISOString() : null,
+        ...context,
       },
     });
 
     res.json(updated);
+  },
+);
+
+supportRouter.delete(
+  "/users/:id",
+  authenticate,
+  requireRole("support", "admin", "admin_metrics"),
+  async (req, res) => {
+    const context = getRequestContext(req);
+    const userId = String(req.params.id || "").trim();
+    if (!userId) {
+      res.status(400).json({ error: "User ID is required" });
+      return;
+    }
+    if (String(req.user?.id || "") === userId) {
+      res.status(400).json({ error: "Cannot delete your own account" });
+      return;
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, role: true, approvalStatus: true },
+    });
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (target.role !== "user") {
+      res.status(403).json({ error: "Only role=user can be deleted from support panel" });
+      return;
+    }
+    const actorRole = String(req.user?.role || "");
+    const isAdmin = actorRole === "admin";
+    if (!isAdmin && target.approvalStatus !== "pending") {
+      res.status(403).json({ error: "Support can delete only pending applicants" });
+      return;
+    }
+
+    await logEvent({
+      event: "support.user.deleted",
+      actorId: req.user.id,
+      targetType: "user",
+      targetId: target.id,
+      meta: {
+        email: target.email,
+        name: target.name,
+        ...context,
+      },
+    });
+    await prisma.user.delete({ where: { id: userId } });
+    res.json({ ok: true });
   },
 );
 
@@ -311,6 +409,11 @@ supportRouter.get("/logs", authenticate, requireRole("support", "admin", "admin_
   const q = req.query?.q ? String(req.query.q).trim() : "";
   const fromStr = req.query?.from ? String(req.query.from).trim() : "";
   const toStr = req.query?.to ? String(req.query.to).trim() : "";
+  const category = req.query?.category ? String(req.query.category).trim().toLowerCase() : "";
+  const maskParam = String(req.query?.mask ?? "true").toLowerCase();
+  const requestedUnmasked = ["0", "false", "no"].includes(maskParam);
+  const canViewRawLogs = ["admin", "admin_metrics"].includes(String(req.user?.role || ""));
+  const shouldMask = requestedUnmasked ? !canViewRawLogs : true;
 
   const and = [];
 
@@ -328,6 +431,9 @@ supportRouter.get("/logs", authenticate, requireRole("support", "admin", "admin_
         { user: { name: { contains: q, mode: "insensitive" } } },
       ],
     });
+  }
+  if (category && ["security", "application"].includes(category)) {
+    and.push({ meta: { path: ["category"], equals: category } });
   }
 
   const fromP = parseYmd(fromStr);
@@ -353,7 +459,7 @@ supportRouter.get("/logs", authenticate, requireRole("support", "admin", "admin_
       user: { select: { id: true, email: true, name: true, role: true } },
     },
   });
-  res.json(logs);
+  res.json(shouldMask ? logs.map(maskLogForExport) : logs);
 });
 
 supportRouter.get("/report", authenticate, requireRole("support", "admin", "admin_metrics"), async (_req, res) => {

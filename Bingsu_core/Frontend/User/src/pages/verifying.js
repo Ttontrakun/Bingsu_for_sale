@@ -19,6 +19,12 @@ function Verifying() {
     const text = String(message || '').toLowerCase();
     return text.includes('invalid or expired token');
   };
+  const toFriendlyError = (message) => {
+    if (isInvalidOrExpiredTokenError(message)) {
+      return 'ลิงก์ยืนยันไม่ถูกต้องหรือหมดอายุ กรุณากดส่งอีเมลยืนยันอีกครั้ง';
+    }
+    return message;
+  };
 
   const handleVerifyEmail = useCallback(async (token, userEmail) => {
     if (!token) {
@@ -38,7 +44,7 @@ function Verifying() {
       });
     } catch (error) {
       console.error('Error verifying email:', error);
-      const errorMessage = getErrorMessage(error) || 'เกิดข้อผิดพลาดในการยืนยันอีเมล';
+      const errorMessage = toFriendlyError(getErrorMessage(error) || 'เกิดข้อผิดพลาดในการยืนยันอีเมล');
       const fallbackEmail = userEmail || email;
 
       // Handle stale email links more gracefully:
@@ -56,11 +62,11 @@ function Verifying() {
             return;
           }
 
-          setError('ลิงก์ยืนยันหมดอายุแล้ว กรุณาตรวจสอบอีเมลล่าสุดหรือสมัครใหม่อีกครั้ง');
+          setSuccess('ลิงก์เดิมหมดอายุแล้ว ระบบได้ส่งลิงก์ยืนยันฉบับใหม่ไปยังอีเมลของคุณแล้ว');
           return;
         } catch (resendError) {
           console.error('Error auto-resending verification:', resendError);
-          const resendErrorMessage = getErrorMessage(resendError) || 'ลิงก์ยืนยันหมดอายุ กรุณาส่งอีเมลยืนยันอีกครั้ง';
+          const resendErrorMessage = toFriendlyError(getErrorMessage(resendError) || 'ลิงก์ยืนยันหมดอายุ กรุณาส่งอีเมลยืนยันอีกครั้ง');
           setError(resendErrorMessage);
           return;
         }
@@ -88,17 +94,19 @@ function Verifying() {
     if (tokenFromParams) {
       if (verifiedTokenRef.current === tokenFromParams) return;
       verifiedTokenRef.current = tokenFromParams;
+      // Remove sensitive token from the address bar as soon as we capture it.
+      window.history.replaceState(window.history.state, '', window.location.pathname);
       handleVerifyEmail(tokenFromParams, emailFromState || emailFromParams);
     } else if (tokenFromState) {
       // For development: show verification link if token is in state
-      const userEmail = emailFromState || emailFromParams;
-      const verificationLink = `${window.location.origin}/verifying?token=${tokenFromState}&email=${encodeURIComponent(userEmail || '')}`;
+      const verificationLink = `${window.location.origin}/verifying?token=${tokenFromState}`;
       setSuccess(`Development: คลิกลิงก์นี้เพื่อยืนยันอีเมล - ${verificationLink}`);
     }
   }, [location, searchParams, handleVerifyEmail]);
 
   const handleResendVerification = async () => {
-    if (!email) {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
       setError('ไม่พบอีเมล กรุณาลองใหม่อีกครั้ง');
       return;
     }
@@ -108,18 +116,19 @@ function Verifying() {
     setSuccess('');
 
     try {
-      const response = await authAPI.resendVerification(email);
+      const response = await authAPI.resendVerification(normalizedEmail);
+      setEmail(normalizedEmail);
       
       // For development/testing: show verification link if token is returned
       if (response.verificationToken) {
-        const verificationLink = `${window.location.origin}/verifying?token=${response.verificationToken}&email=${encodeURIComponent(email)}`;
+        const verificationLink = `${window.location.origin}/verifying?token=${response.verificationToken}`;
         setSuccess(`Development: คลิกลิงก์นี้เพื่อยืนยันอีเมล - ${verificationLink}`);
       } else {
-        setSuccess('ส่งอีเมลยืนยันเรียบร้อยแล้ว กรุณาตรวจสอบอีเมลของคุณ');
+        setSuccess(`ส่งอีเมลยืนยันเรียบร้อยแล้ว กรุณาตรวจสอบอีเมลของคุณ (${normalizedEmail})`);
     }
     } catch (error) {
       console.error('Error resending verification:', error);
-      const errorMessage = getErrorMessage(error) || 'เกิดข้อผิดพลาดในการส่งอีเมล';
+      const errorMessage = toFriendlyError(getErrorMessage(error) || 'เกิดข้อผิดพลาดในการส่งอีเมล');
       setError(errorMessage);
     } finally {
       setIsResending(false);
@@ -137,10 +146,13 @@ function Verifying() {
 
       {/* กลางจอ */}
       <div className="relative w-full max-w-[380px] m-4">
-        {/* BingSu Logo at center top above card */}
+        {/* Enterprise AI Chatbot Logo at center top above card */}
         <div className="flex items-center justify-center gap-3 mb-4">
-          <img src={bingsuLogo} alt="BingSu Logo" className="h-12 w-12 object-cover rounded-full" />
-          <h2 className="text-2xl font-bold text-zinc-800">BingSu</h2>
+          <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="h-12 w-12 object-cover rounded-full" />
+          <h2 className="text-xl font-bold text-zinc-800 leading-tight">
+            <span className="block">Enterprise AI</span>
+            <span className="block">Chatbot</span>
+          </h2>
         </div>
         {/* Card */}
         <div className="relative w-full rounded-[2rem] bg-white p-12 shadow-[0_10px_30px_rgba(0,0,0,0.08)] min-h-[400px] flex flex-col justify-center"
@@ -178,13 +190,21 @@ function Verifying() {
               </div>
             )}
 
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="ใส่อีเมลเพื่อส่งลิงก์ยืนยันใหม่"
+              className="w-full mb-4 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-300"
+            />
+
             {/* Resend Verification Email Button */}
             <button
               type="button"
               onClick={handleResendVerification}
-              disabled={isResending || !email}
+              disabled={isResending}
               className={`w-40 h-9 mb-3 rounded-full bg-yellow-400 text-xs font-semibold text-black shadow-md cursor-pointer transition-all duration-200 hover:bg-yellow-500 hover:shadow-lg active:scale-95 focus:outline-none focus:ring-2 focus:ring-yellow-300 ${
-                isResending || !email ? 'opacity-50 cursor-not-allowed' : ''
+                isResending ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
               {isResending ? 'กำลังส่ง...' : 'ส่งอีเมลยืนยัน'}

@@ -167,7 +167,7 @@ model User {
   messageFeedbacks MessageFeedback[]
   integrations  IntegrationSetting[]
 
-  // Optional: legacy Bingsu backend/website compatibility (separate credential table)
+  // Optional: legacy Enterprise AI Chatbot backend/website compatibility (separate credential table)
   credential Credential?
 
   // Optional: multi-user chat rooms (backend/website-style)

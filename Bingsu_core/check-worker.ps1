@@ -1,4 +1,4 @@
-# ตรวจสอบ Docker และบริการ (Worker, Legacy, Redis, Web) สำหรับ Bingsu Plus
+# ตรวจสอบ Docker และบริการ (Worker, Legacy, Redis, Web) สำหรับ Enterprise AI Chatbot Plus
 # รันจากโฟลเดอร์ bingsu_plus: .\check-worker.ps1
 # หรือ double-click ไฟล์ check-worker.bat
 
@@ -7,7 +7,7 @@ $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $here
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  ตรวจสอบ Bingsu Plus (Docker)" -ForegroundColor Cyan
+Write-Host "  ตรวจสอบ Enterprise AI Chatbot Plus (Docker)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 

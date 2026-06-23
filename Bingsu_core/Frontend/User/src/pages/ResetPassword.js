@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { HiLockClosed, HiOutlineEye, HiOutlineEyeOff, HiCheck, HiX } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/NT_Logo.png';
@@ -7,7 +7,9 @@ import { authAPI, getErrorMessage } from '../services/api';
 
 function ResetPassword() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
+  const [resetToken, setResetToken] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -17,9 +19,6 @@ function ResetPassword() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   
-  // Get token from URL
-  const token = searchParams.get('token');
-
   // Check password requirements
   const hasUpperCase = /[A-Z]/.test(password);
   const hasLowerCase = /[a-z]/.test(password);
@@ -37,12 +36,25 @@ function ResetPassword() {
     { id: 'number', label: 'ตัวเลข (0-9)', isValid: hasNumber },
   ];
 
-  // Check if token is present
+  // Capture token once and remove it from URL to reduce leakage risk.
   useEffect(() => {
-    if (!token) {
+    const tokenFromState = location.state?.token;
+    if (tokenFromState) {
+      setResetToken(tokenFromState);
+      setError('');
+      return;
+    }
+    const tokenFromUrl = searchParams.get('token');
+    if (tokenFromUrl) {
+      setResetToken(tokenFromUrl);
+      setError('');
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+      return;
+    }
+    if (!resetToken) {
       setError('Invalid or missing reset token. Please request a new password reset.');
     }
-  }, [token]);
+  }, [location.state, searchParams, resetToken]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -59,7 +71,7 @@ function ResetPassword() {
       return;
     }
 
-    if (!token) {
+    if (!resetToken) {
       setError('Invalid or missing reset token');
       return;
     }
@@ -67,7 +79,7 @@ function ResetPassword() {
     setIsLoading(true);
 
     try {
-      await authAPI.resetPassword(token, password);
+      await authAPI.resetPassword(resetToken, password);
       setSuccess(true);
       
       // Redirect to login after 2 seconds
@@ -94,10 +106,13 @@ function ResetPassword() {
 
       {/* กลางจอ */}
       <div className="relative w-full max-w-[420px] m-4">
-        {/* BingSu Logo at center top above card */}
+        {/* Enterprise AI Chatbot Logo at center top above card */}
         <div className="flex items-center justify-center gap-3 mb-4">
-          <img src={bingsuLogo} alt="BingSu Logo" className="h-12 w-12 object-cover rounded-full" />
-          <h2 className="text-2xl font-bold text-zinc-800">BingSu</h2>
+          <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="h-12 w-12 object-cover rounded-full" />
+          <h2 className="text-xl font-bold text-zinc-800 leading-tight">
+            <span className="block">Enterprise AI</span>
+            <span className="block">Chatbot</span>
+          </h2>
         </div>
 
         {/* Card */}
@@ -232,7 +247,7 @@ function ResetPassword() {
               <div className="flex justify-center">
                 <button
                   type="submit"
-                  disabled={isLoading || !token || success}
+                  disabled={isLoading || !resetToken || success}
                   className="w-24 h-9 rounded-full bg-yellow-400 text-sm font-semibold text-black shadow-md cursor-pointer transition-all duration-200 hover:bg-yellow-500 hover:shadow-lg active:scale-95 focus:outline-none focus:ring-2 focus:ring-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'กำลังส่ง...' : success ? 'สำเร็จ' : 'ส่ง'}

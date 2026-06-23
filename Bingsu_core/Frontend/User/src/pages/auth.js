@@ -70,7 +70,7 @@ function Auth() {
       
       // Special handling for rate limiting (429) - show user-friendly message
       if (error.response?.status === 429) {
-        errorMessage = error.response?.data?.detail || 
+        errorMessage = getErrorMessage(error) || 
           'คุณพยายามเข้าสู่ระบบบ่อยเกินไป กรุณารอสักครู่แล้วลองอีกครั้ง';
       }
       
@@ -94,13 +94,27 @@ function Auth() {
     setSignUpLoading(true);
     try {
       const response = await authAPI.register(signUpEmail, signUpName, signUpAcceptedTerms);
-      // Registration successful - redirect to verifying page
-      // User needs to click "Send Verification Email" button or use link from email
-      navigate('/verifying', { 
-        state: { 
+      if (response?.onboardingState === 'approval_pending') {
+        navigate('/approval');
+        return;
+      }
+
+      if (response?.passwordSetupRequired && response?.passwordSetupToken) {
+        navigate(`/create-password?token=${response.passwordSetupToken}`, {
+          state: {
+            email: signUpEmail,
+            verified: true,
+          },
+        });
+        return;
+      }
+
+      // Registration/recovery successful - redirect to verifying page
+      navigate('/verifying', {
+        state: {
           email: signUpEmail,
           token: response.verificationToken // Store token for development/testing
-        } 
+        }
       });
     } catch (error) {
       // Handle error
@@ -154,9 +168,9 @@ function Auth() {
         <div className="flex flex-col items-center pt-8 transition-all duration-500 ease-in-out overflow-hidden">
           {/* Logo */}
           <div className="mb-3 h-[72px] w-[72px] flex items-center justify-center rounded-full bg-yellow-100 transition-all duration-500 ease-in-out hover:scale-110 hover:rotate-6 cursor-default overflow-hidden">
-            <img src={bingsuLogo} alt="BingSu Logo" className="w-full h-full object-cover rounded-full" />
+            <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="w-full h-full object-cover rounded-full" />
           </div>
-          <h2 className="mb-5 text-2xl font-bold text-zinc-800 transition-all duration-500 ease-in-out drop-shadow-lg" style={{ textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)' }}>BingSu</h2>
+          <h2 className="mb-5 text-2xl font-bold text-zinc-800 transition-all duration-500 ease-in-out drop-shadow-lg" style={{ textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)' }}>Enterprise AI Chatbot</h2>
 
           <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: '355px' }}>
             <div 
@@ -310,7 +324,7 @@ function Auth() {
                     className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-yellow-500 focus:ring-yellow-400"
                   />
                   <span className="text-xs text-zinc-700 leading-relaxed">
-                    ฉันยินยอมรับการสื่อสารจาก BingSu และยอมรับนโยบายการใช้งานข้อมูลของระบบนี้
+                    ฉันยอมรับนโยบายความเป็นส่วนตัว (Privacy Policy) และเงื่อนไขการใช้งานของระบบ
                     {' '}
                     (<a href="/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline font-medium">Privacy Policy</a>)
                   </span>

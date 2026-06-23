@@ -1,4 +1,4 @@
-# Bingsu Nginx Configuration
+# Enterprise AI Chatbot Nginx Configuration
 
 Nginx reverse proxy configuration สำหรับ development และ production
 

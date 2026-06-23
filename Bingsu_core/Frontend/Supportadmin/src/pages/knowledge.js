@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { HiSearch, HiTrash, HiPlus } from 'react-icons/hi';
+import { HiSearch, HiTrash, HiPlus, HiPencil } from 'react-icons/hi';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { api, mapDocumentToDisplay } from '../services/api';
 
@@ -9,9 +9,14 @@ function Knowledge({ userRole = 'support' }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const itemsPerPage = 12;
-  const canDeleteKnowledge = userRole === 'support' || userRole === 'admin';
+  const canDeleteKnowledge = userRole === 'admin';
+  const canEditKnowledge = userRole === 'admin';
   const [knowledgeList, setKnowledgeList] = useState([]);
   const [loadError, setLoadError] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
   const GUIDE_NAME = 'คู่มือการใช้งาน';
 
   const pinGuideFirst = useCallback((list) => {
@@ -76,6 +81,39 @@ function Knowledge({ userRole = 'support' }) {
       setLoadError(err?.message || 'ลบ Knowledge ไม่สำเร็จ');
     }
     setConfirmDeleteId(null);
+  };
+
+  const openEditModal = (knowledge) => {
+    setEditTarget(knowledge || null);
+    setEditName(knowledge?.name || '');
+    setEditError('');
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editTarget?.id || !canEditKnowledge) return;
+    const nextName = String(editName || '').trim();
+    if (!nextName) {
+      setEditError('กรุณากรอกชื่อ Knowledge');
+      return;
+    }
+    setEditSaving(true);
+    setEditError('');
+    try {
+      await api.updateDocument(editTarget.id, { displayName: nextName });
+      setKnowledgeList((prev) =>
+        prev.map((knowledge) =>
+          knowledge.id === editTarget.id
+            ? { ...knowledge, name: nextName, description: nextName }
+            : knowledge,
+        ),
+      );
+      setEditTarget(null);
+      setEditName('');
+    } catch (err) {
+      setEditError(err?.message || 'แก้ชื่อ Knowledge ไม่สำเร็จ');
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   return (
@@ -151,6 +189,16 @@ function Knowledge({ userRole = 'support' }) {
                 <div className='flex justify-between items-center mt-4 gap-2 min-w-0'>
                   <p title={knowledge.username} className='text-xs text-gray-500 truncate flex-shrink min-w-0'>By {knowledge.username}</p>
                   <div className='flex items-center gap-2 flex-shrink-0'>
+                    {canEditKnowledge && (
+                      <button
+                        type='button'
+                        onClick={() => openEditModal(knowledge)}
+                        className='inline-flex items-center gap-2 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg hover:bg-amber-50 transition-colors text-sm font-medium'
+                      >
+                        <HiPencil className='text-lg' />
+                        แก้ชื่อ
+                      </button>
+                    )}
                     <button
                       onClick={() =>
                         navigate(`/knowledge/${knowledge.id}/add-data`, {
@@ -266,6 +314,45 @@ function Knowledge({ userRole = 'support' }) {
                 className='px-4 py-2 rounded-lg bg-red-500 text-white hover:bg-red-600'
               >
                 ลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editTarget !== null && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
+          <div className='w-full max-w-md rounded-xl bg-white p-6 shadow-lg'>
+            <h3 className='text-lg font-semibold text-gray-800 mb-2'>แก้ชื่อ Knowledge</h3>
+            <p className='text-sm text-gray-600 mb-4'>ชื่อใหม่นี้จะเป็นชื่อหลักของ Knowledge</p>
+            <input
+              type='text'
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              className='w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400'
+              placeholder='กรอกชื่อ Knowledge'
+              maxLength={120}
+              autoFocus
+            />
+            {editError && <p className='mt-2 text-sm text-red-600'>{editError}</p>}
+            <div className='flex justify-end gap-2 mt-5'>
+              <button
+                type='button'
+                onClick={() => {
+                  setEditTarget(null);
+                  setEditError('');
+                }}
+                className='px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50'
+              >
+                ยกเลิก
+              </button>
+              <button
+                type='button'
+                onClick={handleSaveEdit}
+                disabled={editSaving}
+                className='px-4 py-2 rounded-lg bg-yellow-400 text-gray-800 hover:bg-yellow-500 disabled:opacity-60'
+              >
+                {editSaving ? 'กำลังบันทึก...' : 'บันทึก'}
               </button>
             </div>
           </div>

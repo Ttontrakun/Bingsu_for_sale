@@ -19,7 +19,7 @@ load_dotenv(".env.local")
 load_dotenv()
 
 app = FastAPI(
-    title="ask_AA API (Bingsu Plus)",
+    title="ask_AA API (Enterprise AI Chatbot Plus)",
     version="0.1.0",
     description="API: ระบบ, OCR, ล็อกอิน/สมาชิก, บอท, Knowledge (เอกสาร), แชท, อัปโหลด, โควต้า, สถิติ, Integrations (Admin/Support ยังเรียกได้ที่ /api/admin/*, /api/support/* แต่ไม่แสดงใน docs)",
     openapi_tags=[

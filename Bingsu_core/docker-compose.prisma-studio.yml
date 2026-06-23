@@ -1,0 +1,30 @@
+services:
+  prisma-studio:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile.legacy
+    env_file:
+      - ./Backend/.env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
+    command: >
+      sh -c "npx prisma studio --schema prisma/schema.prisma --hostname 0.0.0.0 --port 5555"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "5555"
+    restart: unless-stopped
+
+  prisma-studio-proxy:
+    image: caddy:2-alpine
+    depends_on:
+      - prisma-studio
+    environment:
+      PRISMA_STUDIO_BASIC_AUTH_USER: ${PRISMA_STUDIO_BASIC_AUTH_USER:-admin}
+      PRISMA_STUDIO_BASIC_AUTH_HASH: ${PRISMA_STUDIO_BASIC_AUTH_HASH:-}
+    volumes:
+      - ./ops/prisma-studio/Caddyfile:/etc/caddy/Caddyfile:ro
+    ports:
+      - "127.0.0.1:5556:8080"
+    restart: unless-stopped

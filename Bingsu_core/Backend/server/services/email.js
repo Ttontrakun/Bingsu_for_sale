@@ -1,5 +1,9 @@
 import nodemailer from "nodemailer";
 import {
+  emailAlertWebhookToken,
+  emailAlertWebhookUrl,
+  emailSendRetryAttempts,
+  emailSendRetryBaseDelayMs,
   frontendUrl,
   isProduction,
   smtpFrom,
@@ -16,7 +20,7 @@ const isEmailConfigured = () =>
   Boolean(smtpServer && smtpPort && smtpUser && smtpPassword && smtpFrom);
 
 const appBaseUrl = () => frontendUrl || "http://localhost:8083";
-const supportLabel = "ศูนย์ดูแลระบบ BingSu (โทรคมนาคมแห่งชาติ (จำกัด))";
+const supportLabel = "ศูนย์ดูแลระบบ Enterprise AI Chatbot (โทรคมนาคมแห่งชาติ (จำกัด))";
 const buildEmailRef = (prefix) => {
   const ts = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
@@ -36,6 +40,36 @@ const getTransporter = () => {
   return transporterInstance;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const sendEmailFailureAlert = async ({ to, subject, error, attemptCount }) => {
+  if (!emailAlertWebhookUrl) return;
+  const payload = {
+    event: "email.send.failed",
+    severity: "high",
+    at: new Date().toISOString(),
+    to,
+    subject,
+    attemptCount,
+    error: String(error?.message || error || "unknown"),
+    source: "backend.email",
+  };
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (emailAlertWebhookToken) headers.Authorization = `Bearer ${emailAlertWebhookToken}`;
+    const resp = await fetch(emailAlertWebhookUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      console.warn(`[email] alert webhook failed with status ${resp.status}`);
+    }
+  } catch (alertErr) {
+    console.warn("[email] alert webhook error:", alertErr?.message || alertErr);
+  }
+};
+
 const sendMail = async ({ to, subject, text, html }) => {
   if (!isEmailConfigured()) {
     const msg = "SMTP is not configured";
@@ -44,21 +78,40 @@ const sendMail = async ({ to, subject, text, html }) => {
     return { skipped: true };
   }
   const transporter = getTransporter();
-  const info = await transporter.sendMail({
-    from: smtpFrom,
+  let lastError = null;
+  for (let attempt = 1; attempt <= emailSendRetryAttempts; attempt += 1) {
+    try {
+      const info = await transporter.sendMail({
+        from: smtpFrom,
+        to,
+        subject,
+        text,
+        html,
+      });
+      return { messageId: info?.messageId || null, attempts: attempt };
+    } catch (err) {
+      lastError = err;
+      if (attempt < emailSendRetryAttempts) {
+        const backoffMs = emailSendRetryBaseDelayMs * attempt;
+        console.warn(`[email] send failed (attempt ${attempt}/${emailSendRetryAttempts}), retrying in ${backoffMs}ms:`, err?.message || err);
+        await sleep(backoffMs);
+      }
+    }
+  }
+  await sendEmailFailureAlert({
     to,
     subject,
-    text,
-    html,
+    error: lastError,
+    attemptCount: emailSendRetryAttempts,
   });
-  return { messageId: info?.messageId || null };
+  throw lastError || new Error("Email send failed");
 };
 
 export const sendVerificationEmail = async ({ email, name, token }) => {
   if (!email || !token) return { skipped: true };
-  const verifyLink = `${appBaseUrl()}/verifying?token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+  const verifyLink = `${appBaseUrl()}/verifying?token=${encodeURIComponent(token)}`;
   const refCode = buildEmailRef("REG");
-  const subject = "[BingSu] กรุณายืนยันอีเมลเพื่อเปิดใช้งานบัญชี";
+  const subject = "[Enterprise AI Chatbot] กรุณายืนยันอีเมลเพื่อเปิดใช้งานบัญชี";
   const text = [
     `เรียน คุณ${name || "ผู้ใช้งาน"}`,
     "",
@@ -66,7 +119,7 @@ export const sendVerificationEmail = async ({ email, name, token }) => {
     supportLabel,
     `เลขอ้างอิง: ${refCode}`,
     "",
-    "ระบบได้รับคำขอสมัครใช้งานบัญชี BingSu ของท่านแล้ว",
+    "ระบบได้รับคำขอสมัครใช้งานบัญชี Enterprise AI Chatbot ของท่านแล้ว",
     "กรุณาคลิกลิงก์ด้านล่างเพื่อยืนยันอีเมลและดำเนินการตั้งรหัสผ่าน:",
     verifyLink,
     "",
@@ -87,7 +140,7 @@ export const sendVerificationEmail = async ({ email, name, token }) => {
         <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${supportLabel}</p>
         <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${refCode}</strong></p>
         <p style="margin:0 0 12px">เรียน คุณ${name || "ผู้ใช้งาน"}</p>
-        <p style="margin:0 0 12px">ระบบได้รับคำขอสมัครใช้งานบัญชี <strong>BingSu</strong> ของท่านแล้ว</p>
+        <p style="margin:0 0 12px">ระบบได้รับคำขอสมัครใช้งานบัญชี <strong>Enterprise AI Chatbot</strong> ของท่านแล้ว</p>
         <p style="margin:0 0 16px">กรุณาคลิกปุ่มด้านล่างเพื่อยืนยันอีเมลและดำเนินการตั้งรหัสผ่าน</p>
         <p style="margin:0 0 18px">
           <a href="${verifyLink}" style="display:inline-block;background:#f59e0b;color:#111;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:8px">ยืนยันอีเมล</a>
@@ -107,7 +160,7 @@ export const sendPasswordResetEmail = async ({ email, name, token }) => {
   if (!email || !token) return { skipped: true };
   const resetLink = `${appBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`;
   const refCode = buildEmailRef("PWD");
-  const subject = "[BingSu] คำขอตั้งรหัสผ่านใหม่สำหรับบัญชีของท่าน";
+  const subject = "[Enterprise AI Chatbot] คำขอตั้งรหัสผ่านใหม่สำหรับบัญชีของท่าน";
   const text = [
     `เรียน คุณ${name || "ผู้ใช้งาน"}`,
     "",
@@ -115,7 +168,7 @@ export const sendPasswordResetEmail = async ({ email, name, token }) => {
     supportLabel,
     `เลขอ้างอิง: ${refCode}`,
     "",
-    "ระบบได้รับคำขอตั้งรหัสผ่านใหม่สำหรับบัญชี BingSu ของท่าน",
+    "ระบบได้รับคำขอตั้งรหัสผ่านใหม่สำหรับบัญชี Enterprise AI Chatbot ของท่าน",
     "กรุณาคลิกลิงก์ด้านล่างเพื่อดำเนินการ:",
     resetLink,
     "",
@@ -136,7 +189,7 @@ export const sendPasswordResetEmail = async ({ email, name, token }) => {
         <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${supportLabel}</p>
         <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${refCode}</strong></p>
         <p style="margin:0 0 12px">เรียน คุณ${name || "ผู้ใช้งาน"}</p>
-        <p style="margin:0 0 12px">ระบบได้รับคำขอตั้งรหัสผ่านใหม่สำหรับบัญชี <strong>BingSu</strong> ของท่าน</p>
+        <p style="margin:0 0 12px">ระบบได้รับคำขอตั้งรหัสผ่านใหม่สำหรับบัญชี <strong>Enterprise AI Chatbot</strong> ของท่าน</p>
         <p style="margin:0 0 16px">กรุณาคลิกปุ่มด้านล่างเพื่อดำเนินการ</p>
         <p style="margin:0 0 18px">
           <a href="${resetLink}" style="display:inline-block;background:#f59e0b;color:#111;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:8px">ตั้งรหัสผ่านใหม่</a>

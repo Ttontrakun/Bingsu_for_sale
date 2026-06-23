@@ -1,4 +1,4 @@
-# Bingsu OCR Service
+# Enterprise AI Chatbot OCR Service
 
 OCR (Optical Character Recognition) service สำหรับดึงข้อความจากไฟล์ PDF และรูปภาพ
 

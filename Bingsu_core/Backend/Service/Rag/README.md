@@ -1,4 +1,4 @@
-# Bingsu RAG Service
+# Enterprise AI Chatbot RAG Service
 
 RAG (Retrieval-Augmented Generation) service สำหรับค้นหาและดึงข้อมูลจาก vector database
 

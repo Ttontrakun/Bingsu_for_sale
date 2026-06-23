@@ -13,6 +13,8 @@ const projectRoot = path.resolve(__dirname, "..");
 const uploadsDir = path.join(projectRoot, "uploads");
 const ocrTestHtmlPath = path.resolve(__dirname, "static", "ocr-test.html");
 import { startSessionCleanup } from "./services/sessions.js";
+import { startSystemLogRetentionJob } from "./services/logRetention.js";
+import { startChatRetentionJob } from "./services/chatRetention.js";
 import { hydrateUploadQueue, startUploadWorker, useRedisQueue } from "./services/uploadQueue.js";
 import { authRouter, signupHandler } from "./routes/auth.js";
 import { uploadsRouter } from "./routes/uploads.js";
@@ -32,6 +34,24 @@ import { internalRouter } from "./routes/internal.js";
 import { logEvent } from "./lib/logging.js";
 
 const app = express();
+const SENSITIVE_QUERY_KEYS = new Set(["token", "email", "password", "newPassword", "currentPassword"]);
+const sanitizeUrlForLogs = (rawUrl) => {
+  const input = String(rawUrl || "");
+  if (!input) return input;
+  try {
+    const parsed = new URL(input, "http://localhost");
+    let hasSensitiveData = false;
+    for (const key of SENSITIVE_QUERY_KEYS) {
+      if (parsed.searchParams.has(key)) {
+        parsed.searchParams.set(key, "[redacted]");
+        hasSensitiveData = true;
+      }
+    }
+    return hasSensitiveData ? `${parsed.pathname}${parsed.search}` : input;
+  } catch {
+    return input.replace(/([?&])(token|email|password|newPassword|currentPassword)=([^&]+)/gi, "$1$2=[redacted]");
+  }
+};
 
 app.use(cors(corsOptions));
 app.use(helmet({
@@ -81,8 +101,9 @@ app.use((req, res, next) => {
   const startTime = Date.now();
   res.on("finish", () => {
     const durationMs = Date.now() - startTime;
+    const sanitizedUrl = sanitizeUrlForLogs(req.originalUrl);
     console.log(
-      `[${new Date().toISOString()}] ${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs}ms (${req.requestId})`,
+      `[${new Date().toISOString()}] ${req.method} ${sanitizedUrl} ${res.statusCode} ${durationMs}ms (${req.requestId})`,
     );
 
     // เก็บ error log สำหรับตามรอยปัญหาผู้ใช้ (ไม่เก็บ IP)
@@ -97,7 +118,7 @@ app.use((req, res, next) => {
         targetId: req.requestId,
         meta: {
           method: req.method,
-          url: req.originalUrl,
+          url: sanitizedUrl,
           status,
           durationMs,
           requestId: req.requestId,
@@ -159,7 +180,7 @@ app.use((err, req, res, next) => {
     targetId: req.requestId,
     meta: {
       method: req?.method,
-      url: req?.originalUrl,
+      url: sanitizeUrlForLogs(req?.originalUrl),
       requestId: req?.requestId,
       status: 500,
       error: err?.message || String(err),
@@ -205,6 +226,8 @@ export const startServer = () => {
     hydrateUploadQueue();
   }
   startSessionCleanup();
+  startSystemLogRetentionJob();
+  startChatRetentionJob();
   const listenHost = process.env.LISTEN_HOST || "0.0.0.0";
   app.listen(port, listenHost, () => {
     console.log(`API server listening on http://${listenHost}:${port}`);

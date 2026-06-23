@@ -17,37 +17,37 @@ function Home() {
       id: 'form', 
       type: 'content',
       title: 'แบบฟอร์มบันทึก', 
-      description: 'รวมแบบฟอร์มการใช้งานที่เกี่ยวข้องกับระบบ BingSu', 
+      description: 'รวมแบบฟอร์มการใช้งานที่เกี่ยวข้องกับระบบ Enterprise AI Chatbot', 
       icon: HiLightBulb, 
       iconBg: 'bg-yellow-100', 
       iconColor: 'text-yellow-500',
       subcategories: [
         {
           id: 'form-trial',
-          title: 'แบบฟอร์มขอทดลองใช้งาน BingSu',
+          title: 'แบบฟอร์มขอทดลองใช้งาน Enterprise AI Chatbot',
           content: [
-            { type: 'pdf', file: '/BingSu Trial Request Form.pdf' }
+            { type: 'pdf', file: '/Enterprise AI Chatbot Trial Request Form.pdf' }
           ]
         },
         {
           id: 'form-issue',
-          title: 'แบบฟอร์มสำหรับแจ้งปัญหาการใช้งาน BingSu',
+          title: 'แบบฟอร์มสำหรับแจ้งปัญหาการใช้งาน Enterprise AI Chatbot',
           content: [
-            { type: 'pdf', file: '/BingSu Issue Report Form.pdf' }
+            { type: 'pdf', file: '/Enterprise AI Chatbot Issue Report Form.pdf' }
           ]
         },
         {
           id: 'form-poc',
-          title: 'แบบฟอร์มสำหรับขอข้อมูล POC ของ BingSu',
+          title: 'แบบฟอร์มสำหรับขอข้อมูล POC ของ Enterprise AI Chatbot',
           content: [
-            { type: 'pdf', file: '/BingSu POC Request.pdf' }
+            { type: 'pdf', file: '/Enterprise AI Chatbot POC Request.pdf' }
           ]
         },
         {
           id: 'form-tech-issue',
           title: 'แบบฟอร์มแจ้งปัญหาการใช้งานด้านเทคนิค',
           content: [
-            { type: 'pdf', file: '/BingSu Technical Issue Report Form.pdf' }
+            { type: 'pdf', file: '/Enterprise AI Chatbot Technical Issue Report Form.pdf' }
           ]
         }
       ]
@@ -65,7 +65,7 @@ function Home() {
           id: 'manual-getting-started',
           title: 'เริ่มต้นใช้งาน',
           content: [
-            { type: 'text', value: 'ขั้นตอนการเริ่มต้นใช้งานระบบ BingSu Support & Admin' },
+            { type: 'text', value: 'ขั้นตอนการเริ่มต้นใช้งานระบบ Enterprise AI Chatbot Support & Admin' },
             { type: 'list', items: ['สร้างบัญชีผู้ใช้งาน', 'ตั้งค่าโปรไฟล์', 'เชื่อมต่อบอท', 'จัดการฐานความรู้'] }
           ]
         },
@@ -135,7 +135,7 @@ function Home() {
           id: 'presentation-overview',
           title: 'ภาพรวมระบบ',
           content: [
-            { type: 'text', value: 'แนะนำระบบ BingSu Support & Admin' },
+            { type: 'text', value: 'แนะนำระบบ Enterprise AI Chatbot Support & Admin' },
             { type: 'list', items: ['ระบบ AI Chatbot อัจฉริยะ', 'รองรับหลายช่องทาง', 'จัดการง่าย ใช้งานสะดวก', 'รายงานและวิเคราะห์แบบ Real-time'] }
           ]
         },

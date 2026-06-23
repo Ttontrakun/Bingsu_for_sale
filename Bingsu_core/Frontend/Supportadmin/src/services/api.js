@@ -6,10 +6,28 @@ const SESSION_KEY = 'supportadmin_token';
 const USER_KEY = 'supportadmin_user';
 
 export const getStoredToken = () => localStorage.getItem(SESSION_KEY);
+const normalizeSessionRole = (role) => {
+  const raw = String(role ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.toLowerCase();
+  if (normalized === 'moderator' || normalized === 'staff' || normalized === 'csr') return 'support';
+  if (normalized === 'ผู้ดูแล') return 'support';
+  if (normalized === 'แอดมิน') return 'admin';
+  if (normalized === 'แอดมิน (รายงาน)') return 'admin_metrics';
+  if (['user', 'support', 'admin', 'admin_metrics', 'pending'].includes(normalized)) return normalized;
+  return normalized;
+};
 export const getStoredUser = () => {
   try {
     const raw = localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const rawRole = parsed.role ?? parsed.roleType ?? parsed.userRole ?? '';
+    return {
+      ...parsed,
+      role: normalizeSessionRole(rawRole),
+    };
   } catch {
     return null;
   }
@@ -143,6 +161,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ extendDays }),
     }),
+  deleteSupportUser: (userId) =>
+    request(`/api/support/users/${userId}`, {
+      method: 'DELETE',
+    }),
   getLogs: (opts = {}) => {
     const sp = new URLSearchParams();
     const take = opts.take ?? 300;
@@ -152,6 +174,9 @@ export const api = {
     if (opts.from && String(opts.from).trim()) sp.set('from', String(opts.from).trim());
     if (opts.to && String(opts.to).trim()) sp.set('to', String(opts.to).trim());
     if (opts.message && String(opts.message).trim()) sp.set('message', String(opts.message).trim());
+    if (opts.mask === false) sp.set('mask', 'false');
+    // Avoid stale log list when browser/proxy cache sits in front of API.
+    sp.set('_ts', String(Date.now()));
     return request(`/api/support/logs?${sp.toString()}`);
   },
   getAdminUsers: () => request('/api/admin/users'),
@@ -182,8 +207,18 @@ export const api = {
     request('/api/admin/guide', { method: 'PATCH', body: JSON.stringify({ text, mode }) }),
   deleteBot: (id) => request(`/api/admin/bots/${id}`, { method: 'DELETE' }),
   deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: 'DELETE' }),
+  updateDocument: (id, payload) =>
+    request(`/api/documents/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
   patchAdminUser: (id, payload) =>
     request(`/api/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(payload || {}) }),
+  resetAdminUserPassword: (id, newPassword) =>
+    request(`/api/admin/users/${id}/reset-password`, {
+      method: 'POST',
+      body: JSON.stringify({ newPassword }),
+    }),
   deleteAdminUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
 };
 
@@ -272,13 +307,17 @@ function formatThaiLastActivity(iso) {
   if (!iso) return 'ยังไม่มีข้อมูล';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleString('th-TH', {
+  const parts = new Intl.DateTimeFormat('th-TH', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  });
+    hour12: false,
+    timeZone: 'Asia/Bangkok',
+  }).formatToParts(d);
+  const get = (type) => parts.find((part) => part.type === type)?.value || '';
+  return `${get('day')} ${get('month')} ${get('year')} ${get('hour')}:${get('minute')}`.trim();
 }
 
 function formatShortThaiDateFromIso(iso) {
@@ -296,8 +335,11 @@ export function mapAdminUserToDisplay(backendUser) {
   const createdAt = backendUser.createdAt
     ? new Date(backendUser.createdAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
     : '-';
+  const isPendingReady =
+    backendUser?.approvalStatus === 'pending' &&
+    (typeof backendUser?.approvalReady === 'boolean' ? backendUser.approvalReady : true);
   const roleType =
-    backendUser.approvalStatus === 'pending' ? 'pending' : normalizeDashboardRole(backendUser.role);
+    isPendingReady ? 'pending' : normalizeDashboardRole(backendUser.role);
   const role =
     roleType === 'pending' ? 'รอดำเนินการ' : (ROLE_LABELS[roleType] || backendUser.role || roleType);
   return {
@@ -310,7 +352,7 @@ export function mapAdminUserToDisplay(backendUser) {
     lastActive: formatThaiLastActivity(backendUser.lastActivityAt),
     createdAt,
     expiresAt: backendUser.role === 'user' ? formatShortThaiDateFromIso(backendUser.expiresAt) : '-',
-    isEnabled: !!backendUser.isActive,
+    isEnabled: backendUser.isActive === true,
     avatar: (name.charAt(0) || '?').toUpperCase(),
     avatarColor: 'bg-gray-400',
     approvalStatus: backendUser.approvalStatus,

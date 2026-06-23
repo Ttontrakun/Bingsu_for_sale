@@ -1,7 +1,7 @@
 {
   "name": "bingsu-database-qdrant",
   "version": "1.0.0",
-  "description": "Bingsu Qdrant Database - Qdrant service",
+  "description": "Enterprise AI Chatbot Qdrant Database - Qdrant service",
   "type": "module",
   "main": "qdrant.js",
   "scripts": {

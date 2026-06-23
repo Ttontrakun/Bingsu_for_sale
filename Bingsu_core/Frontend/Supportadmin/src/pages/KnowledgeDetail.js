@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { HiOutlineArrowLeft, HiSearch } from 'react-icons/hi';
+import { HiOutlineArrowLeft, HiSearch, HiPencil } from 'react-icons/hi';
 import { api } from '../services/api';
 
 function formatFileSize(bytes) {
@@ -19,6 +19,10 @@ function KnowledgeDetail() {
   const [guideText, setGuideText] = useState('');
   const [guideSaving, setGuideSaving] = useState(false);
   const [guideError, setGuideError] = useState('');
+  const [nameEditOpen, setNameEditOpen] = useState(false);
+  const [nameEditValue, setNameEditValue] = useState('');
+  const [nameEditSaving, setNameEditSaving] = useState(false);
+  const [nameEditError, setNameEditError] = useState('');
 
   useEffect(() => {
     if (!id) return;
@@ -88,7 +92,21 @@ function KnowledgeDetail() {
       </button>
 
       <div className='mb-6 min-w-0'>
-        <h1 className='text-3xl font-semibold text-gray-900 mb-1 break-words'>{knowledgeName}</h1>
+        <div className='flex items-start justify-between gap-3'>
+          <h1 className='text-3xl font-semibold text-gray-900 mb-1 break-words'>{knowledgeName}</h1>
+          <button
+            type='button'
+            onClick={() => {
+              setNameEditOpen(true);
+              setNameEditValue(knowledgeName);
+              setNameEditError('');
+            }}
+            className='inline-flex items-center gap-2 px-3 py-2 border border-amber-200 text-amber-700 rounded-lg hover:bg-amber-50 text-sm font-medium'
+          >
+            <HiPencil className='text-base' />
+            แก้ชื่อ
+          </button>
+        </div>
         <p className='text-xs text-gray-500'>ชื่อนี้เป็นการกำหนดให้ AI และชื่อจึงข้อมูลจากเอกสารที่เก็บไว้เป็นไฟล์มาจากแหล่งอื่น</p>
       </div>
 
@@ -230,6 +248,60 @@ function KnowledgeDetail() {
           )}
         </div>
       </div>
+
+      {nameEditOpen && (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
+          <div className='w-full max-w-md rounded-xl bg-white p-6 shadow-lg'>
+            <h3 className='text-lg font-semibold text-gray-800 mb-2'>แก้ชื่อ Knowledge</h3>
+            <input
+              type='text'
+              value={nameEditValue}
+              onChange={(e) => setNameEditValue(e.target.value)}
+              className='w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400'
+              maxLength={120}
+              autoFocus
+            />
+            {nameEditError && <p className='mt-2 text-sm text-red-600'>{nameEditError}</p>}
+            <div className='flex justify-end gap-2 mt-5'>
+              <button
+                type='button'
+                onClick={() => {
+                  setNameEditOpen(false);
+                  setNameEditError('');
+                }}
+                className='px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50'
+              >
+                ยกเลิก
+              </button>
+              <button
+                type='button'
+                disabled={nameEditSaving}
+                onClick={async () => {
+                  const nextName = String(nameEditValue || '').trim();
+                  if (!nextName) {
+                    setNameEditError('กรุณากรอกชื่อ Knowledge');
+                    return;
+                  }
+                  setNameEditSaving(true);
+                  setNameEditError('');
+                  try {
+                    const updated = await api.updateDocument(id, { displayName: nextName });
+                    setDocument((prev) => ({ ...(prev || {}), ...(updated || {}), displayName: nextName }));
+                    setNameEditOpen(false);
+                  } catch (e) {
+                    setNameEditError(e?.message || 'แก้ชื่อไม่สำเร็จ');
+                  } finally {
+                    setNameEditSaving(false);
+                  }
+                }}
+                className='px-4 py-2 rounded-lg bg-yellow-400 text-gray-800 hover:bg-yellow-500 disabled:opacity-60'
+              >
+                {nameEditSaving ? 'กำลังบันทึก...' : 'บันทึก'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

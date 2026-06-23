@@ -29,6 +29,10 @@ export const gatewayBaseUrl = process.env.GATEWAY_BASE_URL || "https://aigateway
 export const openaiKey = process.env.OPENAI_API_KEY;
 export const openaiModel = process.env.OPENAI_MODEL || "ict-ollama/gpt-oss:120b";
 export const openaiFallbackModel = (process.env.OPENAI_FALLBACK_MODEL || "gpt-4o-mini").trim();
+/** Gateway สำรอง (อันดับ 2) — ค่าเริ่มต้นใช้ GATEWAY_BASE_URL เดียวกับ primary */
+export const openaiFallbackBaseUrl = (process.env.OPENAI_FALLBACK_BASE_URL || "").trim().replace(/\/+$/, "") || gatewayBaseUrl;
+/** API key สำรอง — ค่าเริ่มต้นใช้ OPENAI_API_KEY เดียวกับ primary */
+export const openaiFallbackKey = (process.env.OPENAI_FALLBACK_API_KEY || "").trim() || openaiKey;
 export const openaiDeploymentRetryAttempts = Math.max(0, Math.min(5, Number(process.env.OPENAI_DEPLOYMENT_RETRY_ATTEMPTS || 2)));
 export const openaiDeploymentRetryBaseDelayMs = Math.max(500, Number(process.env.OPENAI_DEPLOYMENT_RETRY_BASE_DELAY_MS || 2500));
 export const redisUrl = process.env.REDIS_URL;
@@ -139,6 +143,18 @@ export const smtpSecure = (process.env.SMTP_SECURE || "").toLowerCase() === "tru
 export const smtpFrom = (process.env.SMTP_FROM || process.env.SMTP_USER || "").trim();
 export const supportApprovalEmail = (process.env.SUPPORT_APPROVAL_EMAIL || "").trim();
 export const supportAdminUrl = (process.env.SUPPORT_ADMIN_URL || "").trim().replace(/\/+$/, "");
+export const emailSendRetryAttempts = Math.max(1, Math.min(5, Number(process.env.EMAIL_SEND_RETRY_ATTEMPTS || 3)));
+export const emailSendRetryBaseDelayMs = Math.max(250, Number(process.env.EMAIL_SEND_RETRY_BASE_DELAY_MS || 1500));
+export const emailAlertWebhookUrl = (process.env.EMAIL_ALERT_WEBHOOK_URL || "").trim();
+export const emailAlertWebhookToken = (process.env.EMAIL_ALERT_WEBHOOK_TOKEN || "").trim();
+export const strictPrivacyMode = (process.env.STRICT_PRIVACY_MODE || "false").toLowerCase() === "true";
+export const systemLogRetentionDays = Math.max(1, Number(process.env.SYSTEM_LOG_RETENTION_DAYS || 180));
+export const systemLogRetentionIntervalMs = Math.max(60_000, Number(process.env.SYSTEM_LOG_RETENTION_INTERVAL_MS || 3_600_000));
+export const messageStoreRedaction = (process.env.MESSAGE_STORE_REDACTION || "false").toLowerCase() === "true";
+export const fullUserMessageRedaction = (process.env.FULL_USER_MESSAGE_REDACTION || "false").toLowerCase() === "true";
+export const fullConversationTitleRedaction = (process.env.FULL_CONVERSATION_TITLE_REDACTION || "false").toLowerCase() === "true";
+export const chatRetentionDays = Math.max(0, Number(process.env.CHAT_RETENTION_DAYS || 0));
+export const chatRetentionIntervalMs = Math.max(60_000, Number(process.env.CHAT_RETENTION_INTERVAL_MS || 3_600_000));
 
 export const MAX_UPLOAD_PART_MB = Number(process.env.MAX_UPLOAD_PART_MB || 20);
 export const MAX_UPLOAD_PART_BYTES = Number.isFinite(MAX_UPLOAD_PART_MB)

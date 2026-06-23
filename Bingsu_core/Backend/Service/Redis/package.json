@@ -1,7 +1,7 @@
 {
   "name": "bingsu-redis",
   "version": "1.0.0",
-  "description": "Bingsu Redis Service - Redis client for queue and caching",
+  "description": "Enterprise AI Chatbot Redis Service - Redis client for queue and caching",
   "type": "module",
   "main": "redis.js",
   "scripts": {

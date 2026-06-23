@@ -57,10 +57,13 @@ function ForgotPassword() {
       </div>
 
       <div className="relative w-full max-w-[520px] m-4">
-        {/* BingSu Logo at center top above card */}
+        {/* Enterprise AI Chatbot Logo at center top above card */}
         <div className="flex items-center justify-center gap-3 mb-4">
-          <img src={bingsuLogo} alt="BingSu Logo" className="h-12 w-12 object-cover rounded-full" />
-          <h2 className="text-2xl font-bold text-zinc-800">BingSu</h2>
+          <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="h-12 w-12 object-cover rounded-full" />
+          <h2 className="text-xl font-bold text-zinc-800 leading-tight">
+            <span className="block">Enterprise AI</span>
+            <span className="block">Chatbot</span>
+          </h2>
         </div>
 
       <div className="relative w-full rounded-[2rem] bg-white p-10 shadow-[0_10px_30px_rgba(0,0,0,0.08)]"
@@ -145,14 +148,15 @@ function ForgotPassword() {
                 {resetToken && (
                   <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200">
                     <p className="text-xs text-green-700 mb-2 text-center">
-                      Development: คลิกลิงก์นี้เพื่อรีเซ็ตรหัสผ่าน
+                      Development: ดำเนินการรีเซ็ตรหัสผ่านต่อ
                     </p>
-                    <a
-                      href={`${window.location.origin}/reset-password?token=${resetToken}`}
-                      className="text-xs text-green-600 hover:text-green-700 underline break-all block text-center"
+                    <button
+                      type="button"
+                      onClick={() => navigate('/reset-password', { state: { token: resetToken } })}
+                      className="text-xs text-green-600 hover:text-green-700 underline block text-center w-full"
                     >
-                      {`${window.location.origin}/reset-password?token=${resetToken}`}
-                    </a>
+                      ไปที่หน้าตั้งรหัสผ่านใหม่
+                    </button>
                   </div>
                 )}
                 

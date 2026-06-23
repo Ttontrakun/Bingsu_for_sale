@@ -70,6 +70,7 @@ const isAllowedSourceFile = (file) => {
   if (!file || typeof file !== "object") return true;
   const name = file.name || file.fileName || "";
   const type = file.type || "";
+  if (isExcelFile({ fileName: name, contentType: type })) return true;
   const ext = normalizeExtension(name);
   const hasAllowedExt = ext ? allowedUploadExtensions.includes(ext) : false;
   const hasAllowedType = type ? allowedUploadMimeTypes.includes(String(type)) : false;
@@ -582,7 +583,12 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
       body = {
         text: parsed.text,
         blocks: parsed.blocks,
-        metadata: { provider: "excel", source: "excel-parser", rowCount: parsed.blocks.length },
+        metadata: {
+          ...(parsed.metadata && typeof parsed.metadata === "object" ? parsed.metadata : {}),
+          provider: "excel",
+          source: "excel-parser",
+          rowCount: Array.isArray(parsed.blocks) ? parsed.blocks.length : 0,
+        },
       };
     } else {
       const provider = isPdf ? "typhoon" : "paddle";
@@ -646,7 +652,7 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
     console.error("[documents] /:id/files/ocr error:", message);
     res.status(isMulterError ? 400 : 500).json({
       ok: false,
-      error: isMulterError ? `Upload failed: ${message}` : "OCR upload failed",
+      error: isMulterError ? `Upload failed: ${message}` : message || "OCR upload failed",
     });
   }
 });

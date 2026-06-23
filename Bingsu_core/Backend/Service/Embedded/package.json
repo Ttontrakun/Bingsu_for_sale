@@ -1,7 +1,7 @@
 {
   "name": "bingsu-embeddings",
   "version": "1.0.0",
-  "description": "Bingsu Embeddings Service - OpenAI and Gemini embeddings",
+  "description": "Enterprise AI Chatbot Embeddings Service - OpenAI and Gemini embeddings",
   "type": "module",
   "main": "embeddings.js",
   "scripts": {
