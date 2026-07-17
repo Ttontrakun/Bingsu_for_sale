@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🫐 บิงซูบอท · Ask AA
+#  บิงซูบอท · Ask AA
 
 **ระบบ Hybrid-RAG Chatbot ภาษาไทยสำหรับตอบคำถามจากเอกสารองค์กร**
 
