@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { HiPlus, HiSearch, HiDotsHorizontal } from 'react-icons/hi';
 import Sidebar from '../components/Sidebar';
+import { showToast } from '../components/ToastNotification';
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { botAPI, getErrorMessage } from '../services/api';
 
@@ -83,7 +84,7 @@ function Bots() {
       setBotList(botList.map(b => b.id === botId ? updatedBot : b));
     } catch (err) {
       console.error('Error updating bot status:', err);
-      alert(getErrorMessage(err));
+      showToast(getErrorMessage(err), 'error');
     }
   };
 
@@ -95,7 +96,7 @@ function Bots() {
     setOpenMenuId(null);
     } catch (err) {
       console.error('Error deleting bot:', err);
-      alert(getErrorMessage(err));
+      showToast(getErrorMessage(err), 'error');
     }
   };
 

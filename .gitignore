@@ -2,3 +2,16 @@
 .env.*
 **/.env
 **/.env.*
+
+# Sensitive / local-only — do not commit
+cookies.txt
+**/cookies.txt
+backups/
+**/backups/
+
+_tmp_rb7/
+
+_tmp_rb7/
+*.docx
+Bingsu_core/Backend/knowledge_*.md
+Bingsu_core/docs/

@@ -83,12 +83,6 @@ function CreateKnowledge() {
         ? tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
         : [];
 
-      console.log('Creating/updating knowledge with data:', {
-        displayName: knowledgeName.trim(),
-        tags: tagsArray,
-        isEditMode
-      });
-
       if (isEditMode) {
         // Update existing document - only update displayName and tags, not sourceFiles
         // This preserves existing sourceFiles and avoids unnecessary re-indexing
@@ -96,7 +90,6 @@ function CreateKnowledge() {
           displayName: knowledgeName.trim(),
           tags: tagsArray
         };
-        console.log('Updating document with data:', updateData);
         await documentAPI.updateDocument(editingKnowledge.id, updateData);
       } else {
         // Create new document without files - user will add files later
@@ -107,7 +100,6 @@ function CreateKnowledge() {
           link: null
         };
         
-        console.log('Sending document creation request:', documentData);
         await documentAPI.createDocument(documentData);
       }
 

@@ -175,29 +175,34 @@ const sanitizeMessagesForProvider = (messages = []) =>
 const isDeploymentUnavailable429 = (status, errorText) =>
   status === 429 && /No deployments available|cooldown_list|selected model/i.test(String(errorText || ""));
 
-const buildChatTargets = (modelOverride) => {
+const buildChatTargets = (modelOverride, mode) => {
   const primaryModel = modelOverride || openaiModel;
   const targets = [{ baseUrl: gatewayBaseUrl, apiKey: openaiKey, model: primaryModel, label: "primary" }];
-  if (!openaiFallbackModel) return targets;
-
-  const duplicateTarget =
-    openaiFallbackBaseUrl === gatewayBaseUrl
-    && openaiFallbackKey === openaiKey
-    && openaiFallbackModel === primaryModel;
-  if (!duplicateTarget) {
-    targets.push({
-      baseUrl: openaiFallbackBaseUrl,
-      apiKey: openaiFallbackKey,
-      model: openaiFallbackModel,
-      label: "fallback",
-    });
+  if (openaiFallbackModel) {
+    const duplicateTarget =
+      openaiFallbackBaseUrl === gatewayBaseUrl
+      && openaiFallbackKey === openaiKey
+      && openaiFallbackModel === primaryModel;
+    if (!duplicateTarget) {
+      targets.push({
+        baseUrl: openaiFallbackBaseUrl,
+        apiKey: openaiFallbackKey,
+        model: openaiFallbackModel,
+        label: "fallback",
+      });
+    }
   }
-  return targets.filter((target) => target.baseUrl && target.apiKey);
+  const valid = targets.filter((target) => target.baseUrl && target.apiKey);
+  // โหมด "fast" = ใช้ fallback (โมเดลเล็ก/เร็ว เช่น Qwen) เป็นตัวหลัก แล้วให้ primary (ใหญ่/ช้า เช่น 120B) เป็นตัวสำรอง
+  if (mode === "fast" && valid.length > 1) {
+    return [valid[1], valid[0], ...valid.slice(2)];
+  }
+  return valid;
 };
 
-const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride }) => {
+const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride, mode }) => {
   const providerMessages = sanitizeMessagesForProvider(messages);
-  const targets = buildChatTargets(modelOverride);
+  const targets = buildChatTargets(modelOverride, mode);
   if (targets.length === 0) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
@@ -261,7 +266,7 @@ const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverr
   throw lastError || new Error("Chat request failed");
 };
 
-export const callOpenAiGateway = async (messages, modelOverride) => {
+export const callOpenAiGateway = async (messages, modelOverride, mode) => {
   if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
@@ -275,6 +280,7 @@ export const callOpenAiGateway = async (messages, modelOverride) => {
       stream: false,
       signal: controller.signal,
       modelOverride,
+      mode,
     });
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -294,7 +300,7 @@ export const callOpenAiGateway = async (messages, modelOverride) => {
 };
 
 /** เรียก gateway แบบ streaming — คืนค่า ReadableStream ของ response body (สำหรับ SSE) */
-export const callOpenAiGatewayStream = async (messages, modelOverride) => {
+export const callOpenAiGatewayStream = async (messages, modelOverride, mode) => {
   if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
@@ -308,6 +314,7 @@ export const callOpenAiGatewayStream = async (messages, modelOverride) => {
       stream: true,
       signal: controller.signal,
       modelOverride,
+      mode,
     });
   } catch (error) {
     if (error?.name === "AbortError") {

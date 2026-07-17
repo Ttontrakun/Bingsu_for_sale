@@ -1,444 +1,288 @@
-# บิงซูบอท (bb) — Ask AA
+<div align="center">
 
-ระบบ RAG Chatbot สำหรับสร้างบอทจากชุดความรู้ (Knowledge) รองรับการอัปโหลดเอกสาร, Embedding และแชทกับ AI
+# 🫐 บิงซูบอท · Ask AA
 
----
+**ระบบ Hybrid-RAG Chatbot ภาษาไทยสำหรับตอบคำถามจากเอกสารองค์กร**
 
-## สารบัญ
+ค้นแบบผสม (dense + keyword + rerank) · คำนวณราคาแบบเป๊ะ 100% · อ้างอิงแหล่งที่มา
 
-- [ภาพรวมระบบ](#ภาพรวมระบบ)
-- [สิ่งที่ต้องเตรียม](#สิ่งที่ต้องเตรียม)
-- [วิธีที่ 1: ติดตั้งด้วย Docker (แนะนำ)](#วิธีที่-1-ติดตั้งด้วย-docker-แนะนำ)
-- [วิธีที่ 2: ติดตั้งแบบ Local](#วิธีที่-2-ติดตั้งแบบ-local)
-- [เข้าใช้งานจากเครื่องอื่นใน WiFi เดียวกัน (LAN)](#เข้าใช้งานจากเครื่องอื่นใน-wifi-เดียวกัน-lan)
-- [โครงสร้างโปรเจกต์](#โครงสร้างโปรเจกต์)
-- [แก้ปัญหาเบื้องต้น](#แก้ปัญหาเบื้องต้น)
+<br>
 
----
+![Node](https://img.shields.io/badge/Node.js-20-339933?style=flat-square&logo=node.js&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Postgres](https://img.shields.io/badge/PostgreSQL-Prisma-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC244C?style=flat-square)
+![React](https://img.shields.io/badge/React-Tailwind-61DAFB?style=flat-square&logo=react&logoColor=white)
 
-## ภาพรวมระบบ
-
-| ส่วน | คำอธิบาย |
-|------|----------|
-| **Frontend (User)** | หน้าเว็บสำหรับผู้ใช้ — Login, Knowledge, Bots, Chat |
-| **Frontend (Supportadmin)** | หน้าเว็บสำหรับแอดมิน/ซัพพอร์ต |
-| **Backend (Legacy)** | Node/Express — Auth, Documents, Bots, Chat, Upload |
-| **Database** | PostgreSQL (ผู้ใช้, Knowledge, Bots, บทสนทนา) |
-| **Queue** | Redis (คิวอัปโหลดและประมวลผลเอกสาร) |
-| **Vector DB** | Qdrant (เก็บ Embeddings สำหรับ RAG) |
-
-```
-┌──────────────────┐         ┌─────────────────┐
-│  Web (User)      │   API   │  Legacy (Node)  │
-│  :8083           │ ──────► │  :5052          │
-└──────────────────┘         └────────┬────────┘
-         │                             │
-┌────────┴────────┐                    │
-│ Supportadmin    │                    │
-│ :3014           │                    ▼
-└─────────────────┘         ┌─────────────────────┐
-                             │ Postgres, Redis,    │
-                             │ Qdrant              │
-                             └─────────────────────┘
-```
+</div>
 
 ---
 
-## สิ่งที่ต้องเตรียม
+## ✨ ความสามารถ
 
-| สิ่งที่ต้องมี | เวอร์ชันที่แนะนำ | ใช้ทำอะไร |
-|---------------|------------------|-----------|
-| **Docker** (ถ้ารันแบบ Docker) | ล่าสุด | รันทั้ง stack ใน container |
-| **Node.js** (ถ้ารันแบบ Local) | 20 ขึ้นไป | Backend + Frontend |
-| **Git** | ล่าสุด | โคลนโปรเจกต์ |
+| | |
+|---|---|
+| 🔍 **Hybrid RAG** | ค้นผสม dense (vector) + keyword + rerank แม่นทั้งความหมายและคำเฉพาะ |
+| 📄 **อัปโหลดหลายรูปแบบ** | PDF (text + สแกน/OCR), Word, Excel — chunk + embed อัตโนมัติ |
+| 🎯 **คำนวณราคาเป๊ะ** | ราคา/ส่วนลด/อำนาจอนุมัติ ตอบจากสูตร + อัตราใน DB ไม่ให้ AI เดา |
+| 🔗 **Synonyms** | เชื่อม "ภาษาพูด ↔ คำทางการ" (แอดมินเพิ่มเองได้) |
+| 🧩 **แยกคำถามหลายข้อ** | ถามหลายเรื่องในข้อความเดียว — ค้นแยก ตอบครบ |
+| 📌 **อ้างอิงแหล่งที่มา** | แนบการ์ดอ้างอิง + กรองแหล่งที่ไม่ตรงคำถามออก |
+| 🔒 **โหมดส่วนตัว** | สั่งวิธีตอบ/ให้จำข้อมูล ด้วย `/สั่ง` และ `/จำ` |
+| 🛡️ **ปิดข้อมูล PII** | เซ็นเซอร์บัตร ปชช./เบอร์/อีเมล (ไม่โดนเลขราคา) |
 
 ---
 
-## วิธีที่ 1: ติดตั้งด้วย Docker (แนะนำ)
+## 🏗️ สถาปัตยกรรม
 
-รันทุกอย่างใน Docker — ไม่ต้องติดตั้ง Node/PostgreSQL แยก
+```
+ผู้ใช้ถาม
+   │
+   ├─(1) Deterministic ──── คำถามราคา/อำนาจอนุมัติ → ตอบจากสูตร + DB (เป๊ะ 100%)
+   │
+   └─(2) RAG pipeline
+        ├─ Query expansion (synonyms · multi-hop · แยกหลายคำถาม)
+        ├─ Dense retrieval   → Qdrant
+        ├─ Keyword retrieval → คำตรงตัว (ตัวเลข/รุ่น/ชื่อ)
+        ├─ Merge → Rerank (bge-reranker-v2-m3)
+        ├─ Evidence gate     → ไม่มีหลักฐานจริงก็ไม่มั่ว
+        └─ LLM ตอบ + การ์ดอ้างอิง
+```
 
-### ขั้นตอน
+<div align="center">
 
-**1. เข้าโฟลเดอร์โปรเจกต์ (bb)**
+```
+ Web (User) :8083 ─┐
+                   ├─► Legacy API :5052 ─► Postgres · Redis · Qdrant
+ Supportadmin :3014 ┘
+```
+
+</div>
+
+---
+
+## 🧱 Tech Stack
+
+| ชั้น | เทคโนโลยี |
+|---|---|
+| Backend | Node.js 20 · Express |
+| ORM / DB | Prisma · PostgreSQL |
+| Queue / Vector | Redis · Qdrant |
+| Embedding / Rerank | text-embedding-3-small · bge-reranker-v2-m3 |
+| OCR | Typhoon (external) หรือ self-host ผ่าน `OCR_API_URL` |
+| Frontend | React · Tailwind |
+
+---
+
+## 🚀 เริ่มใช้งาน (Docker)
 
 ```bash
-cd bb
+cd bb                                   # เข้าโฟลเดอร์ Bingsu_core
+cp Backend/env.sample Backend/.env      # เตรียม .env (Windows: copy)
+#  ↳ เติมคีย์แชท + embedding + (ถ้าใช้สแกน) คีย์ OCR ใน Backend/.env
+docker compose up -d --build            # รันทั้ง stack (migration รันเองอัตโนมัติ)
+docker compose exec legacy node server/scripts/seed-admins.js   # สร้างแอดมิน (ครั้งแรก)
 ```
 
-*(ถ้าโคลน repo แล้วอยู่ที่ root: `cd ask_AA/bb` หรือ `cd bb` ตามที่โคลนมา)*
+<div align="center">
 
-**2. สร้างไฟล์ `.env` สำหรับ Backend**
+| 🌐 User | 🛠️ Supportadmin | ⚙️ API |
+|:---:|:---:|:---:|
+| http://localhost:8083 | http://localhost:3014 | http://localhost:5052 |
 
-ไฟล์ `Backend/env.sample` เป็นเทมเพลต **ไม่มี API key หรือรหัสลับ** — ปลอดภัยต่อการ commit  
-ให้ copy ไปเป็น `Backend/.env` แล้วเติมค่าจริงใน `.env` เท่านั้น
+</div>
 
-**Windows (PowerShell):**
-```powershell
-copy Backend\env.sample Backend\.env
-```
+> 💡 ตั้งค่า `SEED_ADMIN_*` / `SEED_SUPPORT_*` ใน `.env` ก่อนรัน seed
 
-**macOS / Linux:**
-```bash
-cp Backend/env.sample Backend/.env
-```
+<details>
+<summary><b>🌐 เข้าจากเครื่องอื่นใน LAN</b></summary>
 
-**3. ตั้งค่าใน `Backend/.env`**
+<br>
 
-เปิด `Backend/.env` แล้วใส่ค่าที่จำเป็น เช่น
-
-- `OPENAI_API_KEY` หรือ `GEMINI_API_KEY` (สำหรับแชท)
-- `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL` (สำหรับ embedding)
-- ถ้าใช้ Typhoon OCR: `TYPHOON_OCR_API_KEY`
-- ค่าอื่น (DB, Redis, Qdrant, port) ใช้จาก `env.sample` ได้ — ใน Docker ค่า DB/Redis/Qdrant ถูก override ให้เชื่อมกับ container อยู่แล้ว
-
-**4. รันทั้งระบบ**
-
-```bash
-docker compose up -d --build
-```
-
-รอ build และรันครั้งแรกสักครู่
-
-**5. เปิดใช้งาน**
-
-| URL | การใช้งาน |
-|-----|------------|
-| **http://localhost:8083** | หน้าเว็บผู้ใช้ (User) |
-| **http://localhost:3014** | หน้าแอดมิน (Supportadmin) |
-| **http://localhost:5052** | API (Legacy Backend) |
-
-### (Optional) Prisma Studio แบบไม่ expose ออกนอก
-
-> ใช้เฉพาะ dev/staging เท่านั้น
-
-1. สร้าง hash สำหรับ Basic Auth password:
-
-```bash
-docker run --rm caddy:2-alpine caddy hash-password --plaintext "your-strong-password"
-```
-
-2. ตั้งค่า env ก่อนรัน (PowerShell):
+หา IP เครื่องเซิร์ฟเวอร์ (`ipconfig` / `ip addr`) แล้วเปิด `http://<IP>:8083`
+ถ้าเข้าไม่ได้ เปิด Windows Firewall (PowerShell แบบ Admin):
 
 ```powershell
-$env:PRISMA_STUDIO_BASIC_AUTH_USER="admin"
-$env:PRISMA_STUDIO_BASIC_AUTH_HASH="ใส่ค่า hash จากคำสั่งด้านบน"
-```
-
-3. เปิด Prisma Studio ผ่าน reverse proxy:
-
-```bash
-docker compose -f Docker-compose.yml -f docker-compose.prisma-studio.yml up -d prisma-studio prisma-studio-proxy
-```
-
-4. เข้าใช้งาน:
-
-- URL: `http://127.0.0.1:5556`
-- ต้องผ่าน Basic Auth ก่อน และพอร์ตเปิดเฉพาะ localhost เท่านั้น
-
-5. ปิดเมื่อไม่ใช้:
-
-```bash
-docker compose -f Docker-compose.yml -f docker-compose.prisma-studio.yml stop prisma-studio prisma-studio-proxy
-```
-
-**6. (ครั้งแรกเท่านั้น) สร้าง user แอดมิน**
-
-```bash
-docker compose exec legacy node server/scripts/seed-admins.js
-```
-
-จากนั้นล็อกอิน Supportadmin ด้วยบัญชีที่ seed (เช่น `admin@admin.com` / `admin1234`)
-
-(ถ้าต้องการ) สร้างบอทช่วยสอน:
-
-```bash
-docker compose exec legacy node server/scripts/seed-help-bot.js
-```
-
-### เข้าใช้งานจากเครื่องอื่นใน WiFi เดียวกัน (LAN)
-
-ถ้าต้องการให้เครื่องอื่นในเครือข่าย WiFi เดียวกันเข้าใช้งานได้ ให้ทำ 2 อย่างนี้:
-
-**1. หา IP ของเครื่องที่รัน Docker (เครื่องเซิร์ฟเวอร์)**
-
-- **Windows:** เปิด CMD หรือ PowerShell แล้วรัน `ipconfig` → ดูค่า **IPv4 Address** (เช่น `192.168.1.50`)
-- **macOS / Linux:** รัน `ifconfig` หรือ `ip addr` แล้วดู IP ของเครือข่ายที่ใช้ (เช่น `192.168.1.50`)
-
-**2. เปิดจากเครื่องอื่น**
-
-บนเครื่องอื่น (มือถือ/โน๊ตบุ๊ค) ที่ต่อ WiFi เดียวกัน เปิดเบราว์เซอร์แล้วเข้า:
-
-| URL | การใช้งาน |
-|-----|------------|
-| **http://\<IP ของเครื่องเซิร์ฟเวอร์\>:8083** | หน้าเว็บผู้ใช้ (User) |
-| **http://\<IP ของเครื่องเซิร์ฟเวอร์\>:3014** | หน้าแอดมิน (Supportadmin) |
-
-ตัวอย่าง: ถ้า IP ของเครื่องที่รันคือ `192.168.1.50` ให้เข้า **http://192.168.1.50:8083**
-
-**3. ถ้าเข้าไม่ได้ — เปิด Firewall (Windows)**
-
-เครื่องอื่นต้องเชื่อมต่อเข้ามาที่พอร์ต **8083** และ **3014** ได้ จึงต้องอนุญาตใน Windows Firewall
-
----
-
-**วิธีที่ 1: ผ่านหน้าต่าง Firewall (ทำทีละขั้น)**
-
-1. กด **Windows + R** พิมพ์ `wf.msc` แล้วกด Enter  
-   → เปิด **Windows Defender Firewall with Advanced Security**
-
-2. คลิก **Inbound Rules** (ด้านซ้าย)
-
-3. คลิก **New Rule...** (ด้านขวา)
-
-4. เลือก **Port** → Next
-
-5. เลือก **TCP** แล้วกรอก **Specific local ports:** `8083` → Next
-
-6. เลือก **Allow the connection** → Next
-
-7. ติ๊ก **Private** (และ **Domain** ถ้าใช้ในเครือข่ายองค์กร) → Next
-
-8. ตั้งชื่อ เช่น `bb User Web (8083)` → Finish
-
-9. ทำซ้ำขั้น 3–8 อีกครั้ง โดยเปลี่ยนพอร์ตเป็น **3014** และชื่อเป็น `bb Supportadmin (3014)`
-
----
-
-**วิธีที่ 2: ใช้ PowerShell (เร็ว)**
-
-1. คลิกขวาที่ปุ่ม Start → เลือก **Windows Terminal (Admin)** หรือ **PowerShell (Admin)**
-
-2. รันคำสั่งนี้ (จะสร้าง rule สำหรับพอร์ต 8083 และ 3014):
-
-```powershell
-New-NetFirewallRule -DisplayName "bb User Web" -Direction Inbound -Protocol TCP -LocalPort 8083 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "bb User Web"     -Direction Inbound -Protocol TCP -LocalPort 8083 -Action Allow -Profile Private
 New-NetFirewallRule -DisplayName "bb Supportadmin" -Direction Inbound -Protocol TCP -LocalPort 3014 -Action Allow -Profile Private
-New-NetFirewallRule -DisplayName "bb Backend API" -Direction Inbound -Protocol TCP -LocalPort 5052 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "bb Backend API"  -Direction Inbound -Protocol TCP -LocalPort 5052 -Action Allow -Profile Private
 ```
 
-3. ถ้าขึ้นคำถามหรือข้อความเกี่ยวกับการอนุญาต ให้กด **Y** หรือ **Enter**
+</details>
 
-4. **ถ้าเข้าได้แต่ล็อกอินแล้วขึ้น "เชื่อมต่อ backend ไม่ได้"** (เช่น เปิดจากมือถือ) ต้องเปิดพอร์ต **5052** ด้วย เพราะแอปจะเรียก API ที่ `http://<IP>:5052` — รันคำสั่งเพิ่มนี้ใน PowerShell (Admin):
+<details>
+<summary><b>⚙️ ติดตั้งแบบ Local (สำหรับ dev)</b></summary>
 
-```powershell
-New-NetFirewallRule -DisplayName "bb Backend API" -Direction Inbound -Protocol TCP -LocalPort 5052 -Action Allow -Profile Private
-```
+<br>
 
-เสร็จแล้วลองเข้า **http://\<IP เครื่องคุณ\>:8083** หรือ **http://\<IP เครื่องคุณ\>:3014** จากเครื่องอื่นใน WiFi เดียวกันอีกครั้ง
-
-### คำสั่งที่ใช้บ่อย (Docker)
-
-| คำสั่ง | ความหมาย |
-|--------|----------|
-| `docker compose up -d --build` | รันทั้ง stack (รวม build ใหม่) |
-| `docker compose down` | ปิด stack |
-| `docker compose logs -f` | ดู log แบบต่อเนื่อง |
-| `docker compose exec legacy npm run security:rotation-checklist` | ตรวจรายการ key ที่ควร rotate (ไม่แสดงค่า secret) |
-
-### Debug Chat Context (สำหรับแก้เคสตอบไม่ตรง)
-
-มี endpoint สำหรับตรวจว่า RAG ดึง chunk อะไรมาตอบ:
-
-- `GET /api/chat/:conversationId/debug-context?message=<คำถาม>`
-- ต้องส่ง token เหมือน endpoint แชทปกติ (`Authorization: Bearer ...`)
-- response จะมี `groundingChunks`, `contextPieces`, `usedFallback`, และ `references`
-
-### พอร์ตที่ใช้
-
-| Service | พอร์ต |
-|---------|--------|
-| Web (User) | 8083 |
-| Supportadmin | 3014 |
-| Backend (Legacy API) | 5052 |
-| Postgres | 5436 |
-| Redis | 6382 |
-| Qdrant | 6336 |
-
-### กรณีพอร์ต 80 หรือ 8083 ถูกใช้อยู่
-
-ถ้าต้องการรัน web ที่พอร์ตอื่น (เช่น 8082):
-
-```bash
-docker compose -f Docker-compose.yml -f docker-compose.port8080.yml up -d web
-```
-
-แล้วเปิด **http://localhost:8082** (ตามที่ตั้งใน `docker-compose.port8080.yml`)
-
----
-
-## วิธีที่ 2: ติดตั้งแบบ Local
-
-เหมาะกับคนที่ต้องการพัฒนา/ดีบัก โดยรัน Backend และ Frontend บนเครื่อง แล้วใช้ Docker เฉพาะ Postgres, Redis, Qdrant
-
-### ขั้นที่ 1 — เข้าโฟลเดอร์ bb และรัน Infrastructure
+รัน Backend/Frontend บนเครื่อง ใช้ Docker เฉพาะ infra
 
 ```bash
 cd bb
-docker compose up -d postgres redis qdrant
-```
+docker compose up -d postgres redis qdrant        # 1) infra
 
-ตรวจสอบว่า container ทำงาน:
-
-```bash
-docker ps
-```
-
-| Service | พอร์ต |
-|---------|--------|
-| Postgres | 5436 |
-| Redis | 6382 |
-| Qdrant | 6336 |
-
-### ขั้นที่ 2 — ตั้งค่า Backend (.env.local)
-
-ที่โฟลเดอร์ `Backend` — ใช้ `env.sample` เป็นเทมเพลต (ไม่มี key ในไฟล์ sample):
-
-```bash
 cd Backend
-```
-
-**Windows:**
-```powershell
-copy env.sample .env.local
-```
-
-**macOS / Linux:**
-```bash
-cp env.sample .env.local
-```
-
-เปิด `Backend/.env.local` แล้วเติมค่าจริงอย่างน้อย:
-
-| ตัวแปร | ความหมาย | ตัวอย่าง (Local) |
-|--------|----------|------------------|
-| `DATABASE_URL` | เชื่อมต่อ Postgres | `postgresql://postgres:postgres@localhost:5436/ask_the_manual?schema=public` |
-| `REDIS_URL` | เชื่อมต่อ Redis | `redis://localhost:6382` |
-| `QDRANT_URL` | เชื่อมต่อ Qdrant | `http://localhost:6336` |
-| `CORS_ORIGINS` | อนุญาต Frontend | `http://localhost:3000,http://localhost:8083` |
-| `OPENAI_API_KEY` | คีย์แชท | คีย์จาก OpenAI หรือ gateway |
-| `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL` | Embedding | ตามที่ใช้ (เช่น openai, gemini) |
-
-### ขั้นที่ 3 — ติดตั้ง Backend และ Database
-
-ยังอยู่ที่โฟลเดอร์ `Backend`:
-
-```bash
+cp env.sample .env.local                           # 2) แก้ DATABASE_URL/REDIS_URL/QDRANT_URL ให้ชี้ localhost
 npm install
 npm run prisma:generate
-npm run prisma:migrate:deploy
+npm run prisma:migrate:deploy                      # 3) เตรียม DB
+npm run seed:admins                                # (ครั้งแรก)
+npm run dev:legacy                                 # 4) Backend :5052
 ```
 
-(ถ้าต้องการ) สร้าง user แอดมินและบอทช่วยสอน:
-
-```bash
-npm run seed:admins
-npm run seed:help-bot
-```
-
-### ขั้นที่ 4 — รัน Backend (Legacy)
-
-ที่โฟลเดอร์ `Backend`:
-
-```bash
-npm run dev:legacy
-```
-
-Backend จะรันที่ **http://localhost:5052**
-
-### ขั้นที่ 5 — ตั้งค่าและรัน Frontend (User)
-
-เปิด Terminal อีกอัน:
-
+Frontend (อีก terminal):
 ```bash
 cd bb/Frontend/User
+npm install && npm start                           # :3000 · ตั้ง REACT_APP_API_BASE_URL=http://localhost:5052
 ```
 
-สร้าง `.env` จากตัวอย่างที่โฟลเดอร์ bb:
+</details>
 
-**Windows:**
-```powershell
-copy ..\..\.env.example .env
-```
+<details>
+<summary><b>🔑 Environment Variables ที่สำคัญ</b></summary>
 
-**macOS / Linux:**
-```bash
-cp ../../.env.example .env
-```
+<br>
 
-ในโหมดพัฒนา ตั้ง `REACT_APP_API_BASE_URL=http://localhost:5052` (หรือใช้ proxy ถ้ามีในโปรเจกต์)
+ตั้งใน `Backend/.env` (Docker) หรือ `Backend/.env.local` (Local)
 
-ติดตั้งและรัน:
+| ตัวแปร | ความหมาย |
+|---|---|
+| `OPENAI_API_KEY` / `GEMINI_API_KEY` | คีย์โมเดลแชท |
+| `EMBEDDING_API_KEY` · `EMBEDDING_BASE_URL` · `EMBEDDING_MODEL` | ตั้งค่า embedding |
+| `DATABASE_URL` · `REDIS_URL` · `QDRANT_URL` | เชื่อม infra (Docker override ให้แล้ว) |
+| `SEED_ADMIN_EMAIL` · `SEED_ADMIN_PASSWORD` | บัญชี admin ตอน seed |
+| `SEED_SUPPORT_EMAIL` · `SEED_SUPPORT_PASSWORD` | บัญชี support ตอน seed |
+| `TYPHOON_OCR_API_KEY` · `TYPHOON_OCR_API_URL` | OCR สแกน (external) |
+| `OCR_API_URL` | OCR service ที่ self-host เอง (แทน Typhoon) |
+| `UPLOAD_QUEUE_MODE` | `redis` (Docker) / `memory` (Local) |
+| `QDRANT_TOP_K` | จำนวน chunk ต่อคำถาม (ดีฟอลต์ 12) |
 
-```bash
-npm install
-npm start
-```
+> ⚠️ `env.sample` ไม่มี key — copy ไปเป็น `.env` แล้วเติมค่าจริง · **อย่า commit `.env`**
 
-เบราว์เซอร์จะเปิดที่ **http://localhost:3000**
-
-### ขั้นที่ 6 — (ถ้าต้องใช้) รัน Frontend Supportadmin
-
-ที่โฟลเดอร์ `Frontend/Supportadmin` ตั้ง API base URL ไปที่ `http://localhost:5052` แล้วรัน:
-
-```bash
-cd bb/Frontend/Supportadmin
-npm install
-npm start
-```
-
-(พอร์ตอาจเป็น 3001 ถ้า 3000 ถูกใช้แล้ว)
-
-### สรุป URL (Local)
-
-| URL | การใช้งาน |
-|-----|------------|
-| http://localhost:3000 | หน้าเว็บผู้ใช้ (User) |
-| http://localhost:5052 | API (Backend) |
+</details>
 
 ---
 
-## โครงสร้างโปรเจกต์
+## 🔄 Deploy & ดูแลระบบ
+
+```bash
+# หลังแก้โค้ด Backend
+docker compose build legacy && docker compose up -d legacy
+
+# หลังแก้โค้ด Frontend (User)
+docker compose build web && docker compose up -d web
+```
+
+| สถานการณ์ | ต้องทำ |
+|---|---|
+| แก้ schema ฐานข้อมูล | rebuild `legacy` → migration รันเองอัตโนมัติ |
+| แก้ pipeline Excel/เอกสาร | **อัปโหลดไฟล์ใหม่** (ของเดิม embed ไปแล้ว) |
+| เปลี่ยนโมเดล embedding | **re-index ทั้งหมด** (มิติเวกเตอร์ต่างกัน) |
+| ลืมรหัส admin/support | รีเซ็ตด้วยสคริปต์ (ดูด้านล่าง) |
+
+<details>
+<summary><b>🔐 รีเซ็ตรหัส admin/support</b></summary>
+
+<br>
+
+รหัสใน DB เป็น bcrypt (ถอดกลับไม่ได้) — รีเซ็ตแทน:
+
+```bash
+docker compose exec legacy node server/scripts/reset-password.js --list          # ดูอีเมลที่มี
+docker compose exec -e RESET_EMAIL=support@example.com -e RESET_PASSWORD="NewPass123!" \
+  legacy node server/scripts/reset-password.js
+```
+
+</details>
+
+---
+
+## 🛠️ ฟีเจอร์แอดมิน (Supportadmin)
+
+เข้าที่ http://localhost:3014 · บัญชี role `admin`
+
+| เมนู | ทำอะไร |
+|---|---|
+| **Knowledge** | สร้างชุดความรู้ + อัปโหลดเอกสาร |
+| **Bots** | สร้าง/แก้บอท ตั้ง prompt เลือก Knowledge |
+| **Synonyms** | เพิ่มคำพ้อง เชื่อมภาษาพูด ↔ คำในเอกสาร |
+| **Service Rates** | แก้อัตราค่าบริการที่เครื่องคำนวณใช้ (ไม่ต้องแตะโค้ด) |
+| **Activity Logs** | ประวัติการกระทำในระบบ |
+
+> 📘 คู่มือละเอียดสำหรับผู้ดูแล: `คู่มือใช้งาน-Supportadmin.docx`
+
+<details>
+<summary><b>📟 คำสั่งที่ใช้บ่อย · Debug · พอร์ต</b></summary>
+
+<br>
+
+| คำสั่ง | ความหมาย |
+|---|---|
+| `docker compose up -d --build` | รันทั้ง stack |
+| `docker compose ps` | ดูสถานะ container |
+| `docker compose logs -f legacy` | ดู log Backend |
+| `docker compose down` | ปิด stack |
+
+**Debug คำตอบไม่ตรง:** `GET /api/chat/:conversationId/debug-context?message=<คำถาม>`
+(แนบ `Authorization: Bearer ...`) → คืน `groundingChunks` · `references` · `usedFallback`
+
+**พอร์ต:** User `8083` · Supportadmin `3014` · Backend `5052` · Postgres `5436` · Redis `6382` · Qdrant `6336`
+
+</details>
+
+<details>
+<summary><b>📁 โครงสร้างโปรเจกต์</b></summary>
+
+<br>
 
 ```
-bb/
-├── README.md                 ← คู่มือนี้
-├── .env.example              ← ตัวอย่าง env สำหรับ Frontend (ไม่มี key)
-├── Docker-compose.yml        ← รันทั้ง stack ด้วย Docker
-├── docker-compose.port8080.yml  ← ใช้เมื่อพอร์ต 80/8083 ถูกใช้
-├── Dockerfile.web            ← Build Frontend User + nginx
-├── Backend/                  ← Node/Express (Legacy)
-│   ├── env.sample            ← เทมเพลต .env (ไม่มี API key — copy ไปเป็น .env แล้วเติมค่าจริง)
-│   ├── .env / .env.local     ← ค่าจริง (ไม่ commit)
-│   ├── server/               ← Auth, Documents, Bots, Chat, Upload
-│   ├── prisma/               ← Schema และ migrations
-│   └── nginx/                ← คอนฟิก Nginx (สำหรับ build web)
+bb/  (Bingsu_core)
+├── README.md                    ← คู่มือนี้
+├── Docker-compose.yml           ← รันทั้ง stack
+├── Dockerfile.web               ← build Frontend User + nginx
+├── คู่มือใช้งาน-Supportadmin.docx ← คู่มือผู้ดูแล (non-dev)
+├── Backend/
+│   ├── env.sample               ← เทมเพลต .env (ไม่มี key)
+│   ├── prisma/                  ← schema + migrations
+│   └── server/
+│       ├── routes/              ← auth, conversations, documents, support ...
+│       ├── services/            ← rag.js, excel.js, rerank.js, uploadQueue.js ...
+│       ├── lib/                 ← privacy.js (PII mask) ฯลฯ
+│       └── scripts/             ← seed-admins.js, reset-password.js ...
 └── Frontend/
-    ├── User/                 ← หน้าเว็บผู้ใช้
-    └── Supportadmin/         ← หน้าแอดมิน
+    ├── User/                    ← หน้าเว็บผู้ใช้
+    └── Supportadmin/            ← หน้าแอดมิน
 ```
 
-**หมายเหตุ:** `Backend/env.sample` และ `.env.example` เป็นไฟล์ตัวอย่างเท่านั้น ไม่มี key หรือรหัสลับ — copy ไปเป็น `.env` / `.env.local` แล้วเติมค่าจริงในไฟล์นั้น (และอย่า commit ไฟล์ `.env`)
+**ไฟล์บริการหลัก:** `rag.js` (hybrid retrieval) · `excel.js` (parse ตาราง) · `rerank.js` · `uploadQueue.js` (OCR/structure) · `ntCorpPricingDb.js` (คำนวณราคา)
 
----
+</details>
 
-## แก้ปัญหาเบื้องต้น
+<details>
+<summary><b>🩹 แก้ปัญหาเบื้องต้น</b></summary>
+
+<br>
 
 | อาการ | แนวทางแก้ |
-|--------|------------|
-| **เชื่อมต่อ backend ไม่ได้ / อัปโหลดไม่ได้** | ตรวจว่า container **legacy** และ **web** รันอยู่: `docker compose ps` — ถ้า **web** ไม่ขึ้น มักเพราะพอร์ต 8083 ถูกใช้ → ใช้ `docker-compose.port8080.yml` รัน web ที่ 8082 แล้วเปิด http://localhost:8082 |
-| **แอดมินเข้าไม่ได้ / ล็อกอิน admin ไม่ได้** | ยังไม่มี user ใน DB → รัน seed: `docker compose exec legacy node server/scripts/seed-admins.js` (จากโฟลเดอร์ bb) แล้วล็อกอินด้วย `admin@admin.com` / `admin1234` |
-| **เปิดจาก IP อื่นใน LAN แล้วเชื่อมต่อ backend ไม่ได้** | เปิด Windows Firewall อนุญาต Inbound พอร์ต **8083** (และ 3014 ถ้าเข้า Supportadmin) |
-| **พอร์ตถูกใช้อยู่** (5052, 8083, 3014) | ปิด process ที่ใช้พอร์ตนั้น หรือเปลี่ยนพอร์ตใน Docker-compose / .env |
-| **Login แล้วขึ้น Network error** | ตรวจว่า Backend รันที่ 5052 และ Frontend ชี้ `REACT_APP_API_BASE_URL` ไปที่ถูก |
-| **อัปโหลดเอกสารแล้วไม่ประมวลผล** | ตรวจว่าใน Docker ใช้ `UPLOAD_QUEUE_MODE=redis` และ Redis รันอยู่; ถ้ารัน Local ใช้ `memory` ได้ |
-| **Embedding / แชท error เรื่อง API key** | ตรวจ `OPENAI_API_KEY`, `EMBEDDING_API_KEY` หรือ `GEMINI_API_KEY` ใน `Backend/.env` |
+|---|---|
+| เชื่อม backend ไม่ได้ / อัปโหลดไม่ได้ | เช็ค `docker compose ps` ว่า `legacy` + `web` รัน · พอร์ต 8083 ชนใช้ `docker-compose.port8080.yml` |
+| ล็อกอิน admin ไม่ได้ | seed ก่อน หรือ reset ด้วย `reset-password.js` |
+| เปิดจาก LAN ต่อ backend ไม่ได้ | เปิด Firewall พอร์ต 8083, 3014, **5052** |
+| อัปโหลดแล้วไม่ประมวลผล | Docker ต้องใช้ `UPLOAD_QUEUE_MODE=redis` + Redis รัน |
+| แชท/embedding error เรื่อง key | เช็คคีย์ใน `Backend/.env` |
+| Excel ตอบไม่ตรง | ลบเอกสารเดิมแล้วอัปใหม่ |
+| PDF สแกนอ่านไม่ออก | ตั้ง `TYPHOON_OCR_API_KEY` หรือ `OCR_API_URL` |
 
-**สคริปต์ช่วยตรวจ:** จากโฟลเดอร์ bb รัน `.\check-worker.ps1` (หรือ `.\check-worker.bat`) เพื่อดูว่า Docker รันอยู่หรือไม่ และมีไฟล์ `.env` หรือไม่
+**สคริปต์ช่วยตรวจ:** `.\check-worker.ps1` (หรือ `.bat`)
+
+</details>
 
 ---
 
-## ลิงก์เพิ่มเติม
+<div align="center">
 
-- **Backend:** [Backend/README.md](Backend/README.md) (ถ้ามี)
-- **Frontend User / Supportadmin:** ดู README ในโฟลเดอร์ `Frontend/User` และ `Frontend/Supportadmin` (ถ้ามี)
+**ลิงก์:** [Backend](Backend/README.md) · [Frontend User](Frontend/User/README.md) · [Supportadmin](Frontend/Supportadmin/README.md) · คู่มือผู้ดูแล `.docx`
+
+<sub>🫐 Ask AA — Hybrid RAG for NT</sub>
+
+</div>

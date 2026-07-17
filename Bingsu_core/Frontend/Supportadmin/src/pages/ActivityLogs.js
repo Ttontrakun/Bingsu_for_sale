@@ -17,6 +17,7 @@ const EVENT_LABEL_TH = {
   'user.expiry.renewed': 'ต่ออายุการใช้งาน',
   'user.status.updated': 'เปลี่ยนสถานะผู้ใช้',
   'user.role.updated': 'เปลี่ยนบทบาทผู้ใช้',
+  'user.private_context.updated': 'บันทึกความจำ/คำสั่งส่วนตัว (/จำ /สั่ง)',
   'http.error': 'ข้อผิดพลาดระบบ (HTTP)',
   'http.exception': 'ข้อผิดพลาดระบบ (Exception)',
   'integration.line.updated': 'ตั้งค่า LINE Integration',
@@ -25,7 +26,13 @@ const EVENT_LABEL_TH = {
   'document.created': 'สร้าง Knowledge / เอกสาร',
   'document.updated': 'อัปเดต Knowledge / เอกสาร',
   'document.vectorize.failed': 'แปลงเป็น Vector (ล้มเหลว)',
+  'document.ocr.structured': 'จัดเรียงข้อความด้วย AI',
   'document.deleted': 'ลบเอกสาร',
+  'synonym.created': 'เพิ่มคำพ้องความหมาย',
+  'synonym.updated': 'แก้ไขคำพ้องความหมาย',
+  'synonym.enabled': 'เปิดใช้งานคำพ้องความหมาย',
+  'synonym.disabled': 'ปิดใช้งานคำพ้องความหมาย',
+  'synonym.deleted': 'ลบคำพ้องความหมาย',
   'upload.batch.completed': 'อัปโหลดไฟล์ (ครบชุด)',
   'admin.user.deleted': 'ลบผู้ใช้ (แอดมิน)',
   'support.user.deleted': 'ลบผู้ใช้ (ซัพพอร์ต)',
@@ -250,6 +257,22 @@ function formatAdminSummary(eventMessage, meta) {
       return m.error
         ? `กู้คืนข้อมูลไม่สำเร็จ — ${String(m.error).slice(0, 160)}`
         : 'กู้คืนข้อมูลไม่สำเร็จ';
+    case 'document.ocr.structured': {
+      const chars = m.inputChars != null && Number.isFinite(Number(m.inputChars))
+        ? ` (${Number(m.inputChars).toLocaleString('th-TH')} ตัวอักษร)`
+        : '';
+      return know
+        ? `จัดเรียงข้อความด้วย AI — Knowledge ${q(know)}${chars}`
+        : `จัดเรียงข้อความด้วย AI${chars}`;
+    }
+    case 'user.private_context.updated': {
+      const parts = [];
+      if (m.savedKnowledge) parts.push('บันทึกความจำ (/จำ)');
+      if (m.savedInstructions) parts.push('ตั้งคำสั่ง AI (/สั่ง)');
+      const what = parts.length ? parts.join(' · ') : 'อัปเดตเนื้อหาส่วนตัว';
+      const state = m.enabled === true ? ' — เปิดโหมดส่วนตัว' : m.enabled === false ? ' — ปิดโหมดส่วนตัว' : '';
+      return `ผู้ใช้ใช้งานโหมดส่วนตัว — ${what}${state}`;
+    }
     default:
       break;
   }
@@ -300,7 +323,11 @@ const EVENT_FILTER_GROUPS = [
   },
   {
     label: 'Knowledge และการอัปโหลด',
-    keys: ['document.created', 'document.updated', 'document.vectorize.failed', 'document.deleted', 'upload.batch.completed'],
+    keys: ['document.created', 'document.updated', 'document.ocr.structured', 'document.vectorize.failed', 'document.deleted', 'upload.batch.completed'],
+  },
+  {
+    label: 'การใช้งานของผู้ใช้ (โหมดส่วนตัว)',
+    keys: ['user.private_context.updated'],
   },
   {
     label: 'Integrations',

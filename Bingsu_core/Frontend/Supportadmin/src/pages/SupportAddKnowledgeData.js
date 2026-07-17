@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { HiArrowLeft, HiPlus, HiX, HiOutlinePencil, HiDocumentText } from 'react-icons/hi';
+import { HiArrowLeft, HiPlus, HiX, HiOutlinePencil, HiDocumentText, HiChevronDown } from 'react-icons/hi';
 import Dropdown from '../components/Dropdown';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supportDocuments, getErrorMessage } from '../services/api';
@@ -128,6 +128,10 @@ const recoverExcelPreviewSheets = (inputText = '') => {
   return parseLegacyExcelRowSheets(inputText);
 };
 
+// แปลงเป็นมุมมอง "ตาราง/sheet" เฉพาะไฟล์สเปรดชีตจริง (Excel/CSV) เท่านั้น
+// ข้อความ/markdown ที่ผู้ใช้พิมพ์เอง (.txt) จะไม่ถูกแปลงเป็น sheet เพื่อไม่ให้ข้อความ (prose) ถูกซ่อน/ตัดทิ้ง
+const looksLikeSpreadsheetName = (name = '') => /\.(xlsx|xls|csv)$/i.test(String(name || ''));
+
 function SupportAddKnowledgeData() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -143,13 +147,14 @@ function SupportAddKnowledgeData() {
   const [fileToDelete, setFileToDelete] = useState(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingFile, setEditingFile] = useState(null);
-  const [editContent, setEditContent] = useState('');
+  const [editName, setEditName] = useState(''); // แก้ไขชื่อไฟล์ (ปุ่มปากกา)
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContent, setPreviewContent] = useState('');
   const [previewEditMode, setPreviewEditMode] = useState(false);
   const [previewAiStructuring, setPreviewAiStructuring] = useState(false);
   const [selectedPreviewChunks, setSelectedPreviewChunks] = useState([]);
+  const [showChunkSelector, setShowChunkSelector] = useState(false); // ยุบ/กาง ตัวเลือก chunk ในโหมดแก้ไขข้อความ
   const [previewTableSheets, setPreviewTableSheets] = useState([]);
   const [previewActiveSheetIdx, setPreviewActiveSheetIdx] = useState(0);
   const [expandedCellEditor, setExpandedCellEditor] = useState(null);
@@ -184,7 +189,10 @@ function SupportAddKnowledgeData() {
           const fileText = typeof file.text === 'string' ? file.text : '';
           const text = fileText.trim() ? fileText : fromBlocks;
           const metadata = file.metadata && typeof file.metadata === 'object' ? { ...file.metadata } : {};
-          if (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0) {
+          if (
+            (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0)
+            && looksLikeSpreadsheetName(file.fileName || file.name)
+          ) {
             const recoveredSheets = recoverExcelPreviewSheets(text);
             if (recoveredSheets.length > 0) {
               metadata.previewSheets = recoveredSheets;
@@ -319,7 +327,10 @@ function SupportAddKnowledgeData() {
         const pageCount = result.pages && Array.isArray(result.pages) ? result.pages.length : null;
         const blocks = result.blocks && result.blocks.length > 0 ? result.blocks : (text ? [{ text, label: 'Content' }] : []);
         const metadata = result.metadata && typeof result.metadata === 'object' ? { ...result.metadata } : {};
-        if (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0) {
+        if (
+          (!Array.isArray(metadata.previewSheets) || metadata.previewSheets.length === 0)
+          && looksLikeSpreadsheetName(file?.name)
+        ) {
           const recoveredSheets = recoverExcelPreviewSheets(text);
           if (recoveredSheets.length > 0) {
             metadata.previewSheets = recoveredSheets;
@@ -451,9 +462,12 @@ function SupportAddKnowledgeData() {
       setUploadedFiles([...uploadedFiles, newFile]);
       setDataContent('');
       setTextFileName('');
+      // หลังกด Upload ข้อความสำเร็จ สลับไปมุมมอง "ไฟล์" อัตโนมัติ
+      // เพื่อให้กด "บันทึกและแปลงเป็น Vector" ได้ทันที ไม่ติด warning ให้ใส่ชื่อ/กด Upload อีก
+      setDataType('file');
       return;
     }
-    
+
     // For actual file uploads
     if (file instanceof File) {
       if (!isSupportedUploadFile(file)) {
@@ -588,41 +602,76 @@ function SupportAddKnowledgeData() {
     };
   };
 
-  const handleEditFile = (file) => {
-    const rows = buildOcrBlockRows(file.blocks);
-    const excelSheets = hasExcelPreviewSheets(file) ? clonePreviewSheets(file.metadata.previewSheets) : [];
-    setPreviewFile(file);
-    setPreviewContent(flattenBlocksToText(file));
-    setPreviewTableSheets(excelSheets);
-    setPreviewActiveSheetIdx(0);
-    setSelectedPreviewChunks(rows.map((r) => r.idx));
-    setPreviewEditMode(true);
-    setIsPreviewModalOpen(true);
+  // รวมตาราง (ที่แก้แล้วใน sheet editor) กลับเข้าไปใน "ข้อความเต็ม" โดยคงข้อความ (prose) รอบๆ ตารางไว้
+  // แทนที่บล็อกตารางเดิมในข้อความด้วยตารางที่สร้างใหม่ทีละบล็อกตามลำดับ ส่วนบรรทัดที่ไม่ใช่ตารางคงไว้เหมือนเดิม
+  const mergeSheetsIntoText = (originalText, sheets) => {
+    const src = String(originalText || '');
+    const sheetList = Array.isArray(sheets) ? sheets : [];
+    if (sheetList.length === 0) return src;
+    const isTableLine = (line) => /^\|.+\|$/.test(String(line || '').trim());
+    const buildPlainTable = (sheet = {}) => {
+      const columns = Array.isArray(sheet?.columns) ? sheet.columns : [];
+      const rows = Array.isArray(sheet?.rows) ? sheet.rows : [];
+      if (!columns.length) return '';
+      const header = `| ${columns.map((col) => escapeTableCell(col)).join(' | ')} |`;
+      const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+      const body = rows.map((row) => `| ${columns.map((column) => escapeTableCell(row?.[column])).join(' | ')} |`);
+      return [header, separator, ...body].join('\n');
+    };
+    const lines = src.split(/\r?\n/);
+    const out = [];
+    let sheetIdx = 0;
+    let i = 0;
+    while (i < lines.length) {
+      if (isTableLine(lines[i])) {
+        const blockLines = [];
+        while (i < lines.length && isTableLine(lines[i])) {
+          blockLines.push(lines[i]);
+          i += 1;
+        }
+        if (sheetIdx < sheetList.length) {
+          const rebuilt = buildPlainTable(sheetList[sheetIdx]);
+          out.push(rebuilt || blockLines.join('\n'));
+          sheetIdx += 1;
+        } else {
+          out.push(blockLines.join('\n'));
+        }
+      } else {
+        out.push(lines[i]);
+        i += 1;
+      }
+    }
+    return out.join('\n');
   };
 
+  // เปิด modal แก้ไข "ชื่อไฟล์" (ปุ่มปากกา)
+  const handleRenameFile = (file) => {
+    setEditingFile(file);
+    setEditName(file?.name || '');
+    setFileError('');
+    setIsEditModalOpen(true);
+  };
+
+  // บันทึกชื่อไฟล์ใหม่
   const handleSaveEdit = () => {
-    setUploadedFiles(uploadedFiles.map(f => {
-      if (f.id === editingFile.id) {
-        const updated = { ...f, content: editContent, text: editContent };
-        // Update blocks if content changed
-        if (editContent.trim()) {
-          updated.blocks = [{ text: editContent, label: 'Content' }];
-        } else {
-          updated.blocks = [];
-        }
-        return updated;
-      }
-      return f;
-    }));
+    const newName = (editName || '').trim();
+    if (!newName) {
+      setFileError('กรุณากรอกชื่อไฟล์');
+      return;
+    }
+    if (!editingFile) return;
+    setUploadedFiles(uploadedFiles.map(f => (
+      f.id === editingFile.id ? { ...f, name: newName } : f
+    )));
     setIsEditModalOpen(false);
     setEditingFile(null);
-    setEditContent('');
+    setEditName('');
   };
 
   const handleCancelEdit = () => {
     setIsEditModalOpen(false);
     setEditingFile(null);
-    setEditContent('');
+    setEditName('');
   };
 
   const handlePreviewFile = (file) => {
@@ -640,17 +689,20 @@ function SupportAddKnowledgeData() {
   const handleSavePreviewEdit = () => {
     if (!previewFile) return;
     if (previewTableSheets.length > 0) {
-      const parsed = buildSourceFromPreviewSheets(previewTableSheets);
+      const cleanedSheets = clonePreviewSheets(previewTableSheets);
+      // คงข้อความ (prose) รอบตารางไว้ แล้วแทนเฉพาะบล็อกตารางด้วยตารางที่แก้แล้ว
+      const mergedText = mergeSheetsIntoText(previewContent, cleanedSheets);
+      const nextBlocks = mergedText.trim() ? [{ text: mergedText, label: 'Content' }] : [];
       setUploadedFiles(prev => prev.map((f) => {
         if (f.id !== previewFile.id) return f;
         return {
           ...f,
-          content: parsed.text,
-          text: parsed.text,
-          blocks: parsed.blocks,
+          content: mergedText,
+          text: mergedText,
+          blocks: nextBlocks,
           metadata: {
             ...(f.metadata || {}),
-            previewSheets: parsed.previewSheets,
+            previewSheets: cleanedSheets,
           },
         };
       }));
@@ -658,18 +710,18 @@ function SupportAddKnowledgeData() {
         prev
           ? {
               ...prev,
-              content: parsed.text,
-              text: parsed.text,
-              blocks: parsed.blocks,
+              content: mergedText,
+              text: mergedText,
+              blocks: nextBlocks,
               metadata: {
                 ...(prev.metadata || {}),
-                previewSheets: parsed.previewSheets,
+                previewSheets: cleanedSheets,
               },
             }
           : null
       ));
-      setPreviewContent(parsed.text);
-      setPreviewTableSheets(parsed.previewSheets);
+      setPreviewContent(mergedText);
+      setPreviewTableSheets(cleanedSheets);
       showToast('บันทึกการแก้ไขตารางแล้ว', 'success');
       setPreviewEditMode(false);
       return;
@@ -768,6 +820,7 @@ function SupportAddKnowledgeData() {
     setPreviewEditMode(false);
     setPreviewAiStructuring(false);
     setSelectedPreviewChunks([]);
+    setShowChunkSelector(false);
     setPreviewTableSheets([]);
     setPreviewActiveSheetIdx(0);
     setExpandedCellEditor(null);
@@ -1497,7 +1550,6 @@ function SupportAddKnowledgeData() {
                       
                       const canViewOcr =
                         !file.processingOCR && !!flattenBlocksToText(file);
-                      const canEditContent = canViewOcr;
 
                       return (
                         <div
@@ -1539,12 +1591,12 @@ function SupportAddKnowledgeData() {
                             
                             {/* Action Buttons */}
                             <div className='flex items-center gap-1 flex-shrink-0'>
-                            {canEditContent && (
+                            {!file.processingOCR && (
                               <button
                                 type='button'
-                                onClick={() => handleEditFile(file)}
+                                onClick={() => handleRenameFile(file)}
                                 className='p-1 text-gray-500 hover:text-gray-700 transition-colors'
-                                title='แก้ไขข้อความรวม'
+                                title='แก้ไขชื่อ'
                               >
                                 <HiOutlinePencil className='text-lg' />
                               </button>
@@ -1689,17 +1741,29 @@ function SupportAddKnowledgeData() {
               <div className='bg-white rounded-lg shadow-2xl w-full max-w-2xl' onClick={(e) => e.stopPropagation()}>
                 <div className='px-6 py-4 border-b border-gray-200'>
                   <h3 className='text-lg font-semibold text-gray-800'>
-                    แก้ไขไฟล์: {editingFile.name}
+                    แก้ไขชื่อไฟล์
                   </h3>
                 </div>
                 <div className='p-6'>
-                  <textarea
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    placeholder='แก้ไขเนื้อหาไฟล์ที่นี่...'
-                    rows={15}
-                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all resize-none text-gray-700 placeholder-gray-400'
+                  <label htmlFor='rename-input' className='block text-sm font-medium text-gray-700 mb-2'>
+                    ชื่อไฟล์
+                  </label>
+                  <input
+                    id='rename-input'
+                    type='text'
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); handleSaveEdit(); }
+                      else if (e.key === 'Escape') { handleCancelEdit(); }
+                    }}
+                    placeholder='กรอกชื่อไฟล์...'
+                    autoFocus
+                    className='w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent transition-all text-gray-700 placeholder-gray-400'
                   />
+                  {fileError && (
+                    <p className='text-sm text-red-600 mt-2'>{fileError}</p>
+                  )}
                 </div>
                 <div className='px-6 py-4 border-t border-gray-200 flex gap-3 justify-end'>
                   <button
@@ -1744,7 +1808,7 @@ function SupportAddKnowledgeData() {
                   <div className='flex items-center gap-2 shrink-0 flex-wrap justify-end'>
                     <button
                       type='button'
-                      onClick={() => setPreviewEditMode(!previewEditMode)}
+                      onClick={() => { setPreviewEditMode(!previewEditMode); setShowChunkSelector(false); }}
                       className='px-3 py-1.5 text-sm border border-gray-800/25 rounded-lg text-gray-900 hover:bg-yellow-300/70 transition-colors'
                     >
                       {previewEditMode ? 'ดูผล' : 'แก้ไขข้อความ'}
@@ -1858,11 +1922,22 @@ function SupportAddKnowledgeData() {
                           if (!ocrRows.length) return null;
                           return (
                             <div className='rounded-lg border border-slate-200 bg-white p-3'>
-                              <div className='flex flex-wrap items-center justify-between gap-2 mb-2'>
-                                <p className='text-xs font-semibold text-slate-700'>
+                              <button
+                                type='button'
+                                onClick={() => setShowChunkSelector((v) => !v)}
+                                className='w-full flex items-center justify-between gap-2 text-left'
+                              >
+                                <span className='text-sm sm:text-base font-semibold text-slate-800'>
                                   เลือก chunk ที่ต้องการให้ AI จัดเรียง ({selectedPreviewChunks.length}/{ocrRows.length})
-                                </p>
-                                <div className='flex items-center gap-2'>
+                                </span>
+                                <span className='flex items-center gap-1 text-xs text-slate-500 shrink-0'>
+                                  {showChunkSelector ? 'ซ่อน' : 'เลือก chunk'}
+                                  <HiChevronDown className={`text-base transition-transform ${showChunkSelector ? 'rotate-180' : ''}`} />
+                                </span>
+                              </button>
+                              {showChunkSelector && (
+                                <>
+                                <div className='flex flex-wrap items-center justify-end gap-2 mt-3 mb-2'>
                                   <button
                                     type='button'
                                     onClick={() => setSelectedPreviewChunks(ocrRows.map((row) => row.idx))}
@@ -1885,7 +1960,6 @@ function SupportAddKnowledgeData() {
                                     ลบ chunk ที่เลือก
                                   </button>
                                 </div>
-                              </div>
                               <div className='max-h-56 overflow-y-auto grid grid-cols-1 md:grid-cols-2 gap-2 pr-1'>
                                 {ocrRows.map((row) => {
                                   const selected = selectedPreviewChunks.includes(row.idx);
@@ -1921,6 +1995,8 @@ function SupportAddKnowledgeData() {
                                   );
                                 })}
                               </div>
+                                </>
+                              )}
                             </div>
                           );
                         })()}

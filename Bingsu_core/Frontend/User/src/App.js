@@ -21,6 +21,7 @@ function App() {
         <Route path="/forgotpassword" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/homepage" element={<Homepage />} />
+        <Route path="/private" element={<Homepage privateMode />} />
         <Route path="/verifying" element={<Verifying />} />
         <Route path="/create-password" element={<CreatePassword />} />
         <Route path="/approval" element={<Approval />} />

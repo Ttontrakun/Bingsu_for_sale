@@ -329,6 +329,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   const [healthData, setHealthData] = useState(null);
   const [healthResponseTimeMs, setHealthResponseTimeMs] = useState(null);
   const [faqCategories, setFaqCategories] = useState(null);
+  const [citedDocs, setCitedDocs] = useState(null); // เอกสารที่ถูกอ้างอิงบ่อย
   const [adminActivity, setAdminActivity] = useState(null);
   const [tokenUsageData, setTokenUsageData] = useState(null);
   const [userRoleDistributionData, setUserRoleDistributionData] = useState(null);
@@ -403,6 +404,19 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       .getFaqCategories(scope, 30)
       .then((data) => setFaqCategories(data?.categories ?? null))
       .catch(() => setFaqCategories([]));
+  }, [filter, userRole]);
+
+  // เอกสารที่ถูกอ้างอิงบ่อย (แทนการ์ด "ประเภทคำถามที่พบบ่อย")
+  useEffect(() => {
+    if (filter === 'system' || userRole === 'support') {
+      setCitedDocs(null);
+      return;
+    }
+    const scope = filter === 'user' ? 'user' : 'all';
+    api
+      .getTopCitedDocuments(scope, 30)
+      .then((data) => setCitedDocs(data?.categories ?? null))
+      .catch(() => setCitedDocs([]));
   }, [filter, userRole]);
 
   useEffect(() => {
@@ -1596,25 +1610,25 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           )}
         </div>
 
-        {/* Frequently Asked Questions Bar Chart */}
+        {/* เอกสารที่ถูกอ้างอิงบ่อย (Most-cited knowledge documents) */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-all duration-300">
           <div className="flex items-center gap-3 mb-6">
             <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
-              <HiQuestionMarkCircle className="text-white text-2xl" />
+              <HiBookOpen className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">ประเภทคำถามที่พบบ่อย</h3>
-              <p className="text-sm text-gray-600">จำนวนคำถามตามประเภท</p>
+              <h3 className="text-2xl font-bold text-gray-800">เอกสารที่ถูกอ้างอิงบ่อย</h3>
+              <p className="text-sm text-gray-600">จำนวนคำตอบที่อ้างอิงเอกสารแต่ละฉบับ (30 วันล่าสุด)</p>
             </div>
           </div>
-          {faqCategories === null ? (
+          {citedDocs === null ? (
             <div className="w-full h-[320px] flex items-center justify-center text-sm text-gray-500">
               กำลังโหลด...
             </div>
-          ) : faqCategories.length ? (
+          ) : citedDocs.length ? (
             <ResponsiveContainer width="100%" height={320}>
               <BarChart
-                data={metrics.frequentlyAskedQuestions}
+                data={citedDocs}
                 layout="vertical"
                 margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
               >
@@ -1631,19 +1645,20 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                   style={{ fontSize: '12px', fontWeight: '500' }}
                   tickLine={false}
                   domain={[0, 'dataMax']}
+                  allowDecimals={false}
                 />
                 <YAxis
                   dataKey="type"
                   type="category"
                   stroke="#6B7280"
-                  style={{ fontSize: '12px', fontWeight: '500' }}
-                  width={140}
+                  style={{ fontSize: '11px', fontWeight: '500' }}
+                  width={180}
                   tickLine={false}
                 />
                 <Tooltip content={<CustomTooltip />} />
                 <Bar
                   dataKey="count"
-                  name="จำนวนคำถาม"
+                  name="จำนวนการอ้างอิง"
                   fill="url(#barGradient)"
                   radius={[0, 8, 8, 0]}
                   animationDuration={1000}
@@ -1651,8 +1666,9 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div className="w-full h-[320px] flex items-center justify-center text-sm text-gray-500">
-              ไม่มีข้อมูล
+            <div className="w-full h-[320px] flex flex-col items-center justify-center text-sm text-gray-500 gap-1">
+              <span>ยังไม่มีการอ้างอิงเอกสารในช่วงนี้</span>
+              <span className="text-xs text-gray-400">เมื่อผู้ใช้ถามและบอทตอบโดยอ้างอิงเอกสาร จะแสดงที่นี่</span>
             </div>
           )}
         </div>

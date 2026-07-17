@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -14,11 +14,77 @@ import {
   HiPencil,
   HiThumbUp,
   HiThumbDown,
-  HiPaperClip
+  HiChevronDown,
 } from 'react-icons/hi';
 import { HiChatBubbleLeftRight } from 'react-icons/hi2';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
-import { chatMessageAPI, chatAPI, botAPI, userAPI, getErrorMessage } from '../services/api';
+import { showToast } from '../components/ToastNotification';
+import { chatMessageAPI, chatAPI, botAPI, userAPI, privateContextAPI, getErrorMessage } from '../services/api';
+
+// ตัวเรนเดอร์ Markdown ของบอท — แยกออกมาและหุ้ม memo เพื่อไม่ให้ re-render
+// ตาม state อื่น ๆ ของหน้าแชท (โหลด quota ทุก 12 วิ, hover, scroll ฯลฯ)
+// เพราะการ re-render ReactMarkdown ระหว่างลากเมาส์จะทำให้ selection หลุด
+// ต้องกดค้างตลอด — memo ช่วยให้ DOM คงเดิม เลือก/คัดลอกได้เหมือนข้อความผู้ใช้
+const BOT_MARKDOWN_COMPONENTS = {
+  h1: ({ node, children, ...props }) => <h1 className='text-lg font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h1>,
+  h2: ({ node, children, ...props }) => <h2 className='text-base font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h2>,
+  h3: ({ node, children, ...props }) => <h3 className='text-[15px] font-semibold mt-2.5 mb-1.5 text-gray-900' {...props}>{children}</h3>,
+  table: ({ node, ...props }) => (
+    <table
+      className='w-full max-w-full table-fixed border border-gray-200 rounded-lg overflow-hidden my-2 text-sm'
+      style={{ tableLayout: 'fixed' }}
+      {...props}
+    />
+  ),
+  thead: ({ node, ...props }) => <thead className='bg-gray-100' {...props} />,
+  th: ({ node, ...props }) => (
+    <th
+      className='border border-gray-200 px-3 py-2 text-left font-semibold text-gray-700 align-top break-words whitespace-normal sm:whitespace-nowrap'
+      style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
+      {...props}
+    />
+  ),
+  td: ({ node, ...props }) => (
+    <td
+      className='border border-gray-200 px-3 py-2 text-gray-800 align-top break-words whitespace-pre-wrap'
+      style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
+      {...props}
+    />
+  ),
+  tr: ({ node, ...props }) => <tr className='border-b border-gray-200' {...props} />,
+  p: ({ node, ...props }) => <p className='whitespace-pre-wrap my-2 text-[15px] leading-7' {...props} />,
+  strong: ({ node, ...props }) => <strong className='font-semibold' {...props} />,
+  ul: ({ node, ...props }) => <ul className='list-disc list-inside my-2 space-y-1' {...props} />,
+  ol: ({ node, ...props }) => <ol className='list-decimal list-inside my-2 space-y-1 pl-4' {...props} />,
+  li: ({ node, ...props }) => <li className='ml-1 pl-1 leading-7' {...props} />,
+  blockquote: ({ node, ...props }) => (
+    <blockquote className='border-l-4 border-yellow-300 bg-yellow-50/60 rounded-r-md px-3 py-2 my-2 text-gray-700' {...props} />
+  ),
+  code: ({ inline, children, ...props }) =>
+    inline ? (
+      <code className='px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 text-[13px]' {...props}>
+        {children}
+      </code>
+    ) : (
+      <code className='block rounded-lg bg-gray-900 text-gray-100 p-3 text-[13px] leading-6 overflow-x-auto' {...props}>
+        {children}
+      </code>
+    ),
+};
+
+const BotMarkdown = memo(function BotMarkdown({ text }) {
+  return (
+    <div className='gemini-markdown max-w-full min-w-0 overflow-x-auto select-text [&_*]:select-text [&_ol_li>p]:inline [&_ol_li>p]:my-0 [&_ul_li>p]:inline [&_ul_li>p]:my-0 [&_table]:max-w-full [&_th:first-child]:w-32 [&_td:first-child]:w-32'>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw]}
+        components={BOT_MARKDOWN_COMPONENTS}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  );
+});
 
 const formatToken = (n) => {
   const x = Number(n || 0);
@@ -26,6 +92,8 @@ const formatToken = (n) => {
 };
 const OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
 const ENABLE_MESSAGE_EDIT_BUTTON = false;
+// ซ่อนปุ่มเลือกโหมด (Flash/Detail) ไว้ก่อน — ใช้ Detail (120B บน H100) เป็นหลักเสมอ
+const ENABLE_MODE_SELECTOR = false;
 const ENABLE_SOURCE_REFERENCES = true;
 const isCorruptedText = (value) => {
   const text = String(value || '').trim();
@@ -41,6 +109,33 @@ const normalizeReferenceQuote = (input) => {
     .replace(/^(?:sheet|tab)\s*[^|]*\|\s*/i, '')
     .replace(/^(?:row|line|column)\s*[_\d\s-]*:?\s*/i, '');
   return (stripped || raw).slice(0, 220).trim();
+};
+
+// ส่วนในเอกสารที่เขียนไว้ "ให้ AI ค้นหาเจอง่าย" (machine-oriented) — ซ่อนตอนแสดงแหล่งที่มาให้ผู้ใช้
+// (AI ยังใช้เนื้อหาเต็มในการค้น/ตอบ เพียงแต่ไม่แสดงส่วนนี้ในหน้าอ้างอิง)
+const AI_HELPER_MARKER = /(ให้ระบบค้นเจอง่าย|ให้ค้นหาเจอง่าย|ให้ค้นเจอง่าย|ให้ระบบค้นหาเจอ|ให้ระบบค้นเจอ|ให้ระบบค้นหา|search[- ]?friendly|สรุปเป็นประโยค|แบบประโยค)/i;
+// บรรทัด "ประโยคช่วยค้นหา" (machine sentence) ที่ถูกตัด chunk แยกจากหัวข้อ — ตัดทิ้งตอนแสดง
+const AI_HELPER_LINE = /International\s+[\d,]+\s*\/\s*Local\s*Access\s+[\d,]+\s*Mbps\s*:\s*ราคาปกติรวม/i;
+
+const stripAiHelperSections = (raw) => {
+  const lines = String(raw || '').split('\n');
+  const out = [];
+  let skipping = false;
+  for (const line of lines) {
+    const isHeader = /^\s{0,3}#{1,6}\s/.test(line);
+    if (isHeader) {
+      skipping = AI_HELPER_MARKER.test(line);
+      if (!skipping) out.push(line);
+      continue;
+    }
+    if (!skipping && AI_HELPER_MARKER.test(line)) {
+      skipping = true;
+      continue;
+    }
+    if (AI_HELPER_LINE.test(line)) continue;
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 };
 
 const extractReferencePosition = (chunk) => {
@@ -126,6 +221,61 @@ const getReferenceFileMeta = (displayName) => {
   return { icon: '📎', type: 'DOC', previewClass: 'from-slate-500 to-slate-700' };
 };
 
+const isGeneratedFollowUpPrompt = (text) => {
+  const t = String(text || '').trim();
+  if (!t) return false;
+  return /^จากคำตอบก่อนหน้า\s*ช่วย/i.test(t);
+};
+
+const parsePrivateCommand = (text) => {
+  const raw = String(text || '').trim();
+  if (!raw.startsWith('/')) return null;
+  const match = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
+  if (!match) return null;
+  return {
+    kind: match[1] === 'จำ' ? 'remember' : 'instruction',
+    payload: String(match[2] || '').trim(),
+  };
+};
+
+const parseRememberedItems = (content) =>
+  String(content || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+// ตัวบ่งชี้ "กำลังพิมพ์" ของบอท — แสดงเฉพาะตอนรอคำตอบแต่ยังไม่มีบับเบิลบอท (ไม่ทับตอนสตรีม)
+const TypingIndicator = ({ isTyping, messages, typingStage }) => {
+  if (!isTyping) return null;
+  const lastMsg = messages[messages.length - 1];
+  if (lastMsg?.sender === 'bot') return null;
+  return (
+    <div className='flex gap-3 justify-start'>
+      <div className='flex-shrink-0 w-8 h-8 mt-1'>
+        <div className='w-8 h-8 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-sm'>
+          <HiChatBubbleLeftRight className='text-white text-sm' />
+        </div>
+      </div>
+      <div className='flex-1'>
+        <div className='inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white border border-gray-200 shadow-sm'>
+          <div className='flex gap-1.5'>
+            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '0ms' }}></div>
+            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '150ms' }}></div>
+            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '300ms' }}></div>
+          </div>
+          <span className='text-xs text-gray-500'>
+            {typingStage === 0
+              ? 'กำลังค้นหาข้อมูลที่เกี่ยวข้อง…'
+              : typingStage === 1
+                ? 'กำลังเรียบเรียงคำตอบ…'
+                : 'ใกล้เสร็จแล้ว กำลังตรวจสอบความถูกต้อง…'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function Chat() {
   const { chatId } = useParams();
   const navigate = useNavigate();
@@ -133,6 +283,8 @@ function Chat() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [typingStage, setTypingStage] = useState(0);
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const [chatName, setChatName] = useState('');
   // help bot: ใช้ซ่อนปุ่มคำสั่งลัดเฉพาะแชทบอทช่วยสอน
   const [helpBotId, setHelpBotId] = useState(null);
@@ -145,13 +297,36 @@ function Chat() {
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editingText, setEditingText] = useState('');
   const [editingOriginalText, setEditingOriginalText] = useState('');
-  const [attachedFile, setAttachedFile] = useState(null);
-  const fileInputRef = useRef(null);
+  // แก้ไขข้อความที่ผู้ใช้ส่งไปแล้ว แล้วส่งคำถามที่แก้ใหม่ (แบบ Gemini)
+  const [editingUserMsgId, setEditingUserMsgId] = useState(null);
+  const [editingUserText, setEditingUserText] = useState('');
+  // โหมดส่วนตัว: จัดการเนื้อหา/คำสั่งที่หน้า /private — ในแชทเหลือสวิตช์เปิด/ปิด
+  const [privateMode, setPrivateMode] = useState(false);
+  // โหมดคำตอบ: 'fast' (Qwen เร็ว) หรือ 'detailed' (120B ละเอียด) — จำค่าไว้ข้ามการใช้งาน
+  const [answerMode, setAnswerMode] = useState(() => {
+    if (!ENABLE_MODE_SELECTOR) return 'detailed';
+    try { return localStorage.getItem('answerMode') === 'fast' ? 'fast' : 'detailed'; } catch { return 'detailed'; }
+  });
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+  const selectAnswerMode = (m) => {
+    const next = m === 'fast' ? 'fast' : 'detailed';
+    setAnswerMode(next);
+    try { localStorage.setItem('answerMode', next); } catch {}
+    setModeMenuOpen(false);
+  };
+  const [usePrivateContent, setUsePrivateContent] = useState(true);
+  const [privateHasData, setPrivateHasData] = useState(false);
+  const [privateInstructionsText, setPrivateInstructionsText] = useState('');
+  const [privateRememberItems, setPrivateRememberItems] = useState([]);
+  const [privateMemoryPanelOpen, setPrivateMemoryPanelOpen] = useState(false);
+  const [composerPrivateCommand, setComposerPrivateCommand] = useState(null); // 'remember' | 'instruction' | null
+  const privateModeRef = useRef(false);
   const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [sourceModalData, setSourceModalData] = useState(null);
   const [isSelectingText, setIsSelectingText] = useState(false);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const textareaRef = useRef(null);
   const timeoutRefs = useRef({});
   const streamTextRef = useRef('');
@@ -180,6 +355,7 @@ function Chat() {
       try {
         const chat = await chatAPI.getChat(chatId);
         setChatBotId(chat?.botId ?? null);
+        if (chat?.private === true) setPrivateMode(true);
         if (chat && chat.name) {
           setChatName(chat.name);
         } else {
@@ -190,7 +366,6 @@ function Chat() {
         if (chat && chat.botId && bots.length > 0) {
           const bot = bots.find(b => b.id === chat.botId);
           if (bot) {
-            console.log('Found bot from chat.botId:', bot.name, 'with documentIds:', bot.documentIds);
             setSelectedBot(bot);
           } else {
             console.warn('Bot from chat.botId not found in bots list:', chat.botId);
@@ -239,12 +414,41 @@ function Chat() {
     return () => { cancelled = true; };
   }, []);
 
+  const refreshPrivateMemory = useCallback(async () => {
+    try {
+      const data = await privateContextAPI.get();
+      const instructions = String(data?.instructions || '').trim();
+      const content = String(data?.content || '');
+      const remembered = parseRememberedItems(content);
+      setPrivateInstructionsText(instructions);
+      setPrivateRememberItems(remembered);
+      setPrivateHasData(Boolean(instructions || remembered.length));
+    } catch (_) {
+      // ignore
+    }
+  }, []);
+
+  // ตรวจว่าผู้ใช้มีเนื้อหา/คำสั่งส่วนตัวบันทึกไว้ไหม (ไว้แสดงป้ายและ list ในแชท)
+  useEffect(() => {
+    refreshPrivateMemory();
+  }, [refreshPrivateMemory]);
+
+  // ห้องนี้เป็นห้องส่วนตัวไหม: เปิดทันทีถ้ามาจากหน้าโหมดส่วนตัว (ยืนยันอีกครั้งจาก chat.private ตอนโหลด)
+  useEffect(() => {
+    if (location.state?.privateMode) {
+      setPrivateMode(true);
+    }
+  }, [location.state]);
+
+  // sync refs เพื่อให้ค่าใน callback/stream เป็นปัจจุบันเสมอ
+  // ส่ง privateMode=true ก็ต่อเมื่ออยู่ในห้องส่วนตัว "และ" สวิตช์เปิดอยู่
+  useEffect(() => { privateModeRef.current = privateMode && usePrivateContent; }, [privateMode, usePrivateContent]);
+
   // โหลด bots จาก API
   useEffect(() => {
     const loadBots = async () => {
       try {
         const botsData = await botAPI.getBots();
-        console.log('Bots data from API:', botsData);
         
         // Ensure we have an array and filter out any invalid data
         if (Array.isArray(botsData)) {
@@ -270,7 +474,6 @@ function Chat() {
             });
           // Store all bots (including inactive) for checking selectedBot status
           setBots(validBots);
-          console.log('Loaded bots:', validBots.length, 'bots (enabled:', validBots.filter(b => b.enabled !== false).length, ')');
         } else {
           console.warn('Bots data is not an array:', botsData);
           setBots([]);
@@ -489,6 +692,9 @@ function Chat() {
         return a.sender === 'user' && b.sender === 'bot' ? -1 : a.sender === 'bot' && b.sender === 'user' ? 1 : 0;
       });
       setMessages(formattedMessages);
+      // โหลด/รีเฟรชแล้วให้เริ่มที่บรรทัดล่าสุดเสมอ
+      setShowScrollDown(false);
+      requestAnimationFrame(() => scrollToBottom('auto'));
       setHasInitialized(true);
     } catch (error) {
       if (isConversationNotFoundError(error) && !missingConversationHandledRef.current) {
@@ -528,7 +734,6 @@ function Chat() {
       if (bot) {
         // ตรวจสอบว่า bot ยัง active อยู่หรือไม่
         if (bot.enabled !== false) {
-          console.log('Found bot from location.state:', bot.name, 'with documentIds:', bot.documentIds, '(enabled)');
           setSelectedBot(bot);
         } else {
           console.warn('Bot from state is inactive:', bot.name);
@@ -540,7 +745,6 @@ function Chat() {
       }
     } else if (botFromState && bots.length === 0) {
       // ถ้ายังไม่มี bots list ให้เก็บไว้ชั่วคราว
-      console.log('Bots list not loaded yet, storing bot from state temporarily');
       setSelectedBot(botFromState);
     }
   }, [location.state, bots, selectedBot]);
@@ -584,7 +788,7 @@ function Chat() {
         }
         
         if (selectedBot && selectedBot.enabled === false) {
-          alert('Bot นี้ถูก inactive แล้ว กรุณาไปเปิด Bot เป็น active ในหน้า Bots ก่อนส่งข้อความ');
+          showToast('Bot นี้ถูก inactive แล้ว กรุณาไปเปิด Bot เป็น active ในหน้า Bots ก่อนส่งข้อความ', 'warning');
           return;
         }
         
@@ -594,6 +798,8 @@ function Chat() {
           { id: tempUserId, text: firstMessage, sender: 'user', timestamp: new Date() },
           { id: tempBotId, text: '', sender: 'bot', timestamp: new Date() },
         ]);
+        setShowScrollDown(false);
+        requestAnimationFrame(() => scrollToBottom('smooth'));
         setIsTyping(true);
         streamTextRef.current = '';
         streamBotIdRef.current = tempBotId;
@@ -601,7 +807,9 @@ function Chat() {
         streamAbortControllerRef.current = controller;
         try {
           await chatMessageAPI.createBotResponseStream(chatId, firstMessage, {
+            mode: answerMode,
             signal: controller.signal,
+            privateMode: privateModeRef.current,
             onChunk: (content) => appendStreamChunk(content),
             onDone: (data) => {
               flushStreamText();
@@ -637,7 +845,9 @@ function Chat() {
           }
           setMessages(prev => prev.filter(m => m.id !== tempBotId));
           try {
-            await chatMessageAPI.createBotResponse(chatId, firstMessage);
+            await chatMessageAPI.createBotResponse(chatId, firstMessage, null, {
+              privateMode: privateModeRef.current,
+            });
             await loadMessages();
           } catch (fallbackErr) {
             if (isConversationNotFoundError(fallbackErr) && !missingConversationHandledRef.current) {
@@ -674,10 +884,48 @@ function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chatId, hasInitialized]);
 
-  // Auto-scroll to bottom when messages change
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior });
+  }, []);
+
+  // ตรวจว่าผู้ใช้อยู่ใกล้ก้นแชทหรือไม่ เพื่อโชว์ปุ่ม "เลื่อนลงล่างสุด"
+  const isNearBottom = useCallback(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: isTyping ? 'auto' : 'smooth' });
-  }, [messages, isTyping]);
+    const el = messagesContainerRef.current;
+    if (!el) return undefined;
+    const onScroll = () => setShowScrollDown(!isNearBottom());
+    el.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [isNearBottom]);
+
+  // Auto-scroll to bottom when messages change — เฉพาะตอนผู้ใช้อยู่ใกล้ก้นแชท
+  useEffect(() => {
+    if (isNearBottom()) {
+      messagesEndRef.current?.scrollIntoView({ behavior: isTyping ? 'auto' : 'smooth' });
+    } else {
+      setShowScrollDown(true);
+    }
+  }, [messages, isTyping, isNearBottom]);
+
+  // สถานะรอคำตอบแบบไล่ขั้น (ให้ผู้ใช้รู้ว่าระบบกำลังทำงาน ไม่ได้ค้าง)
+  useEffect(() => {
+    if (!isTyping) {
+      setTypingStage(0);
+      return undefined;
+    }
+    setTypingStage(0);
+    const timers = [
+      setTimeout(() => setTypingStage(1), 2500),
+      setTimeout(() => setTypingStage(2), 7000),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [isTyping]);
 
   // Format timestamp (สำหรับแสดงใน timestamp badge)
   const formatTime = (date) => {
@@ -824,14 +1072,43 @@ function Chat() {
     setTimeout(() => setSuccessMessage(null), 1800);
   };
 
+  const handleDeletePrivateInstruction = async () => {
+    try {
+      await privateContextAPI.save({ instructions: '', enabled: true });
+      await refreshPrivateMemory();
+      setSuccessMessage('ลบคำสั่ง AI แล้ว');
+      setTimeout(() => setSuccessMessage(null), 1800);
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err) || 'ลบคำสั่ง AI ไม่สำเร็จ');
+      setTimeout(() => setErrorMessage(null), 2500);
+    }
+  };
+
+  const handleDeleteRememberItem = async (index) => {
+    try {
+      const nextItems = privateRememberItems.filter((_, i) => i !== index);
+      await privateContextAPI.save({ content: nextItems.join('\n'), enabled: true });
+      await refreshPrivateMemory();
+      setSuccessMessage('ลบข้อมูลหน่วยความจำแล้ว');
+      setTimeout(() => setSuccessMessage(null), 1800);
+    } catch (err) {
+      setErrorMessage(getErrorMessage(err) || 'ลบข้อมูลไม่สำเร็จ');
+      setTimeout(() => setErrorMessage(null), 2500);
+    }
+  };
+
   const handleSendMessage = async (e, overrideMessage = null) => {
     e.preventDefault();
     const shouldClearComposer = overrideMessage == null;
     const messageText = (overrideMessage != null && String(overrideMessage).trim() !== '')
       ? String(overrideMessage).trim()
       : chatInput.trim();
-    const withAttachment = attachedFile ? ` (แนบไฟล์: ${attachedFile.name})` : '';
-    const finalText = messageText + withAttachment;
+    const commandPrefix = composerPrivateCommand === 'remember'
+      ? '/จำ'
+      : composerPrivateCommand === 'instruction'
+        ? '/สั่ง'
+        : '';
+    const finalText = (commandPrefix ? `${commandPrefix} ${messageText}` : messageText);
 
     if (!finalText.trim()) return;
     if (isTyping) return;
@@ -858,7 +1135,7 @@ function Chat() {
     }
     if (shouldClearComposer) {
       setChatInput('');
-      setAttachedFile(null);
+      setComposerPrivateCommand(null);
 
       // Reset textarea height after we've confirmed message can be sent
       if (textareaRef.current) {
@@ -866,6 +1143,68 @@ function Chat() {
       }
     }
     const draftKey = getDraftKey(id);
+
+    // คำสั่งลัดโหมดส่วนตัว: /จำ ... หรือ /สั่ง ...
+    const privateCmd = parsePrivateCommand(finalText);
+    if (privateCmd) {
+      if (!privateMode) {
+        setErrorMessage('คำสั่ง /จำ และ /สั่ง ใช้ได้เฉพาะในโหมดส่วนตัว');
+        const t = setTimeout(() => setErrorMessage(null), 3500);
+        timeoutRefs.current.privateCmdMode = t;
+        restoreInputOnError();
+        return;
+      }
+      if (!privateCmd.payload) {
+        setErrorMessage(privateCmd.kind === 'remember'
+          ? 'รูปแบบที่ถูกต้อง: /จำ <ข้อมูลที่ต้องการให้ AI จำ>'
+          : 'รูปแบบที่ถูกต้อง: /สั่ง <คำสั่งการตอบของ AI>');
+        const t = setTimeout(() => setErrorMessage(null), 3500);
+        timeoutRefs.current.privateCmdEmpty = t;
+        restoreInputOnError();
+        return;
+      }
+      const userTempId = `temp-user-${Date.now()}`;
+      const botTempId = `temp-bot-cmd-${Date.now()}`;
+      setMessages(prev => [
+        ...prev,
+        { id: userTempId, text: finalText, sender: 'user', timestamp: new Date() },
+        {
+          id: botTempId,
+          text: privateCmd.kind === 'remember'
+            ? 'บันทึกข้อมูลส่วนตัวแล้ว ใช้ต่อในแชทใหม่ได้ทันที'
+            : 'บันทึกคำสั่ง AI แล้ว ระบบจะใช้รูปแบบนี้ในการตอบถัดไป',
+          sender: 'bot',
+          timestamp: new Date(),
+        },
+      ]);
+      try {
+        const current = await privateContextAPI.get();
+        const maxChars = Number.isFinite(current?.maxChars) ? Number(current.maxChars) : 12000;
+        const maxInstructionsChars = Number.isFinite(current?.maxInstructionsChars) ? Number(current.maxInstructionsChars) : 2000;
+        // ใส่ข้อมูลใหม่ไว้ก่อนข้อมูลเก่า เพื่อให้ข้อมูลล่าสุดมีน้ำหนักมากกว่า
+        const nextContent = privateCmd.kind === 'remember'
+          ? [privateCmd.payload, String(current?.content || '').trim()].filter(Boolean).join('\n')
+          : String(current?.content || '');
+        const nextInstructions = privateCmd.kind === 'instruction'
+          ? privateCmd.payload
+          : String(current?.instructions || '');
+        await privateContextAPI.save({
+          content: nextContent.slice(0, maxChars),
+          instructions: nextInstructions.slice(0, maxInstructionsChars),
+          enabled: true,
+        });
+        await refreshPrivateMemory();
+        setSuccessMessage(privateCmd.kind === 'remember' ? 'จำข้อมูลให้แล้ว' : 'ตั้งค่าคำสั่ง AI แล้ว');
+        setTimeout(() => setSuccessMessage(null), 2200);
+      } catch (err) {
+        setMessages(prev => prev.filter(m => m.id !== botTempId));
+        setErrorMessage(getErrorMessage(err) || 'บันทึกคำสั่งส่วนตัวไม่สำเร็จ');
+        const t = setTimeout(() => setErrorMessage(null), 4000);
+        timeoutRefs.current.privateCmdSave = t;
+        restoreInputOnError();
+      }
+      return;
+    }
 
     // คำสั่ง "X เปลี่ยนเป็น Y" / "ช่วยเปลี่ยน X เป็น Y" — แก้ข้อความบอทล่าสุด
     const replaceCmd = tryApplyReplaceCommand(finalText);
@@ -932,6 +1271,8 @@ function Chat() {
       timestamp: new Date(),
     };
     setMessages(prev => [...prev, userMsg, botMsgPlaceholder]);
+    setShowScrollDown(false);
+    requestAnimationFrame(() => scrollToBottom('smooth'));
     setIsTyping(true);
     streamTextRef.current = '';
     streamBotIdRef.current = tempBotId;
@@ -940,7 +1281,9 @@ function Chat() {
 
     try {
       await chatMessageAPI.createBotResponseStream(chatId, outboundText, {
+        mode: answerMode,
         signal: controller.signal,
+        privateMode: privateModeRef.current,
         onChunk: (content) => appendStreamChunk(content),
         onDone: (data) => {
           flushStreamText();
@@ -985,7 +1328,9 @@ function Chat() {
       // Fallback: ถ้า streaming ไม่รองรับ ให้ใช้แบบธรรมดา
       setMessages(prev => prev.filter(m => m.id !== tempBotId));
       try {
-        await chatMessageAPI.createBotResponse(chatId, outboundText);
+        await chatMessageAPI.createBotResponse(chatId, outboundText, null, {
+          privateMode: privateModeRef.current,
+        });
         if (draftKey && shouldClearComposer) {
           try {
             localStorage.removeItem(draftKey);
@@ -1101,6 +1446,10 @@ function Chat() {
       if (i < lines.length && /^\s*\|[\s\-:]+\|\s*$/.test(lines[i])) {
         out.push(lines[i]);
         i++;
+      } else if (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
+        // มีแถวข้อมูลตามมาแต่ AI ลืมใส่บรรทัดคั่นหัวตาราง (|---|---|)
+        // → เติมให้เอง เพื่อให้เรนเดอร์เป็นตารางจริง ไม่ใช่ markdown ดิบ
+        out.push(`|${' --- |'.repeat(numCols)}`);
       }
       while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
         const row = lines[i];
@@ -1165,6 +1514,45 @@ function Chat() {
     }
   };
 
+  // แก้ไขข้อความที่ผู้ใช้ส่งไปแล้ว → เข้าสู่โหมดแก้ (แสดงกล่องพิมพ์แทนฟองข้อความ)
+  const handleStartUserEdit = (message) => {
+    if (isTyping) return;
+    setEditingUserMsgId(message.id);
+    setEditingUserText(message.text || '');
+  };
+  const handleCancelUserEdit = () => {
+    setEditingUserMsgId(null);
+    setEditingUserText('');
+  };
+  // บันทึกการแก้ → ส่งคำถามที่แก้ไปใหม่ (เหมือนถามใหม่ด้วยข้อความที่แก้แล้ว)
+  const handleResendEditedUserMessage = () => {
+    const text = (editingUserText || '').trim();
+    if (!text || isTyping) return;
+    setEditingUserMsgId(null);
+    setEditingUserText('');
+    handleSendMessage({ preventDefault: () => {} }, text);
+  };
+
+  // กดโหวตคำตอบ 👍/👎 — กดซ้ำที่ปุ่มเดิม = ยกเลิก พร้อมแจ้งเตือนมุมบนขวา
+  const handleFeedback = async (message, ratingWanted) => {
+    const current = feedbackByMessageId[message.id] ?? message.feedback ?? null;
+    const next = current === ratingWanted ? 'none' : ratingWanted;
+    const prevValue = feedbackByMessageId[message.id];
+    setFeedbackByMessageId(prev => ({ ...prev, [message.id]: next }));
+    try {
+      await chatMessageAPI.submitFeedback(message.id, next);
+      if (next === 'up') {
+        showToast('ขอบคุณสำหรับความคิดเห็นของคุณ', 'success');
+      } else if (next === 'down') {
+        showToast('ขอบคุณสำหรับความคิดเห็นของคุณ เราจะนำไปปรับปรุงให้ดีขึ้น', 'success');
+      } else {
+        showToast('ยกเลิกความคิดเห็นแล้ว', 'info');
+      }
+    } catch (err) {
+      setFeedbackByMessageId(prev => ({ ...prev, [message.id]: prevValue }));
+    }
+  };
+
   // ฟังก์ชันสำหรับคัดลอกข้อความ
   const handleCopyMessage = async (messageText, messageId) => {
     try {
@@ -1199,23 +1587,42 @@ function Chat() {
   };
 
   const getPreviousUserQuestion = (botMessageIndex) => {
+    let fallbackQuestion = '';
     for (let i = botMessageIndex - 1; i >= 0; i -= 1) {
       const candidate = messages[i];
       if (candidate?.sender === 'user' && String(candidate?.text || '').trim()) {
-        return String(candidate.text).trim();
+        const text = String(candidate.text).trim();
+        if (!fallbackQuestion) fallbackQuestion = text;
+        // ข้ามข้อความ template ที่ระบบสร้างจากปุ่ม follow-up
+        // เพื่อให้ "คำถามเดิม" คือคำถามหลักจริงของผู้ใช้
+        if (isGeneratedFollowUpPrompt(text)) continue;
+        return text;
       }
     }
-    return '';
+    return fallbackQuestion;
   };
 
   const openSourceReference = (message, ref) => {
     if (!ENABLE_SOURCE_REFERENCES) return;
     if (!message || !ref?.docId) return;
+    if (String(ref.docId) === '__private__') {
+      setSourceModalData({
+        docId: '__private__',
+        displayName: ref.displayName || 'เนื้อหาส่วนตัวของคุณ',
+        positions: [],
+        chunks: [],
+        isPrivate: true,
+      });
+      setIsSourceModalOpen(true);
+      return;
+    }
     const relatedChunks = parseStoredJsonArray(message.groundingChunks)
       .filter((chunk) => {
         const docId = chunk?.retrievedContext?.docId ?? chunk?.payload?.docId;
         return String(docId) === String(ref.docId);
       })
+      // เรียงตามความเกี่ยวข้อง (score) มาก→น้อย เพื่อโชว์เฉพาะช่วงที่ใช้ตอบจริง
+      .sort((a, b) => (Number(b?.score) || 0) - (Number(a?.score) || 0))
       .map((chunk, index) => {
         const pos = extractReferencePosition(chunk);
         return {
@@ -1227,12 +1634,15 @@ function Chat() {
           text: String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? '').trim(),
         };
       })
-      .filter((item) => item.text)
-      .slice(0, 8);
+      // เก็บเฉพาะช่วงที่มีเนื้อหาจริง (ตัดช่วงที่เป็นข้อมูลช่วยค้นหาล้วน) — โชว์ครบเท่าที่ดึงมา ตัวกรอง helper คุมความรกแล้ว
+      .filter((item) => item.text && stripAiHelperSections(item.text))
+      .slice(0, 12);
     setSourceModalData({
       docId: ref.docId,
       displayName: ref.displayName || 'เอกสาร',
-      positions: Array.isArray(ref.positions) ? ref.positions : [],
+      positions: (Array.isArray(ref.positions) ? [...ref.positions] : [])
+        .sort((a, b) => (Number(b?.score) || 0) - (Number(a?.score) || 0))
+        .slice(0, 12),
       chunks: relatedChunks,
     });
     setIsSourceModalOpen(true);
@@ -1257,17 +1667,26 @@ function Chat() {
 
   const buildFollowUpPrompt = (label, botText, userQuestion = '') => {
     const q = String(userQuestion || '').trim();
+    const forQ = q ? ` (คำถามเดิม: ${q})` : '';
+    // ทุกคำสั่งขึ้นต้นด้วย "จากคำตอบก่อนหน้า" เพื่อให้ backend ตรวจเป็น follow-up แล้วดึงประวัติ
+    // (รวมคำตอบบอทก่อนหน้า) มาให้ AI ยึด → คำตอบต่อเนื่องกับด้านบน ไม่หลุดประเด็น
     if (label === 'อธิบายเพิ่มเติม') {
-      return `จากคำตอบก่อนหน้า ช่วยอธิบายเพิ่มเติมให้เข้าใจง่ายขึ้น${q ? ` โดยยึดคำถามเดิม: ${q}` : ''}`;
+      return `จากคำตอบก่อนหน้า ช่วยอธิบายเพิ่มเติมให้เข้าใจง่ายขึ้น โดยยึดเนื้อหาคำตอบเดิมเป็นหลัก ห้ามเปลี่ยนประเด็นหรือสลับไปเรื่องอื่น${forQ}`;
     }
     if (label === 'ดูรายละเอียดเพิ่มเติม') {
-      return `จากคำตอบก่อนหน้า ช่วยอธิบายรายละเอียดเพิ่มเติมแบบเป็นข้อ พร้อมยกตัวอย่างที่เข้าใจง่าย${q ? ` โดยอ้างอิงจากคำถามเดิม: ${q}` : ''}`;
+      return `จากคำตอบก่อนหน้า ช่วยลงรายละเอียดเพิ่มเติมแบบเป็นข้อ โดยยึดเนื้อหาคำตอบเดิมเป็นหลัก ห้ามเปลี่ยนประเด็น${forQ}`;
+    }
+    if (label === 'สรุปเฉพาะประเด็นสำคัญ') {
+      return `จากคำตอบก่อนหน้า ช่วยสรุปเฉพาะประเด็นสำคัญให้สั้นกระชับ โดยสรุปจากเนื้อหาคำตอบเดิมเท่านั้น ห้ามเพิ่มข้อมูลใหม่${forQ}`;
+    }
+    if (label === 'ยกตัวอย่างให้เข้าใจง่าย') {
+      return `จากคำตอบก่อนหน้า ช่วยยกตัวอย่างประกอบให้เข้าใจง่ายขึ้น โดยอิงเนื้อหาคำตอบเดิมเป็นหลัก ไม่ออกนอกประเด็น${forQ}`;
     }
     if (label === 'ขออ้างอิงที่มา') {
-      return `จากคำตอบก่อนหน้า ช่วยระบุแหล่งที่มาจากเอกสารที่ใช้ตอบให้ชัดเจน${q ? ` สำหรับคำถาม: ${q}` : ''}`;
+      return `จากคำตอบก่อนหน้า ช่วยระบุแหล่งที่มาจากเอกสารที่ใช้ตอบให้ชัดเจน${forQ}`;
     }
     if (label === 'ขออ้างอิงข้อที่เกี่ยวข้อง') {
-      return `จากคำตอบก่อนหน้า ช่วยระบุข้ออ้างอิง/แหล่งข้อมูลที่เกี่ยวข้องให้ชัดเจน${q ? ` สำหรับคำถาม: ${q}` : ''}`;
+      return `จากคำตอบก่อนหน้า ช่วยระบุข้ออ้างอิง/แหล่งข้อมูลที่เกี่ยวข้องให้ชัดเจน${forQ}`;
     }
     return label;
   };
@@ -1295,7 +1714,7 @@ function Chat() {
   return (
     <div className='flex h-screen bg-[#f7f7f8] relative'>
       {/* Sidebar Component */}
-      <Sidebar onCollapseChange={setIsSidebarCollapsed} />
+      <Sidebar onCollapseChange={setIsSidebarCollapsed} privateWorkspace={privateMode} />
 
       {/* Main Content */}
       <main className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16' : ''}`}>
@@ -1368,9 +1787,9 @@ function Chat() {
             ) : null}
 
           {selectedBot ? (
-            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 max-w-[320px] min-w-0'>
+            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0'>
               <span
-                className='font-medium truncate min-w-0'
+                className='font-medium whitespace-nowrap'
                 title={typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
               >
                 {typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
@@ -1382,7 +1801,7 @@ function Chat() {
         </div>
 
         {/* Messages Area - Centered like ChatGPT/Gemini */}
-        <div className='flex-1 overflow-y-auto bg-[#f7f7f8]'>
+        <div ref={messagesContainerRef} className='relative flex-1 overflow-y-auto bg-[#f7f7f8]'>
           <div className='max-w-3xl mx-auto px-4 sm:px-6 py-6'>
             {messages.length === 0 ? (
               // Empty state — ใช้ชื่อและคำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท)
@@ -1486,6 +1905,31 @@ function Chat() {
                                     }}
                                   >
                                     {(() => {
+                                      if (isUser && editingUserMsgId === message.id) {
+                                        return (
+                                          <div className='min-w-[240px] sm:min-w-[320px]'>
+                                            <textarea
+                                              autoFocus
+                                              value={editingUserText}
+                                              onChange={(e) => setEditingUserText(e.target.value)}
+                                              onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                  e.preventDefault();
+                                                  handleResendEditedUserMessage();
+                                                } else if (e.key === 'Escape') {
+                                                  handleCancelUserEdit();
+                                                }
+                                              }}
+                                              rows={2}
+                                              className='w-full resize-none rounded-lg bg-white/85 text-gray-900 text-[15px] leading-relaxed px-3 py-2 outline-none border border-amber-500/50 focus:border-amber-600'
+                                            />
+                                            <div className='flex justify-end gap-2 mt-2'>
+                                              <button type='button' onClick={handleCancelUserEdit} className='px-3 py-1 text-sm rounded-full bg-white/70 text-gray-800 hover:bg-white transition-colors'>ยกเลิก</button>
+                                              <button type='button' onClick={handleResendEditedUserMessage} disabled={!editingUserText.trim()} className='px-3 py-1 text-sm rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors'>ส่ง</button>
+                                            </div>
+                                          </div>
+                                        );
+                                      }
                                       const isStreamingThis = message.sender === 'bot' && message.id === streamBotIdRef.current;
                                       const displayText = isStreamingThis ? (streamTextRef.current || message.text) : message.text;
                                       const showDots = message.sender === 'bot' && !displayText && isTyping && index === messages.length - 1;
@@ -1501,62 +1945,7 @@ function Chat() {
                                       if (message.sender === 'bot' && displayText) {
                                         const textWithNewlines = String(displayText).replace(/<br\s*\/?>/gi, '\n');
                                         const textNormalized = normalizeMarkdownTable(textWithNewlines);
-                                        return (
-                                          <div className='gemini-markdown max-w-full min-w-0 overflow-x-auto select-text [&_*]:select-text [&_ol_li>p]:inline [&_ol_li>p]:my-0 [&_ul_li>p]:inline [&_ul_li>p]:my-0 [&_table]:max-w-full [&_th:first-child]:w-32 [&_td:first-child]:w-32'>
-                                            <ReactMarkdown
-                                              remarkPlugins={[remarkGfm]}
-                                              rehypePlugins={[rehypeRaw]}
-                                              components={{
-                                                h1: ({ node, children, ...props }) => <h1 className='text-lg font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h1>,
-                                                h2: ({ node, children, ...props }) => <h2 className='text-base font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h2>,
-                                                h3: ({ node, children, ...props }) => <h3 className='text-[15px] font-semibold mt-2.5 mb-1.5 text-gray-900' {...props}>{children}</h3>,
-                                                table: ({ node, ...props }) => (
-                                                  <table
-                                                    className='w-full max-w-full table-fixed border border-gray-200 rounded-lg overflow-hidden my-2 text-sm'
-                                                    style={{ tableLayout: 'fixed' }}
-                                                    {...props}
-                                                  />
-                                                ),
-                                                thead: ({ node, ...props }) => <thead className='bg-gray-100' {...props} />,
-                                                th: ({ node, ...props }) => (
-                                                  <th
-                                                    className='border border-gray-200 px-3 py-2 text-left font-semibold text-gray-700 align-top break-words whitespace-normal sm:whitespace-nowrap'
-                                                    style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
-                                                    {...props}
-                                                  />
-                                                ),
-                                                td: ({ node, ...props }) => (
-                                                  <td
-                                                    className='border border-gray-200 px-3 py-2 text-gray-800 align-top break-words whitespace-pre-wrap'
-                                                    style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
-                                                    {...props}
-                                                  />
-                                                ),
-                                                tr: ({ node, ...props }) => <tr className='border-b border-gray-200' {...props} />,
-                                                p: ({ node, ...props }) => <p className='whitespace-pre-wrap my-2 text-[15px] leading-7' {...props} />,
-                                                strong: ({ node, ...props }) => <strong className='font-semibold' {...props} />,
-                                                ul: ({ node, ...props }) => <ul className='list-disc list-inside my-2 space-y-1' {...props} />,
-                                                ol: ({ node, ...props }) => <ol className='list-decimal list-inside my-2 space-y-1 pl-4' {...props} />,
-                                                li: ({ node, ...props }) => <li className='ml-1 pl-1 leading-7' {...props} />,
-                                                blockquote: ({ node, ...props }) => (
-                                                  <blockquote className='border-l-4 border-yellow-300 bg-yellow-50/60 rounded-r-md px-3 py-2 my-2 text-gray-700' {...props} />
-                                                ),
-                                                code: ({ inline, children, ...props }) =>
-                                                  inline ? (
-                                                    <code className='px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 text-[13px]' {...props}>
-                                                      {children}
-                                                    </code>
-                                                  ) : (
-                                                    <code className='block rounded-lg bg-gray-900 text-gray-100 p-3 text-[13px] leading-6 overflow-x-auto' {...props}>
-                                                      {children}
-                                                    </code>
-                                                  ),
-                                              }}
-                                            >
-                                              {textNormalized}
-                                            </ReactMarkdown>
-                                          </div>
-                                        );
+                                        return <BotMarkdown text={textNormalized} />;
                                       }
                                       return (
                                         <span
@@ -1599,8 +1988,10 @@ function Chat() {
                               <div className='mt-1.5 space-y-1.5 w-full max-w-xs'>
                                 {message.references.map((ref, i) => {
                                   const meta = getReferenceFileMeta(ref.displayName);
-                                  const pageLabel =
-                                    Array.isArray(ref.positions) && Number.isFinite(ref.positions[0]?.page)
+                                  const isPrivateRef = String(ref.docId) === '__private__';
+                                  const pageLabel = isPrivateRef
+                                    ? 'เนื้อหาส่วนตัว'
+                                    : Array.isArray(ref.positions) && Number.isFinite(ref.positions[0]?.page)
                                       ? `หน้า ${ref.positions[0].page}`
                                       : Array.isArray(ref.positions) && ref.positions[0]?.lineHint
                                         ? ref.positions[0].lineHint
@@ -1652,9 +2043,7 @@ function Chat() {
                                     type='button'
                                     onClick={async (e) => {
                                       e.stopPropagation();
-                                      const rating = 'up';
-                                      setFeedbackByMessageId(prev => ({ ...prev, [message.id]: rating }));
-                                      try { await chatMessageAPI.submitFeedback(message.id, rating); } catch (err) { setFeedbackByMessageId(prev => ({ ...prev, [message.id]: undefined })); }
+                                      await handleFeedback(message, 'up');
                                     }}
                                     className={`rounded p-1.5 hover:bg-gray-100 ${(feedbackByMessageId[message.id] || message.feedback) === 'up' ? 'text-green-600' : 'opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700'}`}
                                     title='มีประโยชน์'
@@ -1665,9 +2054,7 @@ function Chat() {
                                     type='button'
                                     onClick={async (e) => {
                                       e.stopPropagation();
-                                      const rating = 'down';
-                                      setFeedbackByMessageId(prev => ({ ...prev, [message.id]: rating }));
-                                      try { await chatMessageAPI.submitFeedback(message.id, rating); } catch (err) { setFeedbackByMessageId(prev => ({ ...prev, [message.id]: undefined })); }
+                                      await handleFeedback(message, 'down');
                                     }}
                                     className={`rounded p-1.5 hover:bg-gray-100 ${(feedbackByMessageId[message.id] || message.feedback) === 'down' ? 'text-red-600' : 'opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700'}`}
                                     title='ไม่มีประโยชน์'
@@ -1675,6 +2062,17 @@ function Chat() {
                                     <HiThumbDown className='text-base' />
                                   </button>
                                 </>
+                              )}
+                              {isUser && !String(message.id).startsWith('temp-') && editingUserMsgId !== message.id && (
+                                <button
+                                  type='button'
+                                  onClick={(e) => { e.stopPropagation(); handleStartUserEdit(message); }}
+                                  disabled={isTyping}
+                                  className='opacity-70 hover:opacity-100 transition-all duration-150 text-yellow-800 hover:text-yellow-900 rounded p-1.5 hover:bg-gray-100 disabled:opacity-40'
+                                  title='แก้ไขและส่งใหม่'
+                                >
+                                  <HiPencil className='text-base' />
+                                </button>
                               )}
                               <div className="relative group/copy inline-block">
                                 <button
@@ -1739,30 +2137,8 @@ function Chat() {
                   );
                 })}
                 
-                {/* Typing Indicator — แสดงเฉพาะเมื่อกำลังรอแต่ยังไม่มีบับเบิลบอท (ไม่แสดงเมื่อกำลังสตรีมเข้า placeholder เดียวกัน) */}
-                {isTyping && (() => {
-                  const lastMsg = messages[messages.length - 1];
-                  const isStreamingIntoBot = lastMsg?.sender === 'bot';
-                  if (isStreamingIntoBot) return null;
-                  return (
-                    <div className='flex gap-3 justify-start'>
-                      <div className='flex-shrink-0 w-8 h-8 mt-1'>
-                        <div className='w-8 h-8 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-sm'>
-                          <HiChatBubbleLeftRight className='text-white text-sm' />
-                        </div>
-                      </div>
-                      <div className='flex-1'>
-                        <div className='inline-block px-4 py-2.5 rounded-2xl bg-white border border-gray-200 shadow-sm'>
-                          <div className='flex gap-1.5'>
-                            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '0ms' }}></div>
-                            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '150ms' }}></div>
-                            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '300ms' }}></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* Typing Indicator — แยกเป็น component TypingIndicator */}
+                <TypingIndicator isTyping={isTyping} messages={messages} typingStage={typingStage} />
                 
                 <div ref={messagesEndRef} />
               </div>
@@ -1771,7 +2147,18 @@ function Chat() {
         </div>
 
         {/* Chat Input - ChatGPT/Gemini style */}
-        <div className='border-t border-gray-200 bg-white'>
+        <div className='relative border-t border-gray-200 bg-white'>
+          {showScrollDown && (
+            <button
+              type='button'
+              onClick={() => { scrollToBottom('smooth'); setShowScrollDown(false); }}
+              aria-label='เลื่อนลงล่างสุด'
+              title='เลื่อนลงล่างสุด'
+              className='absolute -top-12 left-1/2 -translate-x-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-600 hover:bg-gray-50 hover:text-gray-800 transition-all'
+            >
+              <HiArrowLeft className='text-lg -rotate-90' />
+            </button>
+          )}
           <div className='max-w-3xl mx-auto px-4 sm:px-6 py-4'>
             {/* Warning message if bot is inactive */}
             {selectedBot && selectedBot.enabled === false && (
@@ -1791,49 +2178,138 @@ function Chat() {
                 </div>
               </div>
             )}
-            <form onSubmit={handleSendMessage} className='relative'>
-              <input
-                ref={fileInputRef}
-                type='file'
-                accept='.pdf,.png,.jpg,.jpeg,.doc,.docx,image/*'
-                className='hidden'
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setAttachedFile({ name: f.name, file: f });
-                  e.target.value = '';
-                }}
-              />
-              {attachedFile && (
-                <div className='flex items-center gap-2 mb-2 px-2 py-1.5 rounded-lg bg-yellow-50 border border-yellow-200'>
-                  <HiPaperClip className='text-yellow-600 flex-shrink-0' />
-                  <span className='text-sm text-gray-700 truncate flex-1'>{attachedFile.name}</span>
-                  <button type='button' onClick={() => setAttachedFile(null)} className='text-gray-500 hover:text-red-600 p-0.5'>
-                    <HiX className='text-base' />
-                  </button>
+            {/* แจ้งเตือนเมื่อบอทยังไม่มีเอกสารความรู้ในระบบ */}
+            {selectedBot && selectedBot.enabled !== false && !isHelpChat && !privateMode
+              && Array.isArray(selectedBot.documentIds) && selectedBot.documentIds.length === 0 && (
+              <div className='mb-4 p-3 bg-amber-50 border-2 border-amber-300 rounded-lg'>
+                <div className='flex items-start gap-2'>
+                  <span className='text-amber-600 text-lg'>⚠️</span>
+                  <div className='flex-1'>
+                    <p className='text-amber-900 text-sm font-bold mb-0.5'>ยังไม่มีเอกสารความรู้ในระบบ</p>
+                    <p className='text-amber-800 text-xs'>
+                      บอทนี้ยังไม่มี Knowledge ให้ใช้อ้างอิง คำตอบอาจไม่ครบถ้วนหรือไม่อ้างอิงจากเอกสาร — แนะนำให้เพิ่มเอกสารก่อนใช้งาน
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+            {privateMode && (
+            <div className='mb-2'>
+              <div className='flex items-center gap-2 flex-wrap'>
+                <button
+                  type='button'
+                  role='switch'
+                  aria-checked={usePrivateContent}
+                  onClick={() => setUsePrivateContent((v) => !v)}
+                  className='flex items-center gap-2 px-2.5 py-1.5 rounded-full border border-gray-300 bg-white hover:border-yellow-400 transition-colors'
+                  title='เปิด = ใช้หน่วยความจำส่วนตัวร่วมกับเอกสารระบบ, ปิด = ปิดเฉพาะส่วนตัว (ยังใช้เอกสารระบบ)'
+                >
+                  <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usePrivateContent ? 'bg-yellow-400' : 'bg-gray-300'}`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${usePrivateContent ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                  </span>
+                  <span className='text-xs font-semibold text-gray-800'>ใช้หน่วยความจำส่วนตัว {usePrivateContent ? '(เปิด)' : '(ปิด)'}</span>
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setPrivateMemoryPanelOpen((v) => !v)}
+                  className='px-2.5 py-1.5 text-xs font-medium rounded-full border border-gray-300 bg-white text-gray-700 hover:border-yellow-400 transition-colors'
+                >
+                  หน่วยความจำ
+                </button>
+                <span className='text-xs text-gray-500'>
+                  {privateHasData
+                    ? 'ใช้ /จำ เพื่อเพิ่มข้อมูล, ใช้ /สั่ง เพื่อตั้งรูปแบบคำตอบ'
+                    : 'ยังไม่มีข้อมูลส่วนตัว — ลองพิมพ์ /จำ <ข้อมูล> หรือ /สั่ง <คำสั่ง>'}
+                </span>
+                <span className='text-xs text-gray-500'>
+                  เปิด = ส่วนตัว + เอกสารระบบ, ปิด = ปิดเฉพาะส่วนตัว
+                </span>
+              </div>
+              {privateMemoryPanelOpen && (
+                <div className='mt-2 rounded-xl border border-gray-200 bg-white p-3 space-y-2'>
+                  <p className='text-xs font-semibold text-gray-700'>หน่วยความจำที่บันทึกไว้ (ระดับผู้ใช้)</p>
+                  <div className='space-y-2 max-h-56 overflow-y-auto overflow-x-hidden pr-1'>
+                    {privateInstructionsText ? (
+                      <div className='rounded-lg border border-blue-200 bg-blue-50 p-2'>
+                        <div className='flex items-start justify-between gap-2'>
+                          <div>
+                            <p className='text-[11px] font-semibold text-blue-700'>คำสั่ง AI (/สั่ง)</p>
+                            <p className='text-xs text-gray-700 whitespace-pre-wrap break-words'>{privateInstructionsText}</p>
+                          </div>
+                          <button
+                            type='button'
+                            onClick={handleDeletePrivateInstruction}
+                            className='text-xs text-red-600 hover:text-red-700'
+                          >
+                            ลบ
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {privateRememberItems.map((item, idx) => (
+                      <div key={`mem-${idx}`} className='rounded-lg border border-yellow-200 bg-yellow-50 p-2'>
+                        <div className='flex items-start justify-between gap-2'>
+                          <div>
+                            <p className='text-[11px] font-semibold text-yellow-700'>ข้อมูลที่จำไว้ #{idx + 1}</p>
+                            <p className='text-xs text-gray-700 whitespace-pre-wrap break-words'>{item}</p>
+                          </div>
+                          <button
+                            type='button'
+                            onClick={() => handleDeleteRememberItem(idx)}
+                            className='text-xs text-red-600 hover:text-red-700'
+                          >
+                            ลบ
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {!privateInstructionsText && privateRememberItems.length === 0 && (
+                      <p className='text-xs text-gray-500'>ยังไม่มีข้อมูลที่จำไว้</p>
+                    )}
+                  </div>
                 </div>
               )}
+            </div>
+            )}
+            <form onSubmit={handleSendMessage} className='relative'>
               <div className={`flex items-end gap-2 bg-white border-2 rounded-2xl shadow-sm transition-colors ${
                 selectedBot && selectedBot.enabled === false
                   ? 'border-red-300 bg-red-50'
                   : 'border-gray-300 hover:border-yellow-400 focus-within:border-yellow-400'
               }`}>
-                <button
-                  type='button'
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={selectedBot && selectedBot.enabled === false}
-                  className='p-2.5 text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg self-end mb-1 ml-1 disabled:opacity-50'
-                  title='แนบไฟล์'
-                >
-                  <HiPaperClip className='text-lg' />
-                </button>
+                {privateMode && composerPrivateCommand && (
+                  <button
+                    type='button'
+                    onClick={() => setComposerPrivateCommand(null)}
+                    className='self-center mb-1 ml-1 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-700'
+                    title='ปิดโหมดคำสั่ง'
+                  >
+                    <span className='font-semibold'>{composerPrivateCommand === 'remember' ? '/จำ' : '/สั่ง'}</span>
+                    <HiX className='text-xs' />
+                  </button>
+                )}
                 <textarea
                   ref={textareaRef}
                   value={chatInput}
                   onChange={(e) => {
-                    setChatInput(e.target.value);
+                    const next = e.target.value;
+                    if (privateMode && !composerPrivateCommand) {
+                      const cmd = parsePrivateCommand(next);
+                      if (cmd) {
+                        setComposerPrivateCommand(cmd.kind);
+                        setChatInput(cmd.payload || '');
+                        adjustTextareaHeight();
+                        return;
+                      }
+                    }
+                    setChatInput(next);
                     adjustTextareaHeight();
                   }}
                   onKeyDown={(e) => {
+                    if (privateMode && composerPrivateCommand && e.key === 'Backspace' && !chatInput) {
+                      setComposerPrivateCommand(null);
+                      return;
+                    }
                     if (e.key === 'Enter' && !e.shiftKey) {
                       const hasMultipleLines = String(chatInput || '').includes('\n');
                       const explicitSend = e.ctrlKey || e.metaKey;
@@ -1849,7 +2325,15 @@ function Chat() {
                       adjustTextareaHeight();
                     }
                   }}
-                  placeholder={selectedBot && selectedBot.enabled === false ? 'Bot นี้ถูก inactive แล้ว...' : 'พิมพ์ข้อความ...'}
+                  placeholder={
+                    selectedBot && selectedBot.enabled === false
+                      ? 'Bot นี้ถูก inactive แล้ว...'
+                      : privateMode
+                        ? (composerPrivateCommand
+                          ? (composerPrivateCommand === 'remember' ? 'พิมพ์ข้อมูลที่ต้องการให้ระบบจำ...' : 'พิมพ์คำสั่งการตอบของ AI...')
+                          : 'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI')
+                        : 'พิมพ์ข้อความ...'
+                  }
                   rows={1}
                   disabled={selectedBot && selectedBot.enabled === false}
                   className={`flex-1 outline-none text-[15px] placeholder-gray-400 bg-transparent resize-none overflow-x-hidden overflow-y-auto min-h-[52px] max-h-[200px] px-4 py-3.5 ${
@@ -1859,6 +2343,52 @@ function Chat() {
                   }`}
                 />
                 
+                {/* โหมดคำตอบ (Flash/Detail) — ซ่อนไว้ก่อน ใช้ Detail เป็นหลัก (เปิดคืนได้ที่ ENABLE_MODE_SELECTOR) */}
+                {ENABLE_MODE_SELECTOR && (
+                <div className='relative self-end mb-2 flex-shrink-0'>
+                  <button
+                    type='button'
+                    onClick={() => setModeMenuOpen((o) => !o)}
+                    className='flex items-center gap-1 px-2 py-1.5 rounded-full text-xs text-gray-600 hover:bg-gray-100 transition-colors'
+                    title='เลือกโหมดคำตอบ'
+                  >
+                    <span>{answerMode === 'fast' ? '⚡' : '🎯'}</span>
+                    <span className='font-medium'>{answerMode === 'fast' ? 'Flash' : 'Detail'}</span>
+                    <HiChevronDown className={`text-sm text-gray-400 transition-transform ${modeMenuOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {modeMenuOpen && (
+                    <>
+                      <div className='fixed inset-0 z-10' onClick={() => setModeMenuOpen(false)} aria-hidden='true' />
+                      <div className='absolute bottom-full right-0 mb-2 w-80 max-w-[85vw] bg-white rounded-xl shadow-xl border border-gray-200 z-20 py-1'>
+                        <button
+                          type='button'
+                          onClick={() => selectAnswerMode('fast')}
+                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-start gap-2.5 ${answerMode === 'fast' ? 'bg-yellow-50' : ''}`}
+                        >
+                          <span className='text-lg leading-none mt-0.5'>⚡</span>
+                          <span className='flex-1 min-w-0'>
+                            <span className='block text-sm font-medium text-gray-800'>Flash · เร็ว</span>
+                            <span className='block text-xs text-gray-500'>ตอบไวขึ้น เหมาะกับถาม-ตอบทั่วไป หาข้อมูลตรงๆ</span>
+                          </span>
+                          {answerMode === 'fast' && <HiCheck className='text-yellow-500 text-base mt-0.5 flex-shrink-0' />}
+                        </button>
+                        <button
+                          type='button'
+                          onClick={() => selectAnswerMode('detailed')}
+                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-start gap-2.5 ${answerMode === 'detailed' ? 'bg-yellow-50' : ''}`}
+                        >
+                          <span className='text-lg leading-none mt-0.5'>🎯</span>
+                          <span className='flex-1 min-w-0'>
+                            <span className='block text-sm font-medium text-gray-800'>Detail · ละเอียด</span>
+                            <span className='block text-xs text-gray-500'>วิเคราะห์ลึก เปรียบเทียบ สรุปหลายเงื่อนไข/หลายเอกสาร</span>
+                          </span>
+                          {answerMode === 'detailed' && <HiCheck className='text-yellow-500 text-base mt-0.5 flex-shrink-0' />}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+                )}
                 <div className='pr-2 pb-2 flex items-center justify-center'>
                   {isTyping ? (
                     <button
@@ -1929,20 +2459,35 @@ function Chat() {
                   </div>
                 </div>
               )}
-              {Array.isArray(sourceModalData.chunks) && sourceModalData.chunks.length > 0 ? (
-                sourceModalData.chunks.map((chunk, idx) => (
+              {sourceModalData.isPrivate ? (
+                <div className='rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-gray-700 space-y-1'>
+                  <p className='text-sm font-medium text-gray-800'>อ้างอิงจากเนื้อหาส่วนตัวของคุณ</p>
+                  <p className='text-xs text-gray-600 leading-relaxed'>
+                    คำตอบส่วนนี้อ้างอิงจากเนื้อหาที่คุณตั้งไว้ในโหมดส่วนตัว (ไม่ได้มาจากเอกสารในระบบ) — แก้ไขได้โดยพิมพ์ /จำ หรือ /สั่ง ในแชท หรือที่หน้าโหมดส่วนตัว
+                  </p>
+                </div>
+              ) : Array.isArray(sourceModalData.chunks) && sourceModalData.chunks.length > 0 ? (
+                sourceModalData.chunks.map((chunk, idx) => {
+                  const displayText = stripAiHelperSections(String(chunk.text || '').replace(/<br\s*\/?>/gi, '\n'));
+                  const helperOnly = !displayText;
+                  return (
                   <div key={chunk.id || idx} className='rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5'>
                     <p className='text-xs font-semibold text-gray-700 mb-1'>
                       {chunk.lineHint || (Number.isFinite(chunk.page) ? `หน้า ${chunk.page}` : `ช่วงที่ ${idx + 1}`)}
                     </p>
-                    {chunk.quote ? (
+                    {chunk.quote && !helperOnly ? (
                       <p className='text-xs text-gray-600 italic mb-1'>อ้างอิง: "{chunk.quote}"</p>
                     ) : null}
-                    <p className='whitespace-pre-wrap text-sm text-gray-800 leading-relaxed'>
-                      {chunk.text}
-                    </p>
+                    <div className='text-sm text-gray-800 leading-relaxed'>
+                      {displayText ? (
+                        <BotMarkdown text={normalizeMarkdownTable(displayText)} />
+                      ) : (
+                        <p className='text-xs text-gray-500 italic'>อ้างอิงจากเอกสารนี้ — ดูเอกสารฉบับเต็มสำหรับรายละเอียด</p>
+                      )}
+                    </div>
                   </div>
-                ))
+                  );
+                })
               ) : (
                 <div className='rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-gray-700 space-y-2'>
                   <p className='text-sm font-medium text-gray-800'>ไม่มีข้อความย่อยแสดงในหน้าต่างนี้</p>

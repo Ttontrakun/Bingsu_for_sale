@@ -1,6 +1,8 @@
 import express from "express";
 import { prisma } from "../db.js";
 import { authenticate } from "../lib/auth.js";
+import { logEvent } from "../lib/logging.js";
+import { getNtCorpInternetPricingReply } from "../services/ntCorpPricingDb.js";
 import {
   cacheDel,
   cacheGet,
@@ -9,16 +11,183 @@ import {
   invalidateConversationCaches,
   userCacheKey,
 } from "../lib/cache.js";
-import { buildContextPiecesWithNeighbors, ensureSourceFileBlocks, getFallbackContextFromDocuments, filterContextDocsByIds, stripRedundantShortSummary, buildFallbackGroundingChunksFromDocuments } from "../services/text.js";
+import { buildContextPiecesWithNeighbors, ensureSourceFileBlocks, getFallbackContextFromDocuments, filterContextDocsByIds, stripRedundantShortSummary, buildFallbackGroundingChunksFromDocuments, mergeHybridChunks } from "../services/text.js";
 import { retrieveGroundingChunks, invalidateRagCacheForDocument, invalidateAllRagCache } from "../services/rag.js";
 import { updateChunkText, replaceTextInDocument, deleteDocumentVectors, indexDocumentChunks } from "../services/vectorDb.js";
 import { callOpenAiGateway, callOpenAiGatewayStream, isGreeting, isGreetingOnly } from "../services/chat.js";
 import { getOrCreateUsageDaily } from "../services/usage.js";
-import { CONTEXT_NEIGHBOR_WINDOW, FREE_DAILY_TOKEN_LIMIT, FREE_KNOWLEDGE_LIMIT, GREETING_REPLY, MAX_CHAT_HISTORY_MESSAGES, MAX_CONTEXT_PIECES, MAX_DAILY_CHAT_MESSAGES, openaiModel } from "../config.js";
+import { CONTEXT_NEIGHBOR_WINDOW, FREE_DAILY_TOKEN_LIMIT, FREE_KNOWLEDGE_LIMIT, GREETING_REPLY, MAX_CHAT_HISTORY_MESSAGES, MAX_CONTEXT_PIECES, MAX_DAILY_CHAT_MESSAGES, openaiModel, deterministicRulesEnabled } from "../config.js";
 
 export const conversationsRouter = express.Router();
 export const messagesRouter = express.Router();
 export const chatRouter = express.Router();
+export const privateContextRouter = express.Router();
+
+// จำกัดขนาดเนื้อหาส่วนตัว (กัน token เกิน/ค่าใช้จ่ายพุ่ง) — เฟส 1 ใช้ inline
+const MAX_PRIVATE_CONTEXT_CHARS = Number(process.env.MAX_PRIVATE_CONTEXT_CHARS || 12000);
+
+/** โหลดเนื้อหาส่วนตัวของผู้ใช้ (คืน "" ถ้าไม่มี/ปิดอยู่ เมื่อ requireEnabled=true) */
+const loadUserPrivateContent = async (userId, { requireEnabled = false } = {}) => {
+  try {
+    if (!userId) return "";
+    const row = await prisma.privateContext.findUnique({ where: { userId } });
+    if (!row) return "";
+    if (requireEnabled && !row.enabled) return "";
+    return String(row.content ?? "").slice(0, MAX_PRIVATE_CONTEXT_CHARS);
+  } catch (error) {
+    console.warn("loadUserPrivateContent failed", error?.message || error);
+    return "";
+  }
+};
+
+// จำกัดขนาดคำสั่ง AI และความจำข้ามแชท
+const MAX_PRIVATE_INSTRUCTIONS_CHARS = Number(process.env.MAX_PRIVATE_INSTRUCTIONS_CHARS || 2000);
+const MAX_PRIVATE_MEMORY_CHARS = Number(process.env.MAX_PRIVATE_MEMORY_CHARS || 3000);
+
+/** โหลด "คำสั่ง AI" + "ข้อมูล/ความรู้" ของผู้ใช้ (โหมดส่วนตัว) */
+const loadPrivateContextParts = async (userId) => {
+  try {
+    if (!userId) return { instructions: "", knowledge: "" };
+    const row = await prisma.privateContext.findUnique({ where: { userId } });
+    if (!row) return { instructions: "", knowledge: "" };
+    return {
+      instructions: String(row.instructions ?? "").slice(0, MAX_PRIVATE_INSTRUCTIONS_CHARS),
+      knowledge: String(row.content ?? "").slice(0, MAX_PRIVATE_CONTEXT_CHARS),
+    };
+  } catch (error) {
+    console.warn("loadPrivateContextParts failed", error?.message || error);
+    return { instructions: "", knowledge: "" };
+  }
+};
+
+/** ความจำข้ามแชท: ดึง "ข้อความผู้ใช้" ล่าสุดจากห้องส่วนตัวอื่น (ลดโอกาสโดนคำตอบเก่าของบอทกดทับ) */
+const loadCrossChatMemory = async (userId, currentConversationId) => {
+  try {
+    if (!userId) return "";
+    const rows = await prisma.message.findMany({
+      where: {
+        role: "user",
+        conversation: {
+          userId,
+          private: true,
+          ...(currentConversationId ? { id: { not: currentConversationId } } : {}),
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 16,
+      select: { role: true, content: true },
+    });
+    const lines = rows
+      .reverse()
+      .map((m) => {
+        const text = String(m.content ?? "").trim();
+        if (!text || isRedactedPlaceholder(text)) return "";
+        return `ผู้ใช้: ${text}`;
+      })
+      .filter(Boolean);
+    if (lines.length === 0) return "";
+    let joined = lines.join("\n");
+    if (joined.length > MAX_PRIVATE_MEMORY_CHARS) {
+      // เก็บส่วนท้าย (ล่าสุด) ไว้
+      joined = joined.slice(joined.length - MAX_PRIVATE_MEMORY_CHARS);
+    }
+    return joined;
+  } catch (error) {
+    console.warn("loadCrossChatMemory failed", error?.message || error);
+    return "";
+  }
+};
+
+/** สร้าง system messages สำหรับโหมดส่วนตัว (คำสั่ง / ข้อมูล / ความจำ) */
+const buildPrivateSystemMessages = ({ instructions, knowledge, memory }) => {
+  const out = [];
+  if (instructions) {
+    out.push({
+      role: "system",
+      content: `คำสั่งจากผู้ใช้ (User Instructions — ต้องทำตามอย่างเคร่งครัดในการตอบทุกครั้ง):\n${instructions}`,
+    });
+  }
+  if (knowledge) {
+    out.push({
+      role: "system",
+      content: `ข้อมูล/ความรู้ส่วนตัวจากผู้ใช้ (Private Knowledge — ผู้ใช้ให้มาเอง ใช้ตอบได้เต็มที่ และมีน้ำหนักสำหรับเคสของผู้ใช้; ถ้าขัดกับ Context จากเอกสารระบบ ให้แจ้งทั้งสองมุม):\n${knowledge}`,
+    });
+  }
+  if (memory) {
+    out.push({
+      role: "system",
+      content: `บทสนทนาก่อนหน้าของผู้ใช้ (Cross-chat Memory — ใช้เพื่อความต่อเนื่อง จำสิ่งที่เคยคุย/ถามในห้องส่วนตัวก่อนหน้า ถ้าเกี่ยวข้องกับคำถามปัจจุบัน):\n${memory}`,
+    });
+  }
+  return out;
+};
+
+// GET /api/private-context — ดึงเนื้อหาส่วนตัวของผู้ใช้ปัจจุบัน
+privateContextRouter.get("/", authenticate, async (req, res) => {
+  try {
+    const row = await prisma.privateContext.findUnique({ where: { userId: req.user.id } });
+    res.json({
+      instructions: row?.instructions ?? "",
+      content: row?.content ?? "",
+      enabled: row?.enabled ?? false,
+      maxChars: MAX_PRIVATE_CONTEXT_CHARS,
+      maxInstructionsChars: MAX_PRIVATE_INSTRUCTIONS_CHARS,
+      updatedAt: row?.updatedAt ?? null,
+    });
+  } catch (error) {
+    console.error("get private-context failed", error);
+    res.status(500).json({ error: "Failed to load private context" });
+  }
+});
+
+// PUT /api/private-context — บันทึก/อัปเดตเนื้อหาส่วนตัว + สถานะเปิดโหมด
+privateContextRouter.put("/", authenticate, async (req, res) => {
+  try {
+    const hasContent = typeof req.body?.content === "string";
+    const hasInstructions = typeof req.body?.instructions === "string";
+    const content = hasContent ? req.body.content.slice(0, MAX_PRIVATE_CONTEXT_CHARS) : undefined;
+    const instructions = hasInstructions ? req.body.instructions.slice(0, MAX_PRIVATE_INSTRUCTIONS_CHARS) : undefined;
+    const enabled = typeof req.body?.enabled === "boolean" ? req.body.enabled : undefined;
+    const row = await prisma.privateContext.upsert({
+      where: { userId: req.user.id },
+      create: {
+        userId: req.user.id,
+        content: content ?? "",
+        instructions: instructions ?? "",
+        enabled: enabled ?? false,
+      },
+      update: {
+        ...(content === undefined ? {} : { content }),
+        ...(instructions === undefined ? {} : { instructions }),
+        ...(enabled === undefined ? {} : { enabled }),
+      },
+    });
+    // Log แบบ action-level: ผู้ใช้บันทึกความจำ/คำสั่งส่วนตัว (/จำ = knowledge, /สั่ง = instructions)
+    // เก็บเฉพาะ metadata ไม่เก็บเนื้อหาจริง
+    logEvent({
+      event: "user.private_context.updated",
+      actorId: req.user?.id,
+      targetType: "privateContext",
+      targetId: req.user?.id,
+      meta: {
+        savedInstructions: typeof instructions === "string" && instructions.trim().length > 0,
+        savedKnowledge: typeof content === "string" && content.trim().length > 0,
+        enabled: row.enabled,
+      },
+    }).catch(() => {});
+    res.json({
+      instructions: row.instructions,
+      content: row.content,
+      enabled: row.enabled,
+      maxChars: MAX_PRIVATE_CONTEXT_CHARS,
+      maxInstructionsChars: MAX_PRIVATE_INSTRUCTIONS_CHARS,
+      updatedAt: row.updatedAt,
+    });
+  } catch (error) {
+    console.error("put private-context failed", error);
+    res.status(500).json({ error: "Failed to save private context" });
+  }
+});
 
 const HELP_BOT_NAME = "บอทช่วยสอน";
 const REDACTED_PLACEHOLDERS = new Set([
@@ -45,6 +214,13 @@ const sanitizeRedactedContentForClient = (content) => {
   if (isRedactedPlaceholder(normalized)) return "";
   return content;
 };
+// กฎกันแต่งข้อมูล/ตัวเลข (grounding) — รวมไว้ที่เดียว ใช้ร่วมทุก path การตอบ (stream + non-stream)
+// ต้องการแก้กฎเรื่อง "ห้ามแต่งตัวเลข / ไม่พบข้อมูลให้บอกตรงๆ" ให้แก้ที่นี่จุดเดียว
+const GROUNDING_FACT_RULES = [
+  "- ข้อเท็จจริง/ตัวเลข/ราคา/อำนาจอนุมัติ ต้องยึดจาก Context (ฐานข้อมูลระบบ) เท่านั้น ห้ามนำตัวเลขหรือข้อเท็จจริงจากประวัติสนทนามาตอบ — ใช้ประวัติเพียงเพื่อเข้าใจว่าผู้ใช้กำลังอ้างถึงอะไร",
+  "- ถ้า Context ไม่มีข้อมูลของสิ่งที่ผู้ใช้ถามถึงโดยตรง (ชื่อบริการ/รายการที่ระบุ) ห้ามเดา ห้ามหยิบตัวเลข/ราคา/ส่วนลดจากบริการอื่นที่ใกล้เคียงมาตอบแทน และห้ามแต่งตัวเลขขึ้นเอง — ให้ตอบตรงๆ ว่า 'ไม่พบข้อมูลรายการนี้ในเอกสาร' ถ้าพบเฉพาะข้อมูลใกล้เคียงให้ระบุชัดว่าเป็นของบริการอื่น (ไม่ใช่สิ่งที่ถาม)",
+];
+
 const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
   "RESPONSE FORMAT (Gemini-like, readable):",
   "- ตอบแบบ 2 ชั้นเสมอ: (1) คำตอบสั้นตรงประเด็น 1-2 บรรทัดก่อน (2) รายละเอียดเฉพาะที่จำเป็นเท่านั้น",
@@ -63,6 +239,7 @@ const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
   "- SOURCES / CITATIONS: อย่าใส่ชื่อไฟล์ ฟุตโน้ต เลขอ้างอิง [1] ข้อความ 'อ้างอิงจาก' / 'Sources:' / 'ที่มาจากเอกสาร' ในเนื้อคำตอบ — ผู้ใช้จะเห็นการ์ดเอกสารแหล่งที่มาด้านล่างคำตอบในระบบแยกต่างหาก",
 ];
 
+/* analysis-feature edits: query-rewriting, multi-question, grounding */
 /** สร้างรายการอ้างอิง (เอกสารที่ใช้ตอบ) จาก groundingChunks + contextDocuments */
 function buildReferences(groundingChunks, contextDocuments, primaryDocument) {
   const docMap = new Map((contextDocuments || []).map((d) => [d?.id, d?.displayName || d?.fileName || "เอกสาร"]));
@@ -141,9 +318,47 @@ function buildReferences(groundingChunks, contextDocuments, primaryDocument) {
     if (primaryDocument?.id) pushFallbackDoc(primaryDocument);
     else if ((contextDocuments || []).length === 1) pushFallbackDoc(contextDocuments[0]);
   }
-  return refs
+  // กันเอกสารที่เกี่ยวข้องน้อยหลุดมาเป็นแหล่งอ้างอิง (เช่น ถาม NT Corporate Internet แต่มี Dark Fiber ตามมา)
+  // เก็บเฉพาะเอกสารที่คะแนนความเกี่ยวข้องใกล้เคียงอันดับ 1 (ตัดตัวที่คะแนนต่ำกว่ามาก)
+  const finiteScores = refs.map((r) => r.bestScore).filter((s) => Number.isFinite(s) && s > 0);
+  const topScore = finiteScores.length ? Math.max(...finiteScores) : 0;
+  const minKeep = topScore * 0.75;
+  const keptRefs = (topScore > 0 && refs.length > 1)
+    ? refs.filter((r) => !Number.isFinite(r.bestScore) || r.bestScore >= minKeep)
+    : refs;
+  return keptRefs
     .sort((a, b) => (b.bestScore || Number.NEGATIVE_INFINITY) - (a.bestScore || Number.NEGATIVE_INFINITY))
     .map((ref) => ({ docId: ref.docId, displayName: ref.displayName, positions: ref.positions }));
+}
+
+const PRIVATE_REFERENCE = { docId: "__private__", displayName: "เนื้อหาส่วนตัวของคุณ", positions: [] };
+
+/**
+ * อ้างอิงสำหรับการตอบจริง: ในโหมดส่วนตัวให้เพิ่ม "เนื้อหาส่วนตัวของคุณ" ไว้บนสุด
+ * และถ้าไม่มีหลักฐานจริงจากเอกสารระบบ จะไม่อ้างอิงเอกสารระบบแบบเดา (กันอ้างอิงผิด)
+ */
+function buildReferencesForReply({ groundingChunks, contextDocuments, primaryDocument, message, hasPrivateContext }) {
+  const hasRealEvidence =
+    Array.isArray(groundingChunks) &&
+    groundingChunks.length > 0 &&
+    hasSufficientGroundingEvidence(message, groundingChunks);
+
+  if (!hasPrivateContext) {
+    // โหมดปกติ: ถ้าไม่มีหลักฐานจริง และไม่ใช่คำถามแนวสรุป/ภาพรวม
+    // → ไม่แปะการ์ดอ้างอิงเอกสารที่ไม่ตรงคำถาม (กันเคสตอบทักทาย/คำถามทั่วไป/วันที่
+    //   แล้วมี Dark Fiber/Tower ติดมาตาม top-k). ยกเว้นคำถามแนวสรุปที่ตั้งใจอ้างเอกสารทั้งฉบับ
+    if (!hasRealEvidence && !isOverviewStyleQuery(message)) {
+      return [];
+    }
+    return buildReferences(groundingChunks, contextDocuments, primaryDocument);
+  }
+
+  // โหมดส่วนตัว: ถ้าไม่มีหลักฐานจริงจากเอกสารระบบ → เหลือแค่ "เนื้อหาส่วนตัวของคุณ" เพื่อกันอ้างอิงมั่ว
+  if (!hasRealEvidence) {
+    return [PRIVATE_REFERENCE];
+  }
+  const refs = buildReferences(groundingChunks, contextDocuments, primaryDocument);
+  return [PRIVATE_REFERENCE, ...refs];
 }
 
 /** ความรู้เกี่ยวกับระบบ (สำหรับบอทช่วยสอน) — ครอบคลุมเกือบทุกฟีเจอร์ในเว็บ */
@@ -241,7 +456,83 @@ const formatAuthorityRole = (value) => {
 const isAuthorityDecisionQuery = (message) => {
   const m = normalizeText(message);
   if (!m) return false;
-  return /(ใครอนุมัติ|ผู้อนุมัติ|ใครมีอำนาจ|มีอำนาจอนุมัติ|ใครรับผิดชอบ|อนุมัติ.*ใคร|ใคร.*อนุมัติ|อำนาจส่วนลด|อนุมัติอัตรา|ส่วนลดเฉพาะราย)/.test(m);
+  return /(ใครอนุมัติ|ผู้อนุมัติ|ใครมีอำนาจ|มีอำนาจอนุมัติ|อำนาจอนุมัติ|อำนาจของท่าน|ผู้มีอำนาจ|ท่านใด|ใครรับผิดชอบ|อนุมัติ.*ใคร|ใคร.*อนุมัติ|อำนาจส่วนลด|อนุมัติอัตรา|ส่วนลดเฉพาะราย)/.test(m);
+};
+const isAuthorityDetailFollowUpQuery = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  return /(จากคำตอบก่อนหน้า|อธิบายเพิ่มเติม|ดูรายละเอียดเพิ่มเติม|อธิบายรายละเอียด|ยกตัวอย่าง|แบบเป็นข้อ|ขั้นตอน|เงื่อนไข|เข้าใจง่ายขึ้น)/.test(m);
+};
+const getResponseFormatRulesForMessage = (message) => {
+  // Follow-up ที่ขอ "อธิบายเพิ่ม" ต้องไม่โดนกฎบีบให้เหลือ 2 บรรทัด
+  if (isAuthorityDetailFollowUpQuery(message)) {
+    return GEMINI_LIKE_RESPONSE_FORMAT_RULES.filter(
+      (rule) => !/ใครอนุมัติ\/ใครรับผิดชอบ\/ใครมีอำนาจ/.test(rule),
+    );
+  }
+  return GEMINI_LIKE_RESPONSE_FORMAT_RULES;
+};
+
+// สร้าง system prompt หลักของผู้ช่วย — รวม path แบบ stream (analytical=false) และ non-stream (analytical=true)
+// ไว้ที่เดียว เดิมเขียนซ้ำ 2 ที่ ~28 บรรทัด/ที่. บรรทัดที่ต่างกันเล็กน้อยคุมด้วย flag analytical
+const buildPolicyPrompt = ({ isHelpBot, message, overviewRequest = false, analytical = false }) => {
+  if (isHelpBot) {
+    const helpLines = analytical
+      ? [
+          "You are a helpful Thai AI assistant.",
+          "Scope: ตอบจาก Context ที่ให้มาเท่านั้น ห้ามแต่งข้อมูลที่ไม่มีหลักฐาน.",
+          "Rules:",
+          "1) Use Context to answer and keep response concise.",
+          "2) Remember previous questions for follow-up continuity.",
+          "3) If outside scope, reply that context does not contain the requested information.",
+          "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
+        ]
+      : [
+          "You are a helpful Thai AI assistant. Answer in the same language as the user.",
+          "Scope: ตอบจาก Context ที่ให้มาเป็นหลัก และห้ามแต่งข้อมูลที่ไม่มีหลักฐาน.",
+          "Rules: 1) Remember conversation for follow-ups. 2) Keep answers clear and concise. 3) If outside context, say information is unavailable.",
+          "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
+        ];
+    return helpLines.join("\n");
+  }
+  return [
+    "You are Enterprise AI Chatbot Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
+    "CAPABILITIES (ทำได้ทั้งหมด):",
+    analytical
+      ? "1) General chat: ทักทาย สนทนาทั่วไป ถาม-ตอบ ให้คำแนะนำได้ตามปกติ"
+      : "1) สนทนาทั่วไป: ทักทาย ถาม-ตอบ ให้คำแนะนำทั่วไปได้ตามปกติ",
+    "2) Knowledge Analysis: เมื่อมี Context ให้ตอบและวิเคราะห์จาก Context เป็นหลัก (วิเคราะห์ เปรียบเทียบ สรุปได้จาก Context)",
+    analytical
+      ? "3) Typo/Language Tolerance: แม้ผู้ใช้พิมพ์ผิด สะกดผิด หรือใช้ภาษาไม่เป็นทางการ ให้เข้าใจเจตนาจากบริบทและตอบตามนั้น"
+      : "3) Typo/Language Tolerance: แม้ผู้ใช้พิมพ์ผิด สะกดผิด ไม่เป็นทางการ ให้เข้าใจเจตนาจากบริบทและตอบตามนั้น",
+    "RULES:",
+    analytical
+      ? "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context แต่วิเคราะห์ / เปรียบเทียบ / สรุปจาก Context ได้"
+      : "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context",
+    ...GROUNDING_FACT_RULES,
+    analytical
+      ? "- เมื่อไม่มี Context หรือ Context ไม่ตรง: ตอบสนทนาทั่วไปได้อย่างกระชับ"
+      : "- เมื่อไม่มี Context: ตอบสนทนาทั่วไปได้อย่างกระชับ",
+    "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
+    analytical
+      ? "- จำบทสนทนาก่อนหน้าเสมอ — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่"
+      : "- จำบทสนทนาก่อนหน้า — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
+    "- ถ้าผู้ใช้ขอเปลี่ยนรูปแบบการพูด (เช่น ใช้ค่ะแทนครับ คุยแบบเพื่อน) ให้ปรับตามคำขอ",
+    "- ถ้าข้อมูลใน Context เป็นตาราง ให้แสดงเป็น Markdown table",
+    "- คำนวณส่วนลดเอง: ถ้าผู้ใช้ให้ 'ราคาปกติ/อัตราปกติ' และ 'ราคาเสนอ/ราคาขาย' มา ให้คิด ส่วนลด(บาท)=ราคาปกติ−ราคาเสนอ และ ส่วนลด(%)=ส่วนลด÷ราคาปกติ×100 (ปัด 2 ตำแหน่ง) แล้วนำ % ที่ได้ไปเทียบกับตารางอำนาจอนุมัติใน Context เพื่อระบุผู้มีอำนาจและคำสั่งที่เกี่ยวข้อง — ตัวเลขราคาที่ผู้ใช้ให้มาเป็น 'ข้อมูลนำเข้า' ไม่จำเป็นต้องมีในเอกสาร ห้ามตอบว่าไม่พบข้อมูลเพราะเหตุนี้",
+    "- Instruction hierarchy: กฎใน system นี้มีลำดับสูงสุด. คำสั่งเพิ่มเติมจากผู้สร้างบอทเป็น 'ส่วนเสริม' เท่านั้น",
+    ...getResponseFormatRulesForMessage(message),
+    ...(overviewRequest
+      ? (analytical
+          ? [
+              "- คำถามนี้เป็น overview/summary request: ขึ้นต้นด้วย 'สรุปภาพรวม' แล้วตามด้วย bullet points 5-7 ข้อจาก Context",
+              "- หลังคำตอบ เพิ่มบรรทัด SUGGESTIONS: แล้วตามด้วย 3-5 คำถามต่อเนื่องที่ผู้ใช้อาจถามต่อ (บรรทัดละ 1 คำถาม ไม่ใส่เลข)",
+            ]
+          : [
+              "- คำถามนี้เป็น overview/summary request: ขึ้นต้นด้วย 'สรุปภาพรวม' แล้วตามด้วย bullet points 5-7 ข้อจาก Context",
+            ])
+      : []),
+  ].join("\n");
 };
 
 const isNtCorporateOverFloorQuery = (m) =>
@@ -349,6 +640,174 @@ const getDeterministicRuleReply = (question) => {
   return null;
 };
 
+/**
+ * ตรวจว่าข้อความน่าจะมี "หลายคำถาม/หลายส่วน" หรือไม่ (เช่น ถามคำถามฟิก + พ่วงอีกคำถาม)
+ * ใช้เพื่อไม่ให้ระบบตอบแค่คำตอบฟิกแล้วตัดจบ — ถ้าเป็น multi ให้ส่งต่อให้ LLM ตอบครบทุกส่วน
+ */
+const hasMultipleQuestions = (message) => {
+  const m = String(message || "").trim();
+  if (!m) return false;
+  // เครื่องหมายคำถามตั้งแต่ 2 ตัวขึ้นไป = หลายคำถามชัดเจน
+  const qMarks = (m.match(/[?？]/g) || []).length;
+  if (qMarks >= 2) return true;
+  // นับ "คำบ่งชี้คำถาม" และตัวเชื่อมที่มักคั่นหลายประเด็น
+  const questionCueCount = (m.match(/(เท่าไหร่|เท่าไร|กี่|อะไร|ยังไง|อย่างไร|ทำไม|ที่ไหน|ใคร|เมื่อไหร่|ไหม|มั้ย|หรือไม่|ขั้นต่ำ|สูงสุด|นานสุด)/g) || []).length;
+  const conjCount = (m.match(/(และ|กับ|อีกอย่าง|อีกข้อ|อีกคำถาม|รวมถึง|พร้อมทั้ง|แล้วก็|และก็|ส่วน)/g) || []).length;
+  if (questionCueCount >= 2 && conjCount >= 1) return true;
+  return false;
+};
+
+/**
+ * แปลงคำถามต่อเนื่อง (follow-up) ให้เป็นคำถามสมบูรณ์แบบ standalone โดยอาศัยประวัติสนทนา
+ * เพื่อให้ embed/retrieval ดึง chunk ได้ตรง (แก้ปัญหาถามต่อเนื่องแล้วระบบดึงข้อมูลผิด)
+ * ถ้าไม่ใช่ follow-up หรือไม่มีประวัติ/เขียนใหม่ไม่สำเร็จ → คืนค่าข้อความเดิม
+ */
+const buildStandaloneQuery = async (message, conversationId) => {
+  try {
+    // ปิด LLM rewrite โดยดีฟอลต์เพื่อความเร็ว (ตั้ง RAG_STANDALONE_REWRITE=1 เพื่อเปิด)
+    // คำถามต่อเนื่องยังค้นเจอได้จากกลไก history-merge ใน resolveGroundingChunks ที่ไม่ต้องเรียก LLM
+    if (process.env.RAG_STANDALONE_REWRITE !== "1") return message;
+    if (!isLikelyFollowUp(message)) return message;
+    const recent = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+      select: { role: true, content: true },
+    });
+    if (!recent.length) return message;
+    const historyText = recent
+      .reverse()
+      .map((r) => `${r.role === "model" ? "ผู้ช่วย" : "ผู้ใช้"}: ${String(r.content ?? "").trim()}`)
+      .filter((line) => line.length > 6)
+      .join("\n");
+    if (!historyText) return message;
+    const resp = await callOpenAiGateway([
+      {
+        role: "system",
+        content:
+          "เขียน 'คำถามล่าสุด' ของผู้ใช้ใหม่ให้เป็นคำถามสมบูรณ์แบบ standalone โดยรวมบริบทจากประวัติสนทนา " +
+          "(แทนคำสรรพนาม/คำอ้างอิง เช่น 'อันนี้' 'แบบนั้น' 'อันที่สอง' ด้วยสิ่งที่อ้างถึงจริง). " +
+          "ตอบกลับเฉพาะข้อความคำถามที่เขียนใหม่บรรทัดเดียว ไม่มีคำอธิบาย ไม่มีเครื่องหมายคำพูด. " +
+          "ถ้าคำถามสมบูรณ์ในตัวอยู่แล้ว ให้ส่งกลับข้อความเดิม.",
+      },
+      { role: "user", content: `ประวัติ:\n${historyText}\n\nคำถามล่าสุด: ${message}\n\nคำถาม standalone:` },
+    ]);
+    const rewritten = resp?.choices?.[0]?.message?.content?.trim();
+    if (rewritten && rewritten.length > 0 && rewritten.length <= 400) {
+      if (process.env.DEBUG_RAG === "1") {
+        console.log(`[rag] standalone rewrite: "${message}" -> "${rewritten}"`);
+      }
+      return rewritten;
+    }
+  } catch (error) {
+    console.warn("buildStandaloneQuery failed, using original message", error?.message || error);
+  }
+  return message;
+};
+
+/**
+ * ดึง "คำถามล่าสุดของผู้ใช้" ก่อนหน้านี้ในห้องสนทนา เพื่อนำมาเสริมตอนค้น embedding
+ * (ช่วงนี้ข้อความปัจจุบันยังไม่ถูกบันทึก จึง row ล่าสุด = คำถามก่อนหน้า)
+ * ข้าม prompt ที่ระบบสร้างจากปุ่ม follow-up เพื่อให้ได้คำถามหลักจริงของผู้ใช้
+ */
+const getPreviousUserQuestionForRetrieval = async (conversationId, currentMessage) => {
+  try {
+    if (!conversationId) return "";
+    const rows = await prisma.message.findMany({
+      where: { conversationId, role: "user" },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+      select: { content: true },
+    });
+    const current = normalizeText(currentMessage);
+    let fallback = "";
+    let firstNonGenerated = "";
+    for (const row of rows) {
+      const text = String(row?.content ?? "").trim();
+      if (text.length < 6) continue;
+      if (normalizeText(text) === current) continue;
+      if (!fallback) fallback = text;
+      // ข้ามคำถามที่ระบบสร้างจากปุ่ม follow-up เพื่อให้ได้คำถามหลักจริง
+      const m = normalizeText(text);
+      const looksGenerated = /^จากคำตอบก่อนหน้า/.test(m) || isAuthorityDetailFollowUpQuery(text);
+      if (looksGenerated) continue;
+      if (!firstNonGenerated) firstNonGenerated = text;
+      // ข้ามคำถามที่เป็น follow-up สั้นๆ ในตัวมันเอง (เช่น "ถ้า 70 วันได้มั้ย", "50 วันล่ะ")
+      // เพื่อหา "คำถามหลัก" ที่มี keyword จริงไปเสริม retrieval (กันการดึง chunk ผิดเรื่อง)
+      if (isLikelyFollowUp(text)) continue;
+      if (extractEvidenceTokens(text).length >= 2) return text;
+    }
+    return firstNonGenerated || fallback;
+  } catch (error) {
+    console.warn("getPreviousUserQuestionForRetrieval failed", error?.message || error);
+    return "";
+  }
+};
+
+/**
+ * ค้น grounding chunks โดยอิง "ทั้งประวัติคำถามก่อนหน้า + embedding"
+ * ขั้นตอน: primary docs → secondary docs → ถ้ายังไม่พอ ให้รวมคำถามก่อนหน้าแล้วค้นซ้ำ
+ * แก้ปัญหา follow-up ที่ข้อความสั้น/ไม่มี keyword จน embedding ค้นไม่เจอ แล้วระบบตอบว่า "ไม่พบข้อมูล"
+ * คืนค่า { groundingChunks, retrievalDocumentIds, usedHistory }
+ */
+const resolveGroundingChunks = async ({
+  message,
+  conversationId,
+  retrievalQuery,
+  primaryDocumentIds,
+  secondaryDocumentIds,
+  fast = false,
+}) => {
+  let retrievalDocumentIds = primaryDocumentIds;
+  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, retrievalQuery, { fast });
+  if (
+    secondaryDocumentIds
+    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
+  ) {
+    retrievalDocumentIds = secondaryDocumentIds;
+    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, retrievalQuery, { fast });
+  }
+
+  const insufficient =
+    groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks);
+  if (!insufficient) {
+    return { groundingChunks, retrievalDocumentIds, usedHistory: false };
+  }
+
+  const prevQuestion = await getPreviousUserQuestionForRetrieval(conversationId, message);
+  if (!prevQuestion) {
+    return { groundingChunks, retrievalDocumentIds, usedHistory: false };
+  }
+
+  // รวมคำถามก่อนหน้าเข้ากับคำถามปัจจุบัน เพื่อให้ embedding มี keyword พอจะค้นเจอ
+  const mergedQuery = `${prevQuestion}\n${retrievalQuery}`.trim();
+  if (process.env.DEBUG_RAG === "1") {
+    console.log(
+      `[rag] history-merge: msg="${message}" | retrievalQuery="${retrievalQuery}" | prevQuestion="${prevQuestion}" | merged="${mergedQuery.replace(/\n/g, " | ")}"`,
+    );
+  }
+  const candidateIdSets = [primaryDocumentIds, secondaryDocumentIds].filter(Boolean);
+  for (const ids of candidateIdSets) {
+    const mergedChunks = await retrieveGroundingChunks(ids, mergedQuery, { fast });
+    if (mergedChunks.length === 0) continue;
+    // ประเมินหลักฐานด้วย mergedQuery (คำถามปัจจุบันเดี่ยวๆ มักไม่มี keyword)
+    if (hasSufficientGroundingEvidence(mergedQuery, mergedChunks)) {
+      if (process.env.DEBUG_RAG === "1") {
+        const preview = String(
+          mergedChunks[0]?.retrievedContext?.text ?? mergedChunks[0]?.payload?.text ?? "",
+        ).slice(0, 120);
+        console.log(`[rag] history-merge matched ${mergedChunks.length} chunk(s). first: "${preview}"`);
+      }
+      return { groundingChunks: mergedChunks, retrievalDocumentIds: ids, usedHistory: true };
+    }
+    if (mergedChunks.length > groundingChunks.length) {
+      groundingChunks = mergedChunks;
+      retrievalDocumentIds = ids;
+    }
+  }
+  return { groundingChunks, retrievalDocumentIds, usedHistory: groundingChunks.length > 0 };
+};
+
 const getAuthorityOverrideFromQuestion = (question) => {
   const m = normalizeText(question);
   if (!m) return null;
@@ -407,6 +866,16 @@ const toCompactAuthorityReply = (question, reply) => {
   const rawReply = String(reply || "").trim();
   if (!rawReply) return rawReply;
   if (!isAuthorityDecisionQuery(question)) return rawReply;
+  // ถ้าโมเดลตอบมาแบบละเอียดอยู่แล้ว (เช่น bullet/ลำดับขั้น) ไม่ต้องย่อ
+  // เพื่อกันเคสกด "อธิบายเพิ่มเติม" แล้วคำตอบโดนทับเป็นเวอร์ชันสั้น
+  const hasStructuredDetails =
+    rawReply.split(/\r?\n/).length >= 4
+    || /(?:^|\n)\s*[-*•]\s+/.test(rawReply)
+    || /(?:^|\n)\s*\d+[.)]\s+/.test(rawReply);
+  if (hasStructuredDetails) return rawReply;
+  // Follow-up ที่ต้องการ "อธิบายเพิ่ม/ยกตัวอย่าง" ไม่ควรถูกย่อเป็น 2 บรรทัด
+  // ไม่งั้นคำตอบละเอียดจะถูกทับด้วยรูปแบบ compact โดยไม่จำเป็น
+  if (isAuthorityDetailFollowUpQuery(question)) return rawReply;
 
   // ให้เคส authority สำคัญ (เช่น NT Corporate เกิน Floor Price) ถูก normalize ตรงตามกติกาเสมอ
   // และ fallback จากข้อความตอบ เมื่อโมเดลตอบมาใกล้เคียงแต่รูปแบบไม่คงที่
@@ -447,7 +916,6 @@ const toCompactAuthorityReply = (question, reply) => {
   if (authorityMatch?.label && approverValue === approverLine) {
     approverValue = formatAuthorityRole(authorityMatch.label);
   }
-  if (approverValue.length > 160) approverValue = `${approverValue.slice(0, 160)}...`;
 
   const noteLine = normalizedLines.find(
     (line) =>
@@ -459,7 +927,6 @@ const toCompactAuthorityReply = (question, reply) => {
   if (!noteValue && /(ต้อง|ก่อน|ผ่าน|เสนอ|pm|ผู้จัดการผลิตภัณฑ์)/i.test(approverLine)) {
     noteValue = approverLine;
   }
-  if (noteValue.length > 180) noteValue = `${noteValue.slice(0, 180)}...`;
 
   const compactLines = [`ผู้อนุมัติ: ${approverValue}`];
   if (noteValue) compactLines.push(`หมายเหตุ: ${noteValue}`);
@@ -487,6 +954,17 @@ const isLikelyFollowUp = (message) => {
   if (/สรุปทั้งหมด|สรุปทั้งเอกสาร|เอกสารเกี่ยวกับอะไร|เนื้อหาโดยรวม|โดยรวมเป็นยังไง/.test(m)) {
     return false;
   }
+  // คำขอ "อธิบายเพิ่ม/ดูรายละเอียด/ยกตัวอย่าง/แบบเป็นข้อ/จากคำตอบก่อนหน้า" ถือเป็น follow-up เสมอ
+  if (isAuthorityDetailFollowUpQuery(message)) return true;
+  // คำถามต่อเนื่องทั่วไปที่อ้างอิงคำถามเดิม/ขอข้อมูลเพิ่ม
+  if (/(จากคำถามเดิม|จากที่ถาม|ที่ถามไป|เพิ่มเติม|รายละเอียดเพิ่ม|ขยายความ|แล้วถ้า|แล้วกรณี|ถ้าเกิน|กรณีที่เกิน|แล้วล่ะ|ต่อจาก)/.test(m)) return true;
+  // คำถามต่อเนื่องเชิงเงื่อนไข/ตัวเลขสั้นๆ เช่น "ถ้า 70 วันได้มั้ย", "50 วันล่ะ", "แล้ว 30 วัน"
+  if (/^(ถ้า|แล้ว|งั้น)\s*/.test(m) && m.length <= 40) return true;
+  if (/(ล่ะ|ละ)\s*\??$/.test(m) && m.length <= 30) return true;
+  const isShortConditional = m.length <= 30
+    && /\d/.test(m)
+    && /(ได้มั้ย|ได้ไหม|ได้ป่าว|ได้รึ|ล่ะ|ละ|มั้ย|ไหม|หรือไม่|รึเปล่า)/.test(m);
+  if (isShortConditional) return true;
   // short / referential messages are often follow-ups
   if (m.length <= 14) {
     if (/(แล้ว|ต่อ|อีก|เพิ่ม|ทำไม|ยังไง|ยังงี้|อันไหน|อันนี้|ตรงนี้|เมื่อกี้|ข้างบน|ที่บอก|ตามนั้น)/.test(m)) return true;
@@ -736,6 +1214,7 @@ const NO_GROUNDING_REPLY = "ขออภัยครับ ยังไม่พ
 
 conversationsRouter.post("/", authenticate, async (req, res) => {
   const { documentId, botId } = req.body ?? {};
+  const isPrivate = req.body?.private === true;
 
   if (!documentId) {
     res.status(400).json({ error: "documentId is required" });
@@ -785,6 +1264,7 @@ conversationsRouter.post("/", authenticate, async (req, res) => {
       documentId,
       userId: req.user.id,
       botId: bot?.id ?? undefined,
+      private: isPrivate,
     },
   });
 
@@ -818,6 +1298,7 @@ conversationsRouter.get("/", authenticate, async (req, res) => {
     title: resolveConversationTitle(conversation.title, conversation.messages[0]?.content),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    private: conversation.private === true,
     document: conversation.document,
     bot: conversation.bot,
     lastMessage: sanitizeRedactedContentForClient(conversation.messages[0]?.content) ?? null,
@@ -1205,6 +1686,7 @@ conversationsRouter.get("/:id", authenticate, async (req, res) => {
     title: resolveConversationTitle(conversation.title, conversation.messages[0]?.content),
     botId: conversation.botId,
     documentId: conversation.documentId,
+    private: conversation.private === true,
     document: conversation.document,
     bot: conversation.bot,
     createdAt: conversation.createdAt,
@@ -1274,8 +1756,9 @@ messagesRouter.post("/", authenticate, async (req, res) => {
 messagesRouter.post("/:id/feedback", authenticate, async (req, res) => {
   const { rating, comment } = req.body ?? {};
   const normalizedRating = String(rating || "").toLowerCase();
-  if (!["up", "down"].includes(normalizedRating)) {
-    res.status(400).json({ error: "rating must be up or down" });
+  const isClear = ["none", "clear", "off"].includes(normalizedRating);
+  if (!isClear && !["up", "down"].includes(normalizedRating)) {
+    res.status(400).json({ error: "rating must be up, down, or none" });
     return;
   }
 
@@ -1291,6 +1774,15 @@ messagesRouter.post("/:id/feedback", authenticate, async (req, res) => {
   }
   if (message.role !== "model") {
     res.status(400).json({ error: "Feedback is only allowed for model messages" });
+    return;
+  }
+
+  // กดซ้ำ = ยกเลิก feedback (ลบทิ้ง)
+  if (isClear) {
+    await prisma.messageFeedback.deleteMany({
+      where: { messageId: message.id, userId: req.user.id },
+    });
+    res.json({ ok: true, rating: null });
     return;
   }
 
@@ -1347,8 +1839,14 @@ chatRouter.get("/:conversationId/debug-context", authenticate, async (req, res) 
 
   let groundingChunks = await retrieveGroundingChunks(documentIds, message);
   if (groundingChunks.length === 0) {
-    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
+    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 5);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
+  } else {
+    // Hybrid search: เสริมผล keyword (เลขที่/ราคา/มาตรา ที่ vector อาจพลาด) แล้ว dedupe คงลำดับ vector ก่อน
+    const keywordChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 4);
+    if (keywordChunks.length > 0) {
+      groundingChunks = mergeHybridChunks(groundingChunks, keywordChunks, Math.max(Number(MAX_CONTEXT_PIECES) || 12, groundingChunks.length));
+    }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
     maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
@@ -1396,6 +1894,9 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.status(400).json({ error: "conversationId and message are required" });
     return;
   }
+  // โหมดส่วนตัว: เคารพสวิตช์ที่ client ส่งมา (true/false); ถ้าไม่ส่ง (undefined) จะ fallback เป็น conversation.private
+  const bodyPrivateMode = typeof req.body?.privateMode === "boolean" ? req.body.privateMode : undefined;
+  const bodyPrivateContent = typeof req.body?.privateContent === "string" ? req.body.privateContent.trim() : "";
   // ไม่ใช้ rate limit ต่อนาที สำหรับแชท — ใช้แค่โควต้ารายวัน (MAX_DAILY_CHAT_MESSAGES / FREE_DAILY_TOKEN_LIMIT)
   const usage = await getOrCreateUsageDaily(req.user.id);
   if (usage.chatCount >= MAX_DAILY_CHAT_MESSAGES) {
@@ -1423,6 +1924,19 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.status(404).json({ error: "Conversation not found" });
     return;
   }
+
+  // โหมดส่วนตัว: เคารพสวิตช์จาก client ถ้าส่งมา; ไม่งั้นใช้สถานะห้อง (conversation.private)
+  const privateMode = typeof bodyPrivateMode === "boolean" ? bodyPrivateMode : conversation.private === true;
+  let privateInstructions = "";
+  let privateKnowledge = "";
+  let privateMemory = "";
+  if (privateMode) {
+    const parts = await loadPrivateContextParts(req.user.id);
+    privateInstructions = parts.instructions;
+    privateKnowledge = parts.knowledge;
+    privateMemory = await loadCrossChatMemory(req.user.id, conversationId);
+  }
+  const hasPrivateContext = !!(privateInstructions || privateKnowledge || privateMemory);
 
   if (isUnintelligibleQuery(message)) {
     const fallbackReply = getUnintelligibleReply();
@@ -1575,19 +2089,25 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     rawContextDocs,
     defaultDocumentIds,
   );
-  let retrievalDocumentIds = primaryDocumentIds;
-  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  if (
-    secondaryDocumentIds
-    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
-  ) {
-    retrievalDocumentIds = secondaryDocumentIds;
-    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  }
+  const retrievalQuery = await buildStandaloneQuery(message, conversationId);
+  let { groundingChunks, retrievalDocumentIds } = await resolveGroundingChunks({
+    message,
+    conversationId,
+    retrievalQuery,
+    primaryDocumentIds,
+    secondaryDocumentIds,
+    fast: req.body?.mode === "fast",
+  });
   const contextDocuments = filterContextDocsByIds(rawContextDocs, retrievalDocumentIds);
   if (groundingChunks.length === 0) {
-    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
+    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 5);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
+  } else {
+    // Hybrid search: เสริมผล keyword (เลขที่/ราคา/มาตรา ที่ vector อาจพลาด) แล้ว dedupe คงลำดับ vector ก่อน
+    const keywordChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 4);
+    if (keywordChunks.length > 0) {
+      groundingChunks = mergeHybridChunks(groundingChunks, keywordChunks, Math.max(Number(MAX_CONTEXT_PIECES) || 12, groundingChunks.length));
+    }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
     maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
@@ -1603,8 +2123,10 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
-  const deterministicReply = getDeterministicRuleReply(message);
-  if (deterministicReply) {
+  const ntPricingReply = await getNtCorpInternetPricingReply(message);
+  const deterministicReply = ntPricingReply || (deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
+  const deterministicMultiQuestion = Boolean(deterministicReply) && !ntPricingReply && hasMultipleQuestions(message);
+  if (deterministicReply && !deterministicMultiQuestion) {
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
@@ -1633,6 +2155,16 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
+    // พ่นคำตอบจากเครื่องคำนวณ (deterministic) แบบ stream ให้ทยอยขึ้นเหมือนคำตอบ LLM
+    // ปิด Nagle + flush ทุก chunk เพื่อกันไม่ให้ TCP รวม chunk เล็กๆ ส่งทีเดียว (จะได้เห็นทยอยพิมพ์จริง)
+    try { res.socket?.setNoDelay?.(true); } catch (_) {}
+    const detSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const DET_CHUNK = 4;
+    for (let i = 0; i < deterministicReply.length; i += DET_CHUNK) {
+      res.write(`data: ${JSON.stringify({ content: deterministicReply.slice(i, i + DET_CHUNK) })}\n\n`);
+      if (typeof res.flush === "function") res.flush();
+      await detSleep(22);
+    }
     res.write(
       `data: ${JSON.stringify({
         done: true,
@@ -1648,6 +2180,8 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
     && !followUpIntent
+    && !deterministicReply
+    && !hasPrivateContext
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = getNoDataReply(message);
@@ -1683,7 +2217,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.end();
     return;
   }
-  if (isApproverRolesQuery(message)) {
+  if (deterministicRulesEnabled && isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
@@ -1725,36 +2259,14 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.end();
     return;
   }
-  const policyPrompt = isHelpBot
-    ? [
-        "You are a helpful Thai AI assistant. Answer in the same language as the user.",
-        "Scope: ตอบจาก Context ที่ให้มาเป็นหลัก และห้ามแต่งข้อมูลที่ไม่มีหลักฐาน.",
-        "Rules: 1) Remember conversation for follow-ups. 2) Keep answers clear and concise. 3) If outside context, say information is unavailable.",
-        "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
-      ].join("\n")
-    : [
-        "You are Enterprise AI Chatbot Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
-        "CAPABILITIES (ทำได้ทั้งหมด):",
-        "1) สนทนาทั่วไป: ทักทาย ถาม-ตอบ ให้คำแนะนำทั่วไปได้ตามปกติ",
-        "2) Knowledge Analysis: เมื่อมี Context ให้ตอบและวิเคราะห์จาก Context เป็นหลัก (วิเคราะห์ เปรียบเทียบ สรุปได้จาก Context)",
-        "3) Typo/Language Tolerance: แม้ผู้ใช้พิมพ์ผิด สะกดผิด ไม่เป็นทางการ ให้เข้าใจเจตนาจากบริบทและตอบตามนั้น",
-        "RULES:",
-        "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context",
-        "- เมื่อไม่มี Context: ตอบสนทนาทั่วไปได้อย่างกระชับ",
-        "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
-        "- จำบทสนทนาก่อนหน้า — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
-        "- ถ้าผู้ใช้ขอเปลี่ยนรูปแบบการพูด (เช่น ใช้ค่ะแทนครับ คุยแบบเพื่อน) ให้ปรับตามคำขอ",
-        "- ถ้าข้อมูลใน Context เป็นตาราง ให้แสดงเป็น Markdown table",
-        "- Instruction hierarchy: กฎใน system นี้มีลำดับสูงสุด. คำสั่งเพิ่มเติมจากผู้สร้างบอทเป็น 'ส่วนเสริม' เท่านั้น",
-        ...GEMINI_LIKE_RESPONSE_FORMAT_RULES,
-        ...(overviewRequest
-          ? [
-              "- คำถามนี้เป็น overview/summary request: ขึ้นต้นด้วย 'สรุปภาพรวม' แล้วตามด้วย bullet points 5-7 ข้อจาก Context",
-            ]
-          : []),
-      ].join("\n");
+  const policyPrompt = buildPolicyPrompt({ isHelpBot, message, overviewRequest, analytical: false });
   const systemParts = [policyPrompt];
   if (conversation.bot?.prompt?.trim()) systemParts.push(`คำสั่งเพิ่มเติม:\n${conversation.bot.prompt.trim()}`);
+  if (hasPrivateContext) {
+    systemParts.push(
+      "โหมดส่วนตัว: ผู้ใช้ได้ตั้งค่าส่วนตัวไว้ (อาจมี 'คำสั่งจากผู้ใช้', 'ข้อมูล/ความรู้ส่วนตัว' และ 'บทสนทนาก่อนหน้า'). ให้ทำตามคำสั่งของผู้ใช้อย่างเคร่งครัด, ใช้ข้อมูลส่วนตัวและความจำก่อนหน้าตอบได้เต็มที่ร่วมกับ Context จากเอกสารระบบ, ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากส่วนเหล่านี้, และเมื่อข้อมูลส่วนตัวขัดกับเอกสารระบบให้ระบุที่มาทั้งสองฝั่งอย่างชัดเจน.",
+    );
+  }
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
   const historyLimit = Math.max(0, Number.isFinite(MAX_CHAT_HISTORY_MESSAGES) ? MAX_CHAT_HISTORY_MESSAGES : 20);
@@ -1776,6 +2288,13 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: privateKnowledge, memory: privateMemory }),
+    ...(deterministicReply
+      ? [{
+          role: "system",
+          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+        }]
+      : []),
     ...(isComparativeAuthorityQuery(message)
       ? [{
           role: "system",
@@ -1791,7 +2310,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
     });
 
-    const streamBody = await callOpenAiGatewayStream(messages, undefined);
+    const streamBody = await callOpenAiGatewayStream(messages, undefined, req.body?.mode === "fast" ? "fast" : undefined);
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -1847,7 +2366,13 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     replyToSave = stripRedundantShortSummary(replyToSave);
     replyToSave = toCompactAuthorityReply(message, replyToSave);
 
-    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    const references = buildReferencesForReply({
+      groundingChunks,
+      contextDocuments,
+      primaryDocument: conversation.document,
+      message,
+      hasPrivateContext,
+    });
     const modelMessage = await prisma.message.create({
       data: {
         conversationId,
@@ -1892,7 +2417,13 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     let msg = error instanceof Error ? error.message : "Chat failed";
     const isTimeout = /timed out|timeout/i.test(String(msg || ""));
     if (isTimeout && Array.isArray(groundingChunks) && groundingChunks.length > 0) {
-      const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+      const references = buildReferencesForReply({
+        groundingChunks,
+        contextDocuments,
+        primaryDocument: conversation.document,
+        message,
+        hasPrivateContext,
+      });
       const snippets = groundingChunks
         .map((chunk) => String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? "").replace(/\s+/g, " ").trim())
         .filter(Boolean)
@@ -1951,6 +2482,9 @@ chatRouter.post("/", authenticate, async (req, res) => {
     res.status(400).json({ error: "conversationId and message are required" });
     return;
   }
+  // โหมดส่วนตัว: เคารพสวิตช์ที่ client ส่งมา (true/false); ถ้าไม่ส่ง (undefined) จะ fallback เป็น conversation.private
+  const bodyPrivateMode = typeof req.body?.privateMode === "boolean" ? req.body.privateMode : undefined;
+  const bodyPrivateContent = typeof req.body?.privateContent === "string" ? req.body.privateContent.trim() : "";
   // ไม่ใช้ rate limit ต่อนาที สำหรับแชท
   const usage = await getOrCreateUsageDaily(req.user.id);
   if (usage.chatCount >= MAX_DAILY_CHAT_MESSAGES) {
@@ -1980,6 +2514,19 @@ chatRouter.post("/", authenticate, async (req, res) => {
     res.status(404).json({ error: "Conversation not found" });
     return;
   }
+
+  // โหมดส่วนตัว: เคารพสวิตช์จาก client ถ้าส่งมา; ไม่งั้นใช้สถานะห้อง (conversation.private)
+  const privateMode = typeof bodyPrivateMode === "boolean" ? bodyPrivateMode : conversation.private === true;
+  let privateInstructions = "";
+  let privateKnowledge = "";
+  let privateMemory = "";
+  if (privateMode) {
+    const parts = await loadPrivateContextParts(req.user.id);
+    privateInstructions = parts.instructions;
+    privateKnowledge = parts.knowledge;
+    privateMemory = await loadCrossChatMemory(req.user.id, conversationId);
+  }
+  const hasPrivateContext = !!(privateInstructions || privateKnowledge || privateMemory);
 
   if (isUnintelligibleQuery(message)) {
     const fallbackReply = getUnintelligibleReply();
@@ -2140,19 +2687,25 @@ chatRouter.post("/", authenticate, async (req, res) => {
     rawContextDocs,
     defaultDocumentIds,
   );
-  let retrievalDocumentIds = primaryDocumentIds;
-  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  if (
-    secondaryDocumentIds
-    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
-  ) {
-    retrievalDocumentIds = secondaryDocumentIds;
-    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  }
+  const retrievalQuery = await buildStandaloneQuery(message, conversationId);
+  let { groundingChunks, retrievalDocumentIds } = await resolveGroundingChunks({
+    message,
+    conversationId,
+    retrievalQuery,
+    primaryDocumentIds,
+    secondaryDocumentIds,
+    fast: req.body?.mode === "fast",
+  });
   const contextDocuments = filterContextDocsByIds(rawContextDocs, retrievalDocumentIds);
   if (groundingChunks.length === 0) {
-    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
+    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 5);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
+  } else {
+    // Hybrid search: เสริมผล keyword (เลขที่/ราคา/มาตรา ที่ vector อาจพลาด) แล้ว dedupe คงลำดับ vector ก่อน
+    const keywordChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 4);
+    if (keywordChunks.length > 0) {
+      groundingChunks = mergeHybridChunks(groundingChunks, keywordChunks, Math.max(Number(MAX_CONTEXT_PIECES) || 12, groundingChunks.length));
+    }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
     maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
@@ -2168,8 +2721,10 @@ chatRouter.post("/", authenticate, async (req, res) => {
   if (contextText && contextText.length > MAX_CONTEXT_CHARS_FOR_MODEL) {
     contextText = `${contextText.slice(0, MAX_CONTEXT_CHARS_FOR_MODEL)}\n\n[context truncated]`;
   }
-  const deterministicReply = getDeterministicRuleReply(message);
-  if (deterministicReply) {
+  const ntPricingReply = await getNtCorpInternetPricingReply(message);
+  const deterministicReply = ntPricingReply || (deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
+  const deterministicMultiQuestion = Boolean(deterministicReply) && !ntPricingReply && hasMultipleQuestions(message);
+  if (deterministicReply && !deterministicMultiQuestion) {
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
@@ -2206,6 +2761,8 @@ chatRouter.post("/", authenticate, async (req, res) => {
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
     && !followUpIntent
+    && !deterministicReply
+    && !hasPrivateContext
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = getNoDataReply(message);
@@ -2243,7 +2800,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
     });
     return;
   }
-  if (isApproverRolesQuery(message)) {
+  if (deterministicRulesEnabled && isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
@@ -2279,42 +2836,16 @@ chatRouter.post("/", authenticate, async (req, res) => {
     return;
   }
 
-  const policyPrompt = isHelpBot
-    ? [
-        "You are a helpful Thai AI assistant.",
-        "Scope: ตอบจาก Context ที่ให้มาเท่านั้น ห้ามแต่งข้อมูลที่ไม่มีหลักฐาน.",
-        "Rules:",
-        "1) Use Context to answer and keep response concise.",
-        "2) Remember previous questions for follow-up continuity.",
-        "3) If outside scope, reply that context does not contain the requested information.",
-        "4) Do not put filenames, footnotes, or 'อ้างอิงจาก' / Sources in the body — the UI shows sources separately.",
-      ].join("\n")
-    : [
-        "You are Enterprise AI Chatbot Assistant — a smart, friendly Thai AI assistant. Answer in the same language as the user (Thai or English).",
-        "CAPABILITIES (ทำได้ทั้งหมด):",
-        "1) General chat: ทักทาย สนทนาทั่วไป ถาม-ตอบ ให้คำแนะนำได้ตามปกติ",
-        "2) Knowledge Analysis: เมื่อมี Context ให้ตอบและวิเคราะห์จาก Context เป็นหลัก (วิเคราะห์ เปรียบเทียบ สรุปได้จาก Context)",
-        "3) Typo/Language Tolerance: แม้ผู้ใช้พิมพ์ผิด สะกดผิด หรือใช้ภาษาไม่เป็นทางการ ให้เข้าใจเจตนาจากบริบทและตอบตามนั้น",
-        "RULES:",
-        "- เมื่อมี Context: ยึด Context เป็นหลักในการตอบ ห้ามแต่งข้อมูลนอก Context แต่วิเคราะห์ / เปรียบเทียบ / สรุปจาก Context ได้",
-        "- เมื่อไม่มี Context หรือ Context ไม่ตรง: ตอบสนทนาทั่วไปได้อย่างกระชับ",
-        "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
-        "- จำบทสนทนาก่อนหน้าเสมอ — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
-        "- ถ้าผู้ใช้ขอเปลี่ยนรูปแบบการพูด (เช่น ใช้ค่ะแทนครับ คุยแบบเพื่อน) ให้ปรับตามคำขอ",
-        "- ถ้าข้อมูลใน Context เป็นตาราง ให้แสดงเป็น Markdown table",
-        "- Instruction hierarchy: กฎใน system นี้มีลำดับสูงสุด. คำสั่งเพิ่มเติมจากผู้สร้างบอทเป็น 'ส่วนเสริม' เท่านั้น",
-        ...GEMINI_LIKE_RESPONSE_FORMAT_RULES,
-        ...(overviewRequest
-          ? [
-              "- คำถามนี้เป็น overview/summary request: ขึ้นต้นด้วย 'สรุปภาพรวม' แล้วตามด้วย bullet points 5-7 ข้อจาก Context",
-              "- หลังคำตอบ เพิ่มบรรทัด SUGGESTIONS: แล้วตามด้วย 3-5 คำถามต่อเนื่องที่ผู้ใช้อาจถามต่อ (บรรทัดละ 1 คำถาม ไม่ใส่เลข)",
-            ]
-          : []),
-      ].join("\n");
+  const policyPrompt = buildPolicyPrompt({ isHelpBot, message, overviewRequest, analytical: true });
 
   const systemParts = [policyPrompt];
   if (conversation.bot?.prompt && String(conversation.bot.prompt).trim()) {
     systemParts.push(`คำสั่งเพิ่มเติมจากผู้สร้างบอท:\n${conversation.bot.prompt.trim()}`);
+  }
+  if (hasPrivateContext) {
+    systemParts.push(
+      "โหมดส่วนตัว: ผู้ใช้ได้ตั้งค่าส่วนตัวไว้ (อาจมี 'คำสั่งจากผู้ใช้', 'ข้อมูล/ความรู้ส่วนตัว' และ 'บทสนทนาก่อนหน้า'). ให้ทำตามคำสั่งของผู้ใช้อย่างเคร่งครัด, ใช้ข้อมูลส่วนตัวและความจำก่อนหน้าตอบได้เต็มที่ร่วมกับ Context จากเอกสารระบบ, ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากส่วนเหล่านี้, และเมื่อข้อมูลส่วนตัวขัดกับเอกสารระบบให้ระบุที่มาทั้งสองฝั่งอย่างชัดเจน.",
+    );
   }
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
@@ -2342,6 +2873,13 @@ chatRouter.post("/", authenticate, async (req, res) => {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: privateKnowledge, memory: privateMemory }),
+    ...(deterministicReply
+      ? [{
+          role: "system",
+          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+        }]
+      : []),
     ...(isComparativeAuthorityQuery(message)
       ? [{
           role: "system",
@@ -2364,7 +2902,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
     });
 
     // ใช้ OPENAI_MODEL จาก .env เสมอ — คีย์ gateway มักรองรับแค่บางโมเดล (เช่น gpt-4o-mini) ถ้าใช้ bot.model อาจได้ 401
-    const gatewayResponse = await callOpenAiGateway(messages, undefined);
+    const gatewayResponse = await callOpenAiGateway(messages, undefined, req.body?.mode === "fast" ? "fast" : undefined);
     const tokenUsage = getTokenUsage(gatewayResponse);
     const rawReply =
       gatewayResponse?.choices?.[0]?.message?.content?.trim() ||
@@ -2386,7 +2924,13 @@ chatRouter.post("/", authenticate, async (req, res) => {
     replyToSave = stripRedundantShortSummary(replyToSave);
     replyToSave = toCompactAuthorityReply(message, replyToSave);
 
-    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
+    const references = buildReferencesForReply({
+      groundingChunks,
+      contextDocuments,
+      primaryDocument: conversation.document,
+      message,
+      hasPrivateContext,
+    });
     const modelMessage = await prisma.message.create({
       data: {
         conversationId,
@@ -2444,6 +2988,11 @@ const LINE_PLATFORM = "line";
  * @returns {Promise<{ reply: string }>}
  */
 export async function getChatReplyForLine(conversationId, message, userId) {
+  // โหมดส่วนตัวไม่รองรับบนช่องทาง LINE (ตั้งค่าให้ guardrail/inject ทำงานเหมือนเดิม)
+  const privateInstructions = "";
+  const privateKnowledge = "";
+  const privateMemory = "";
+  const hasPrivateContext = false;
   const conversation = await prisma.conversation.findFirst({
     where: { id: conversationId, userId },
     include: {
@@ -2538,18 +3087,24 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     return { reply: fallbackReply };
   }
 
-  groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  if (
-    secondaryDocumentIds
-    && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
-  ) {
-    retrievalDocumentIds = secondaryDocumentIds;
-    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, message);
-  }
+  const retrievalQuery = await buildStandaloneQuery(message, conversationId);
+  ({ groundingChunks, retrievalDocumentIds } = await resolveGroundingChunks({
+    message,
+    conversationId,
+    retrievalQuery,
+    primaryDocumentIds,
+    secondaryDocumentIds,
+  }));
   const contextDocuments = contextDocumentsFrom(retrievalDocumentIds);
   if (groundingChunks.length === 0) {
-    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 3);
+    const keywordFallbackChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 5);
     if (keywordFallbackChunks.length > 0) groundingChunks = keywordFallbackChunks;
+  } else {
+    // Hybrid search: เสริมผล keyword (เลขที่/ราคา/มาตรา ที่ vector อาจพลาด) แล้ว dedupe คงลำดับ vector ก่อน
+    const keywordChunks = buildFallbackGroundingChunksFromDocuments(message, contextDocuments, 4);
+    if (keywordChunks.length > 0) {
+      groundingChunks = mergeHybridChunks(groundingChunks, keywordChunks, Math.max(Number(MAX_CONTEXT_PIECES) || 12, groundingChunks.length));
+    }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
     maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
@@ -2562,8 +3117,10 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   if (!contextText && contextDocuments.length > 0 && overviewRequest) {
     contextText = getFallbackContextFromDocuments(contextDocuments);
   }
-  const deterministicReply = getDeterministicRuleReply(message);
-  if (deterministicReply) {
+  const ntPricingReply = await getNtCorpInternetPricingReply(message);
+  const deterministicReply = ntPricingReply || (deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
+  const deterministicMultiQuestion = Boolean(deterministicReply) && !ntPricingReply && hasMultipleQuestions(message);
+  if (deterministicReply && !deterministicMultiQuestion) {
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
       data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
@@ -2589,6 +3146,8 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const rejectNoGrounding = !isHelpBot && !overviewRequest && !isGreeting(message)
     && !followUpIntent
+    && !deterministicReply
+    && !hasPrivateContext
     && (groundingChunks.length === 0 || !hasEvidence);
   if (rejectNoGrounding) {
     const fallbackReply = getNoDataReply(message);
@@ -2606,7 +3165,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     await invalidateConversationCaches(conversation.id, userId);
     return { reply: fallbackReply };
   }
-  if (isApproverRolesQuery(message)) {
+  if (deterministicRulesEnabled && isApproverRolesQuery(message)) {
     const reply = buildApproverRolesReply(groundingChunks, contextText);
     const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
     await prisma.message.create({
@@ -2641,13 +3200,19 @@ export async function getChatReplyForLine(conversationId, message, userId) {
         "Scope: ตอบเฉพาะจาก Context เท่านั้น ห้ามใช้ความรู้จากภายนอก.",
         "Rules: 1) Base answer ONLY on Context. 2) If not in Context reply: ขออภัยครับ ข้อมูลส่วนนี้ไม่มีอยู่ในฐานข้อมูลของผม",
         "Rules: 3) ถ้ามีหลายเงื่อนไขในคำถาม ให้แยกตอบเป็นรายกรณีในกรอบข้อมูลที่มี",
-        ...GEMINI_LIKE_RESPONSE_FORMAT_RULES,
+        "Rules: 4) ตัวเลข/ราคา/อำนาจอนุมัติ ให้ยึดจาก Context เท่านั้น ห้ามดึงจากประวัติสนทนา — ใช้ประวัติเพียงเพื่อเข้าใจว่าผู้ใช้อ้างถึงอะไร",
+        ...getResponseFormatRulesForMessage(message),
       ].join("\n");
   const systemParts = [policyPrompt];
   if (conversation.bot?.prompt?.trim()) systemParts.push(`คำสั่งเพิ่มเติม:\n${conversation.bot.prompt.trim()}`);
+  if (hasPrivateContext) {
+    systemParts.push(
+      "โหมดส่วนตัว: ผู้ใช้ได้ตั้งค่าส่วนตัวไว้ (อาจมี 'คำสั่งจากผู้ใช้', 'ข้อมูล/ความรู้ส่วนตัว' และ 'บทสนทนาก่อนหน้า'). ให้ทำตามคำสั่งของผู้ใช้อย่างเคร่งครัด, ใช้ข้อมูลส่วนตัวและความจำก่อนหน้าตอบได้เต็มที่ร่วมกับ Context จากเอกสารระบบ, ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากส่วนเหล่านี้, และเมื่อข้อมูลส่วนตัวขัดกับเอกสารระบบให้ระบุที่มาทั้งสองฝั่งอย่างชัดเจน.",
+    );
+  }
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
 
-  if (!contextText && !isHelpBot && !isGreeting(message)) {
+  if (!contextText && !isHelpBot && !isGreeting(message) && !deterministicReply) {
     const fallbackReply = getNoDataReply(message);
     await prisma.message.create({
       data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
@@ -2687,6 +3252,13 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: privateKnowledge, memory: privateMemory }),
+    ...(deterministicReply
+      ? [{
+          role: "system",
+          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+        }]
+      : []),
     ...(isComparativeAuthorityQuery(message)
       ? [{
           role: "system",

@@ -140,10 +140,16 @@ export const api = {
   logout: () => setSession(null, null),
   getMe: () => request('/api/auth/me'),
   getReport: () => request('/api/support/report'),
+  getFeedback: (rating = 'down', limit = 50, offset = 0) =>
+    request(`/api/support/feedback?rating=${encodeURIComponent(rating)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
+  getQualityMetrics: (days = 30) =>
+    request(`/api/support/quality-metrics?days=${encodeURIComponent(days)}`),
   getMetrics: () => request('/api/admin/metrics'),
   getAdminActivity: (days = 14) => request(`/api/admin/activity?days=${encodeURIComponent(days)}`),
   getFaqCategories: (scope = 'all', days = 30) =>
     request(`/api/admin/faq-categories?scope=${encodeURIComponent(scope)}&days=${encodeURIComponent(days)}`),
+  getTopCitedDocuments: (scope = 'all', days = 30) =>
+    request(`/api/admin/top-cited-documents?scope=${encodeURIComponent(scope)}&days=${encodeURIComponent(days)}`),
   getTokenUsage: (scope = 'all', days = 7) =>
     request(`/api/admin/token-usage?scope=${encodeURIComponent(scope)}&days=${encodeURIComponent(days)}`),
   getUserRoleDistribution: () => request('/api/admin/user-role-distribution'),
@@ -220,6 +226,28 @@ export const api = {
       body: JSON.stringify({ newPassword }),
     }),
   deleteAdminUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
+  // คำพ้องความหมาย (Synonyms)
+  getSynonyms: () => request('/api/support/synonyms'),
+  createSynonym: (payload) =>
+    request('/api/support/synonyms', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  updateSynonym: (id, payload) =>
+    request(`/api/support/synonyms/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
+  deleteSynonym: (id) =>
+    request(`/api/support/synonyms/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
+  // อัตราค่าบริการ (Service Rates)
+  getServiceRates: () => request('/api/support/service-rates'),
+  createServiceRate: (payload) =>
+    request('/api/support/service-rates', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  updateServiceRate: (id, payload) =>
+    request(`/api/support/service-rates/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
+  deleteServiceRate: (id) =>
+    request(`/api/support/service-rates/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
 };
 
 // Credential API functions

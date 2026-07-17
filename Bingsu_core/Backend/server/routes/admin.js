@@ -242,6 +242,72 @@ adminRouter.get("/faq-categories", authenticate, requireRole("support", "admin",
 });
 
 /**
+ * เอกสารที่ถูกอ้างอิงบ่อย (Most-cited knowledge documents)
+ * นับจาก references ที่ผูกกับคำตอบของบอท (role = "model") ในช่วงเวลาที่กำหนด
+ * นับ 1 ครั้งต่อ 1 คำตอบต่อ 1 เอกสาร (dedupe ต่อข้อความ) = "จำนวนคำตอบที่อ้างอิงเอกสารนี้"
+ * คืนรูปแบบเดียวกับ faq-categories: { categories: [{ type, count, percentage, docId }], ... }
+ */
+adminRouter.get("/top-cited-documents", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {
+  const scope = String(req.query?.scope || "all").toLowerCase(); // all | user
+  const daysRaw = Number(req.query?.days);
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(365, Math.floor(daysRaw))) : 30;
+  const limitRaw = Number(req.query?.limit);
+  const limit = Number.isFinite(limitRaw) ? Math.max(100, Math.min(50000, Math.floor(limitRaw))) : 20000;
+  const topRaw = Number(req.query?.top);
+  const top = Number.isFinite(topRaw) ? Math.max(3, Math.min(30, Math.floor(topRaw))) : 12;
+
+  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const where = {
+    role: "model",
+    createdAt: { gte: from },
+  };
+  // scope "user" = เฉพาะบทสนทนาที่เจ้าของเป็น role = user
+  if (scope === "user") {
+    Object.assign(where, { conversation: { user: { role: "user" } } });
+  }
+
+  const messages = await prisma.message.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    select: { references: true },
+  });
+
+  const counts = new Map(); // docId -> { docId, name, count }
+  for (const m of messages) {
+    const refs = Array.isArray(m?.references) ? m.references : [];
+    if (refs.length === 0) continue;
+    const seen = new Set(); // นับครั้งเดียวต่อข้อความ
+    for (const r of refs) {
+      const docId = r?.docId;
+      if (!docId || docId === "__private__") continue;
+      if (seen.has(docId)) continue;
+      seen.add(docId);
+      const name = String(r?.displayName || "เอกสาร").trim() || "เอกสาร";
+      const cur = counts.get(docId) || { docId, name, count: 0 };
+      cur.count += 1;
+      if ((!cur.name || cur.name === "เอกสาร") && name) cur.name = name;
+      counts.set(docId, cur);
+    }
+  }
+
+  const arr = [...counts.values()];
+  const totalCount = arr.reduce((sum, c) => sum + c.count, 0);
+  const categories = arr
+    .map((c) => ({
+      type: c.name,
+      count: c.count,
+      percentage: totalCount > 0 ? Number(((c.count / totalCount) * 100).toFixed(1)) : 0,
+      docId: c.docId,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, top);
+
+  res.json({ categories, totalCount, days, scope, truncated: messages.length >= limit });
+});
+
+/**
  * Token usage รายวัน (ข้อมูลจริงจาก UsageDaily)
  * ใช้สำหรับกราฟ "การใช้ Token รายวัน" ใน Support Admin Dashboard
  */
@@ -656,11 +722,13 @@ adminRouter.delete("/groups/:id", authenticate, requireRole("admin"), async (_re
 
 adminRouter.get("/documents", authenticate, requireRole("support", "admin"), async (_req, res) => {
   const documents = await prisma.document.findMany({
-    orderBy: { createdAt: "desc" },
+    // เรียงตาม updatedAt ล่าสุด → เอกสารที่เพิ่งสร้าง/อัปเดต/แก้ไข ขึ้นบนสุด
+    orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       displayName: true,
       createdAt: true,
+      updatedAt: true,
       owner: { select: { id: true, name: true } },
     },
   });

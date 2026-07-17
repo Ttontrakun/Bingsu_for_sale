@@ -153,6 +153,32 @@ async function propagateStaffDocumentToUsers(documentId) {
   }
 }
 
+/**
+ * เชื่อมเอกสารเข้ากับ "บอทในระบบ" อัตโนมัติ (ยกเว้นบอทช่วยสอน)
+ * ระบบนี้มีบอทหลักตัวเดียว — เมื่อ support/admin บันทึก Knowledge จะผูกเข้าบอทนั้นให้เลย
+ * ไม่ต้องเข้าไปหน้าบอทเพื่อเลือก Knowledge อีกครั้ง (upsert กันซ้ำ)
+ */
+async function linkDocumentToSystemBots(documentId) {
+  try {
+    const bots = await prisma.bot.findMany({
+      where: { name: { not: "บอทช่วยสอน" } },
+      select: { id: true },
+    });
+    for (const b of bots) {
+      await prisma.botDocument.upsert({
+        where: { botId_documentId: { botId: b.id, documentId } },
+        update: {},
+        create: { botId: b.id, documentId },
+      }).catch(() => null);
+    }
+    if (bots.length) {
+      console.log(`[documents] linked doc ${documentId} to ${bots.length} system bot(s)`);
+    }
+  } catch (err) {
+    console.error("[documents] linkDocumentToSystemBots failed:", err?.message);
+  }
+}
+
 documentsRouter.get("/", authenticate, async (req, res) => {
   const summary = ["1", "true", "yes"].includes(String(req.query.summary || "").toLowerCase());
   const documents = await prisma.document.findMany({
@@ -263,6 +289,8 @@ documentsRouter.post("/", authenticate, async (req, res) => {
     });
     if (isStaffDocumentWriter(req.user)) {
       await propagateStaffDocumentToUsers(document.id);
+      // เฉพาะฝั่ง support/admin → เชื่อม Knowledge เข้าบอทในระบบให้อัตโนมัติ (ไม่เกี่ยวกับ user)
+      await linkDocumentToSystemBots(document.id);
     }
     await logEvent({
       event: "document.created",
@@ -396,6 +424,11 @@ documentsRouter.patch("/:id", authenticate, async (req, res) => {
       // ถ้า owner เป็น support/admin → share และ link bot ให้ user ทุกคนอัตโนมัติ
       if (isStaffDocumentWriter({ role: document.owner?.role ?? req.user.role })) {
         await propagateStaffDocumentToUsers(updated.id);
+      }
+      // เฉพาะฝั่ง support/admin (operator เป็น staff) → เชื่อม Knowledge เข้าบอทในระบบให้อัตโนมัติ
+      // ไม่เกี่ยวกับ user ทั่วไป (user บันทึก Knowledge จะไม่ถูกเชื่อมเข้าบอทระบบ)
+      if (isStaffDocumentWriter(req.user)) {
+        await linkDocumentToSystemBots(updated.id);
       }
       await logEvent({
         event: "document.updated",
@@ -690,6 +723,14 @@ documentsRouter.post("/:id/files/ocr/structure-text", authenticate, async (req, 
       return;
     }
     const structured = await structureOcrTextWithLlm(text.trim());
+    // Log แบบ action-level: มีผู้ใช้สั่งจัดเรียงข้อความด้วย AI (เก็บเฉพาะ metadata ไม่เก็บเนื้อหา)
+    logEvent({
+      event: "document.ocr.structured",
+      actorId: req.user?.id,
+      targetType: "document",
+      targetId: document.id,
+      meta: { displayName: document.displayName, inputChars: text.trim().length, ...getRequestContext(req) },
+    }).catch(() => {});
     res.json({ ok: true, text: structured });
   } catch (e) {
     const msg = e?.message || String(e);

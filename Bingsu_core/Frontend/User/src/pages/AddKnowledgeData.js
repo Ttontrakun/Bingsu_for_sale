@@ -530,6 +530,48 @@ function AddKnowledgeData() {
     };
   };
 
+  // รวมตาราง (ที่แก้แล้วใน sheet editor) กลับเข้าไปใน "ข้อความเต็ม" โดยคงข้อความ (prose) รอบๆ ตารางไว้
+  // แทนที่บล็อกตารางเดิมในข้อความด้วยตารางที่สร้างใหม่ทีละบล็อกตามลำดับ ส่วนบรรทัดที่ไม่ใช่ตารางคงไว้เหมือนเดิม
+  const mergeSheetsIntoText = (originalText, sheets) => {
+    const src = String(originalText || '');
+    const sheetList = Array.isArray(sheets) ? sheets : [];
+    if (sheetList.length === 0) return src;
+    const isTableLine = (line) => /^\|.+\|$/.test(String(line || '').trim());
+    const buildPlainTable = (sheet = {}) => {
+      const columns = Array.isArray(sheet?.columns) ? sheet.columns : [];
+      const rows = Array.isArray(sheet?.rows) ? sheet.rows : [];
+      if (!columns.length) return '';
+      const header = `| ${columns.map((col) => escapeTableCell(col)).join(' | ')} |`;
+      const separator = `| ${columns.map(() => '---').join(' | ')} |`;
+      const body = rows.map((row) => `| ${columns.map((column) => escapeTableCell(row?.[column])).join(' | ')} |`);
+      return [header, separator, ...body].join('\n');
+    };
+    const lines = src.split(/\r?\n/);
+    const out = [];
+    let sheetIdx = 0;
+    let i = 0;
+    while (i < lines.length) {
+      if (isTableLine(lines[i])) {
+        const blockLines = [];
+        while (i < lines.length && isTableLine(lines[i])) {
+          blockLines.push(lines[i]);
+          i += 1;
+        }
+        if (sheetIdx < sheetList.length) {
+          const rebuilt = buildPlainTable(sheetList[sheetIdx]);
+          out.push(rebuilt || blockLines.join('\n'));
+          sheetIdx += 1;
+        } else {
+          out.push(blockLines.join('\n'));
+        }
+      } else {
+        out.push(lines[i]);
+        i += 1;
+      }
+    }
+    return out.join('\n');
+  };
+
   const handleEditFile = (file) => {
     const rows = buildOcrBlockRows(file.blocks);
     const excelSheets = hasExcelPreviewSheets(file) ? clonePreviewSheets(file.metadata.previewSheets) : [];
@@ -582,17 +624,20 @@ function AddKnowledgeData() {
   const handleSavePreviewEdit = () => {
     if (!previewFile) return;
     if (previewTableSheets.length > 0) {
-      const parsed = buildSourceFromPreviewSheets(previewTableSheets);
+      const cleanedSheets = clonePreviewSheets(previewTableSheets);
+      // คงข้อความ (prose) รอบตารางไว้ แล้วแทนเฉพาะบล็อกตารางด้วยตารางที่แก้แล้ว
+      const mergedText = mergeSheetsIntoText(previewContent, cleanedSheets);
+      const nextBlocks = mergedText.trim() ? [{ text: mergedText, label: 'Content' }] : [];
       setUploadedFiles(prev => prev.map((f) => {
         if (f.id !== previewFile.id) return f;
         return {
           ...f,
-          content: parsed.text,
-          text: parsed.text,
-          blocks: parsed.blocks,
+          content: mergedText,
+          text: mergedText,
+          blocks: nextBlocks,
           metadata: {
             ...(f.metadata || {}),
-            previewSheets: parsed.previewSheets,
+            previewSheets: cleanedSheets,
           },
         };
       }));
@@ -600,18 +645,18 @@ function AddKnowledgeData() {
         prev
           ? {
               ...prev,
-              content: parsed.text,
-              text: parsed.text,
-              blocks: parsed.blocks,
+              content: mergedText,
+              text: mergedText,
+              blocks: nextBlocks,
               metadata: {
                 ...(prev.metadata || {}),
-                previewSheets: parsed.previewSheets,
+                previewSheets: cleanedSheets,
               },
             }
           : null
       ));
-      setPreviewContent(parsed.text);
-      setPreviewTableSheets(parsed.previewSheets);
+      setPreviewContent(mergedText);
+      setPreviewTableSheets(cleanedSheets);
       showToast('บันทึกการแก้ไขตารางแล้ว', 'success');
       setPreviewEditMode(false);
       return;
@@ -1081,14 +1126,6 @@ function AddKnowledgeData() {
         setLoading(false);
         return;
       }
-
-      console.log('Updating document with files:', sourceFiles);
-      console.log('SourceFiles validation:', sourceFiles.map(f => ({
-        name: f.name,
-        hasText: !!(f.text && f.text.trim()),
-        hasBlocks: !!(f.blocks && f.blocks.length > 0),
-        blocksCount: f.blocks ? f.blocks.length : 0
-      })));
 
       // Update document with new sourceFiles
       await documentAPI.updateDocument(id, {

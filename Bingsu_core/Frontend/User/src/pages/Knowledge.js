@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { HiPlus, HiSearch, HiDotsHorizontal } from 'react-icons/hi';
 import Sidebar from '../components/Sidebar';
+import { showToast } from '../components/ToastNotification';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { documentAPI, getErrorMessage } from '../services/api';
 
@@ -59,9 +60,7 @@ function Knowledge() {
       setError(errorMsg);
       console.error('Error loading knowledge:', err);
       // Show toast notification for better UX
-      if (window.showToast) {
-        window.showToast(errorMsg, 'error');
-      }
+      showToast(errorMsg, 'error');
     } finally {
       setLoading(false);
     }
@@ -136,7 +135,7 @@ function Knowledge() {
         window.dispatchEvent(new CustomEvent('knowledgeUpdated'));
       } catch (err) {
         console.error('Error deleting knowledge:', err);
-        alert(getErrorMessage(err));
+        showToast(getErrorMessage(err), 'error');
       }
     }
     setIsDeleteConfirmOpen(false);

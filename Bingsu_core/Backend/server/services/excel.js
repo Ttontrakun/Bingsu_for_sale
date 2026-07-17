@@ -34,14 +34,62 @@ export const isExcelFile = ({ fileName = "", contentType = "" } = {}) => {
   );
 };
 
-const buildHeader = (rows) => {
-  for (const row of rows) {
-    const cleaned = row.map(normalizeCell);
-    const nonEmpty = cleaned.filter(Boolean);
-    if (!nonEmpty.length) continue;
-    return cleaned.map((cell, idx) => cell || `column_${idx + 1}`);
+/**
+ * หาแถว "หัวตาราง" จริง แทนที่จะเดาว่าแถวแรกที่มีข้อมูลคือหัวตาราง
+ * ปัญหาเดิม: ไฟล์ที่มีแถวชื่อเรื่อง/เซลล์ merge อยู่บนสุด (พบบ่อยในไฟล์ไทย) ทำให้
+ *   ระบบเอาแถวชื่อเรื่องมาเป็นหัวคอลัมน์ → คอลัมน์ที่เหลือกลายเป็น column_2, column_3...
+ *   ชื่อคอลัมน์จริงหายหมด AI เลยไม่รู้ว่าค่าในแต่ละช่องคืออะไร → ตอบไม่ตรง
+ * วิธีใหม่: มองแถวบนสุด ~8 แถว แล้วเลือก "แถวแรกที่เต็มความกว้าง"
+ *   (จำนวนเซลล์ไม่ว่าง ≥ 70% ของแถวที่กว้างสุดในโซนบน) เป็นหัวตาราง
+ *   แถวชื่อเรื่อง/แถวว่างที่อยู่เหนือหัวตารางจริงจะถูกข้ามไป
+ */
+const buildHeaderAndStart = (rows, lookahead = 8) => {
+  const limit = Math.min(rows.length, lookahead);
+  const counts = [];
+  for (let i = 0; i < limit; i += 1) {
+    counts.push(rows[i].map(normalizeCell).filter(Boolean).length);
   }
-  return [];
+  const maxCount = Math.max(0, ...counts);
+  if (maxCount === 0) return { header: [], headerRowIndex: -1 };
+  const threshold = Math.max(2, Math.ceil(maxCount * 0.7));
+  let hri = counts.findIndex((c) => c >= threshold);
+  if (hri < 0) hri = counts.findIndex((c) => c > 0);
+
+  const primary = rows[hri].map(normalizeCell);
+  const width = primary.length;
+  const firstIdx = primary.findIndex(Boolean);
+  const hasGap = primary.slice(firstIdx).some((c) => !c); // มีช่องว่างหลังหัวแรก = อาจมี merged group
+
+  // ตรวจว่าแถวถัดไปเป็น "หัวย่อยชั้นที่ 2" หรือไม่ (เช่น ตารางอำนาจอนุมัติ:
+  //   แถวบน = "ตำแหน่งผู้มีอำนาจอนุมัติ" (merge) / แถวล่าง = กจญ. รจญ. ชจญ. ...)
+  let subRowIndex = -1;
+  if (hasGap && hri + 1 < rows.length) {
+    const next = rows[hri + 1].map(normalizeCell);
+    const nextNonEmpty = next.filter(Boolean);
+    const fillsGap = next.some((c, i) => c && !primary[i]); // เติมช่องที่หัวหลักว่าง
+    const allShort = nextNonEmpty.every((c) => c.length <= 25); // เป็น label สั้น ไม่ใช่ข้อความยาว (=ข้อมูล)
+    if (nextNonEmpty.length >= 2 && fillsGap && allShort) subRowIndex = hri + 1;
+  }
+
+  if (subRowIndex < 0) {
+    // หัวตารางชั้นเดียว
+    const header = primary.map((cell, idx) => cell || `column_${idx + 1}`);
+    return { header, headerRowIndex: hri };
+  }
+
+  // หัวตาราง 2 ชั้น: คลี่ merged group แนวนอน (forward-fill เฉพาะคอลัมน์ที่มีหัวย่อยด้านล่าง)
+  // แล้วรวมเป็น "กลุ่ม - หัวย่อย" เพื่อให้ AI รู้ว่าค่าในช่องนั้นอยู่ใต้กลุ่มไหน
+  const sub = rows[subRowIndex].map(normalizeCell);
+  const w = Math.max(width, sub.length);
+  let last = "";
+  const header = [];
+  for (let i = 0; i < w; i += 1) {
+    if (primary[i]) last = primary[i];
+    const group = primary[i] ? primary[i] : (sub[i] && i >= firstIdx ? last : "");
+    const label = [group || "", sub[i] || ""].filter(Boolean).join(" - ");
+    header[i] = label || `column_${i + 1}`;
+  }
+  return { header, headerRowIndex: subRowIndex };
 };
 
 export const extractExcelText = ({ buffer, fileName = "file.xlsx" }) => {
@@ -67,11 +115,11 @@ export const extractExcelText = ({ buffer, fileName = "file.xlsx" }) => {
     });
     if (!Array.isArray(rows) || rows.length === 0) continue;
 
-    const header = buildHeader(rows);
-    if (!header.length) continue;
+    const { header, headerRowIndex } = buildHeaderAndStart(rows);
+    if (!header.length || headerRowIndex < 0) continue;
 
-    const startRowIndex = rows.findIndex((row) => row.some((cell) => normalizeCell(cell)));
-    const dataRows = rows.slice(Math.max(0, startRowIndex + 1), Math.max(0, startRowIndex + 1) + MAX_SHEET_ROWS);
+    const startRowIndex = headerRowIndex;
+    const dataRows = rows.slice(startRowIndex + 1, startRowIndex + 1 + MAX_SHEET_ROWS);
     const previewRows = [];
 
     dataRows.forEach((row, idx) => {

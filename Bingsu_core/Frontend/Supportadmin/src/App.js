@@ -10,6 +10,9 @@ import KnowledgeDocumentRoute from './pages/KnowledgeDocumentRoute';
 import SupportCreateKnowledge from './pages/SupportCreateKnowledge';
 import SupportPanel from './pages/SupportPanel';
 import ActivityLogs from './pages/ActivityLogs';
+import FeedbackReview from './pages/FeedbackReview';
+import Synonyms from './pages/Synonyms';
+import ServiceRates from './pages/ServiceRates';
 import Login from './pages/Login';
 import Navbar from './components/Navbar';
 import NotificationBell from './components/NotificationBell';
@@ -90,6 +93,9 @@ function AppContent() {
           <Route path="/knowledge/:id/add-data" element={<KnowledgeDocumentRoute />} />
           <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} groups={[]} setGroups={() => {}} onRefreshPending={loadUsers} />} />
           <Route path="/logs" element={canSeeLogs ? <ActivityLogs userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
+          <Route path="/feedback" element={<FeedbackReview userRole={userRole} />} />
+          <Route path="/synonyms" element={isAdmin ? <Synonyms userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
+          <Route path="/service-rates" element={isAdmin ? <ServiceRates userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
         </Routes>
       </main>
     </div>

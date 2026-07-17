@@ -287,20 +287,132 @@ export const buildContextPiecesWithNeighbors = (groundingChunks, documents, quer
 /** ข้อความไม่เกินความยาวนี้ใช้ 1 chunk เดียว (ค่า default ให้แตกไวขึ้นสำหรับไฟล์ text ยาว) */
 const SINGLE_CHUNK_MAX_LENGTH = Number(process.env.SINGLE_CHUNK_MAX_LENGTH || TEXT_CHUNK_SIZE);
 
-export const chunkTextForBlocks = (text, chunkSize = TEXT_CHUNK_SIZE, overlap = TEXT_CHUNK_OVERLAP) => {
+const isMarkdownTableLine = (line) => /^\s*\|.*\|\s*$/.test(line);
+const isTableSeparatorLine = (line) => /^\s*\|?[\s:|-]*-{3,}[\s:|-]*\|?\s*$/.test(line) && line.includes("-");
+
+/** หั่นตารางใหญ่ตามแถว โดยใส่หัวตาราง (+เส้นคั่น) ซ้ำทุกส่วน เพื่อให้ทุก chunk ยังรู้ว่าคอลัมน์ไหนคืออะไร */
+const splitTableByRows = (tableText, size) => {
+  const rows = tableText.split("\n").filter((l) => l.trim());
+  if (rows.length < 2) return [tableText];
+  const hasSep = rows[1] && isTableSeparatorLine(rows[1]);
+  const headerBlock = hasSep ? `${rows[0]}\n${rows[1]}` : rows[0];
+  const bodyRows = rows.slice(hasSep ? 2 : 1);
+  const parts = [];
+  let current = [];
+  let currentLen = headerBlock.length;
+  for (const row of bodyRows) {
+    if (current.length > 0 && currentLen + row.length + 1 > size) {
+      parts.push([headerBlock, ...current].join("\n"));
+      current = [];
+      currentLen = headerBlock.length;
+    }
+    current.push(row);
+    currentLen += row.length + 1;
+  }
+  if (current.length) parts.push([headerBlock, ...current].join("\n"));
+  return parts.length ? parts : [tableText];
+};
+
+/** หั่นย่อหน้ายาวที่ขอบบรรทัด (ไม่ตัดกลางบรรทัด) เผื่อกรณีข้อความล้วนยาวมาก */
+const splitLongText = (textBlock, size) => {
+  if (textBlock.length <= size) return [textBlock];
+  const out = [];
+  let start = 0;
+  while (start < textBlock.length) {
+    let end = Math.min(start + size, textBlock.length);
+    if (end < textBlock.length) {
+      const nl = textBlock.lastIndexOf("\n", end);
+      if (nl > start + 200) end = nl;
+    }
+    const slice = textBlock.slice(start, end).trim();
+    if (slice) out.push(slice);
+    start = end;
+  }
+  return out;
+};
+
+/**
+ * แบ่งข้อความเป็น chunk แบบ "รู้จักโครงสร้าง":
+ * - ไม่ตัดกลางตาราง Markdown (เก็บทั้งตารางไว้ด้วยกัน)
+ * - ถ้าตารางใหญ่เกิน 1 chunk จะหั่นตามแถวและใส่หัวตารางซ้ำ
+ * - จัดกลุ่มย่อหน้า/บล็อกให้พอดี chunk โดยตัดที่ขอบบล็อก ไม่ตัดกลางประโยค
+ */
+export const chunkTextForBlocks = (text, chunkSize = TEXT_CHUNK_SIZE) => {
   const normalized = (text || "").replace(/\r\n/g, "\n").trim();
   if (!normalized) return [];
   if (normalized.length <= SINGLE_CHUNK_MAX_LENGTH) return [normalized];
-  const chunks = [];
-  let start = 0;
-  while (start < normalized.length) {
-    const end = Math.min(start + chunkSize, normalized.length);
-    const slice = normalized.slice(start, end).trim();
-    if (slice) chunks.push(slice);
-    if (end === normalized.length) break;
-    start = Math.max(0, end - overlap);
+  const size = Math.max(400, Number(chunkSize) || TEXT_CHUNK_SIZE);
+
+  // 1) แยกเป็น segment: บล็อกตาราง (atomic) กับบล็อกข้อความ
+  const lines = normalized.split("\n");
+  const segments = [];
+  let buffer = [];
+  let bufferType = null;
+  const flush = () => {
+    if (!buffer.length) return;
+    segments.push({ type: bufferType, text: buffer.join("\n").trim() });
+    buffer = [];
+    bufferType = null;
+  };
+  for (const line of lines) {
+    const type = isMarkdownTableLine(line) ? "table" : "text";
+    if (bufferType && type !== bufferType) flush();
+    bufferType = type;
+    buffer.push(line);
   }
-  return chunks;
+  flush();
+
+  // 2) กาง segment ที่ใหญ่เกิน chunk ออกเป็นหน่วยย่อย
+  const units = [];
+  for (const seg of segments) {
+    if (!seg.text) continue;
+    if (seg.type === "table" && seg.text.length > size) {
+      splitTableByRows(seg.text, size).forEach((t) => units.push(t));
+    } else if (seg.type === "text" && seg.text.length > size) {
+      seg.text
+        .split(/\n{2,}/)
+        .flatMap((para) => splitLongText(para.trim(), size))
+        .filter(Boolean)
+        .forEach((t) => units.push(t));
+    } else {
+      units.push(seg.text);
+    }
+  }
+
+  // 3) แพ็กหน่วยย่อยเข้า chunk แบบ greedy (ไม่หั่นกลางหน่วย)
+  const chunks = [];
+  let current = [];
+  let currentLen = 0;
+  const pushCurrent = () => {
+    const joined = current.join("\n\n").trim();
+    if (joined) chunks.push(joined);
+    current = [];
+    currentLen = 0;
+  };
+  // หัวข้อสั้นๆ (markdown heading) ที่ยืนเดี่ยว — ห้ามปล่อยค้างท้าย chunk เพราะตาราง/เนื้อหาถัดไปจะหลุดไปคนละ chunk
+  const isHeadingUnit = (u) => {
+    const t = String(u).trim();
+    return /^#{1,6}\s/.test(t) && t.split("\n").length <= 2;
+  };
+  for (const unit of units) {
+    const addLen = unit.length + 2;
+    if (currentLen > 0 && currentLen + addLen > size) {
+      // ย้ายหัวข้อที่ค้างท้าย chunk ไปเริ่ม chunk ใหม่พร้อมเนื้อหาถัดไป (ให้หัวข้ออยู่กับตาราง/เนื้อหาของมัน)
+      const carry = [];
+      while (current.length > 0 && isHeadingUnit(current[current.length - 1])) {
+        carry.unshift(current.pop());
+      }
+      pushCurrent();
+      if (carry.length > 0) {
+        current = carry;
+        currentLen = carry.reduce((sum, u) => sum + u.length + 2, 0);
+      }
+    }
+    current.push(unit);
+    currentLen += addLen;
+  }
+  pushCurrent();
+  return chunks.length ? chunks : [normalized];
 };
 
 export const buildBlocksFromText = (text, labelPrefix) =>
@@ -377,6 +489,32 @@ const tokenizeQueryTerms = (query) => {
  * fallback เมื่อ vector search ไม่เจอ: ใช้ keyword match บนเอกสารที่เลือก
  * คืนค่าใน shape เดียวกับ groundingChunks จาก vector
  */
+/**
+ * Hybrid search: รวมผลจาก vector (เรียง/rerank มาแล้ว) กับผลจาก keyword match
+ * โดยคงลำดับ vector ไว้ก่อน แล้วเติม chunk จาก keyword ที่ยังไม่ซ้ำ (dedupe ด้วย docId + ต้นข้อความ)
+ */
+export const mergeHybridChunks = (vectorChunks = [], keywordChunks = [], maxTotal = 12) => {
+  const out = [];
+  const seen = new Set();
+  const keyOf = (c) => {
+    const text = String(c?.retrievedContext?.text ?? c?.payload?.text ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 120);
+    const docId = c?.payload?.docId ?? c?.retrievedContext?.docId ?? "";
+    return `${docId}::${text}`;
+  };
+  for (const chunk of [...(Array.isArray(vectorChunks) ? vectorChunks : []), ...(Array.isArray(keywordChunks) ? keywordChunks : [])]) {
+    if (!chunk) continue;
+    const key = keyOf(chunk);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(chunk);
+    if (out.length >= Math.max(1, maxTotal)) break;
+  }
+  return out;
+};
+
 export const buildFallbackGroundingChunksFromDocuments = (query, documents, maxChunks = 3) => {
   const docs = Array.isArray(documents) ? documents : [];
   const terms = tokenizeQueryTerms(query);

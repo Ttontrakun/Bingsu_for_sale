@@ -19,8 +19,6 @@ function WebsiteIntegrationModal({ isOpen, onClose }) {
       const loadBots = async () => {
         try {
           const botsData = await botAPI.getBots();
-          console.log('Bots data from API (WebsiteIntegration):', botsData);
-          
           // Transform bots data to dropdown options format
           if (Array.isArray(botsData)) {
             const options = botsData

@@ -338,8 +338,6 @@ function CreateBot({ singleUserFlow = false, forcedBotForEdit = null } = {}) {
         documentIds: documentIds.length > 0 ? documentIds : []
       };
 
-      console.log('Creating bot with data:', botData);
-
       if (isEditMode) {
         await botAPI.updateBot(botToEdit.id, botData);
       } else {

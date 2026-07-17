@@ -331,9 +331,10 @@ export const conversationsAPI = {
         const response = await api.get(`/conversations/${encodeURIComponent(sid)}`);
         return response.data;
     },
-    create: async (documentId, botId = null) => {
+    create: async (documentId, botId = null, isPrivate = false) => {
         const payload = { documentId };
         if (botId) payload.botId = botId;
+        if (isPrivate) payload.private = true;
         const response = await api.post('/conversations', payload);
         return response.data;
     },
@@ -361,9 +362,9 @@ export const chatAPI = {
         const c = await conversationsAPI.get(chatId);
         return { ...c, name: c.title };
     },
-    createChat: async (_name, _userIds, botId, documentId) => {
+    createChat: async (_name, _userIds, botId, documentId, isPrivate = false) => {
         if (!documentId) throw new Error('documentId is required to create conversation');
-        return conversationsAPI.create(documentId, botId || null);
+        return conversationsAPI.create(documentId, botId || null, isPrivate === true);
     },
     updateChat: async (chatId, name) => {
         return conversationsAPI.updateTitle(chatId, name);
@@ -442,25 +443,28 @@ export const chatMessageAPI = {
     submitFeedback: async (messageId, rating, comment = null) => {
         const mid = messageId != null ? String(messageId).trim() : '';
         if (!mid) throw new Error('Invalid message ID');
-        const body = { rating: rating === 'up' || rating === 'down' ? rating : 'up' };
+        const body = { rating: ['up', 'down', 'none'].includes(rating) ? rating : 'up' };
         if (comment != null && String(comment).trim()) body.comment = String(comment).trim().slice(0, 500);
         const response = await api.post(`/messages/${encodeURIComponent(mid)}/feedback`, body);
         return response.data;
     },
 
     // ส่งข้อความผู้ใช้ + ได้คำตอบจากบอท (backend: POST /api/chat)
-    createBotResponse: async (chatId, message, _documentIds = null) => {
+    createBotResponse: async (chatId, message, _documentIds = null, opts = {}) => {
         const sid = chatId != null ? String(chatId).trim() : '';
         if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid chat ID');
+        const { privateMode = false, privateContent = '' } = opts || {};
         const response = await api.post('/chat', {
             conversationId: sid,
             message: typeof message === 'string' ? message : (message?.content ?? message ?? ''),
+            privateMode: privateMode === true,
+            ...(privateMode ? { privateContent } : {}),
         });
         return response.data;
     },
 
     // Streaming: ส่งข้อความ + ได้คำตอบทีละส่วน (onChunk ถูกเรียกทุกครั้งที่มี chunk ใหม่)
-    createBotResponseStream: async (chatId, message, { onChunk, onDone, signal } = {}) => {
+    createBotResponseStream: async (chatId, message, { onChunk, onDone, signal, privateMode = false, privateContent = '', mode = 'detailed' } = {}) => {
         const sid = chatId != null ? String(chatId).trim() : '';
         if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid chat ID');
         const baseURL = API_CONFIG.baseURL;
@@ -474,6 +478,9 @@ export const chatMessageAPI = {
             body: JSON.stringify({
                 conversationId: sid,
                 message: typeof message === 'string' ? message : (message?.content ?? message ?? ''),
+                privateMode: privateMode === true,
+                mode: mode === 'fast' ? 'fast' : 'detailed',
+                ...(privateMode ? { privateContent } : {}),
             }),
         });
         if (!res.ok) {
@@ -532,6 +539,33 @@ export const chatMessageAPI = {
     },
 };
 
+// Private Context API (โหมดส่วนตัว — เนื้อหาที่ผู้ใช้กรอกเอง เก็บระดับ user)
+export const privateContextAPI = {
+    get: async () => {
+        const response = await api.get('/private-context');
+        return response.data;
+    },
+    // save รองรับ 2 รูปแบบ:
+    //  - save({ instructions, content, enabled })  (แนะนำ)
+    //  - save(content, enabled)                      (เดิม — backward compat)
+    save: async (arg, enabledArg) => {
+        let payload;
+        if (arg && typeof arg === 'object') {
+            payload = {};
+            if (typeof arg.instructions === 'string') payload.instructions = arg.instructions;
+            if (typeof arg.content === 'string') payload.content = arg.content;
+            if (typeof arg.enabled === 'boolean') payload.enabled = arg.enabled;
+        } else {
+            payload = {
+                content: typeof arg === 'string' ? arg : '',
+                ...(typeof enabledArg === 'boolean' ? { enabled: enabledArg } : {}),
+            };
+        }
+        const response = await api.put('/private-context', payload);
+        return response.data;
+    },
+};
+
 // Bot API functions
 export const botAPI = {
     // Get all bots
@@ -567,7 +601,6 @@ export const botAPI = {
             documentIds: botData.documentIds || []
         };
         
-        console.log('Sending bot creation request:', payload);
         const response = await api.post('/bots', payload);
         return response.data;
     },

@@ -54,6 +54,8 @@ export const ragExternalRerankUrl = (process.env.RAG_EXTERNAL_RERANK_URL || "").
 export const ragExternalRerankApiKey = (process.env.RAG_EXTERNAL_RERANK_API_KEY || "").trim();
 export const ragExternalRerankModel = (process.env.RAG_EXTERNAL_RERANK_MODEL || "").trim();
 export const ragExternalRerankTimeoutMs = Math.max(1000, Number(process.env.RAG_EXTERNAL_RERANK_TIMEOUT_MS || 10000));
+/** คำตอบฟิก (hardcoded rules เช่น ราคา NT Dark Fiber/อำนาจอนุมัติ) — ตั้ง false เพื่อให้ตอบจาก knowledge (RAG) แทน เมื่อ knowledge พร้อมแล้ว */
+export const deterministicRulesEnabled = (process.env.DETERMINISTIC_RULES_ENABLED || "true").toLowerCase() === "true";
 // Pinecone (เมื่อ VECTOR_DB=pinecone)
 export const pineconeApiKey = process.env.PINECONE_API_KEY || "";
 export const pineconeIndexName = (process.env.PINECONE_INDEX || "documents").trim();
@@ -196,6 +198,8 @@ export const ragQuerySynonyms = envRagSynonyms && typeof envRagSynonyms === "obj
   ? { ...defaultRagSynonyms, ...envRagSynonyms }
   : defaultRagSynonyms;
 export const ragQueryVariantLimit = Number(process.env.RAG_QUERY_VARIANT_LIMIT || 4);
+/** Multi-hop (query decomposition): แตกคำถามซับซ้อนหลายเงื่อนไขเป็นคำถามย่อยเพื่อค้นให้ครบ (คำถามง่ายไม่ถูกแตก) — ตั้ง false เพื่อปิด */
+export const multiHopEnabled = (process.env.MULTI_HOP_ENABLED || "true").toLowerCase() === "true";
 
 const clampNumber = (value, min, max) => Math.min(max, Math.max(min, value));
 const parseNumberEnv = (value, fallback) => {

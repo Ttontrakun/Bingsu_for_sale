@@ -5,6 +5,7 @@ import { logEvent } from "../lib/logging.js";
 import { getLastActivityByUserIds } from "../lib/lastUserActivity.js";
 import { getRequestContext } from "../lib/requestContext.js";
 import { maskLogForExport } from "../lib/privacy.js";
+import { invalidateRateCache } from "../services/ntCorpPricingDb.js";
 
 const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const DEFAULT_BOT_PROMPT = [
@@ -101,6 +102,159 @@ export async function ensureUserDefaultBot(userId) {
 }
 
 export const supportRouter = express.Router();
+
+// GET /api/support/feedback — คิวรีวิวคำตอบที่ผู้ใช้ให้ feedback (ค่าเริ่มต้น = 👎 down) พร้อมคำถาม + จำนวน context เพื่อหา knowledge ที่ขาด
+supportRouter.get(
+  "/feedback",
+  authenticate,
+  requireRole("support", "admin", "admin_metrics"),
+  async (req, res) => {
+    try {
+      const rating = ["up", "down"].includes(String(req.query.rating || "").toLowerCase())
+        ? String(req.query.rating).toLowerCase()
+        : "down";
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+
+      const feedbacks = await prisma.messageFeedback.findMany({
+        where: { rating },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+        skip: offset,
+        include: {
+          user: { select: { id: true, name: true, email: true } },
+          message: {
+            select: {
+              id: true,
+              content: true,
+              references: true,
+              groundingChunks: true,
+              createdAt: true,
+              conversationId: true,
+              conversation: { select: { id: true, title: true } },
+            },
+          },
+        },
+      });
+
+      const items = await Promise.all(
+        feedbacks.map(async (fb) => {
+          const msg = fb.message;
+          let question = "";
+          if (msg?.conversationId && msg?.createdAt) {
+            const prevUser = await prisma.message.findFirst({
+              where: {
+                conversationId: msg.conversationId,
+                role: "user",
+                createdAt: { lt: msg.createdAt },
+              },
+              orderBy: { createdAt: "desc" },
+              select: { content: true },
+            });
+            question = prevUser?.content || "";
+          }
+          const refs = Array.isArray(msg?.references) ? msg.references : [];
+          const chunks = Array.isArray(msg?.groundingChunks) ? msg.groundingChunks : [];
+          return {
+            feedbackId: fb.id,
+            rating: fb.rating,
+            comment: fb.comment || "",
+            createdAt: fb.createdAt,
+            question,
+            answer: msg?.content || "",
+            messageId: msg?.id || null,
+            conversationId: msg?.conversationId || null,
+            conversationTitle: msg?.conversation?.title || "",
+            referencesCount: refs.length,
+            groundingChunksCount: chunks.length,
+            // true = มี context แต่ยังโดน 👎 (retrieval/คำตอบพลาด); false = ไม่มี context (knowledge ขาด)
+            hadContext: refs.length > 0 || chunks.length > 0,
+            feedbackBy: fb.user ? { id: fb.user.id, name: fb.user.name, email: fb.user.email } : null,
+          };
+        }),
+      );
+
+      const total = await prisma.messageFeedback.count({ where: { rating } });
+      res.json({ items, total, limit, offset, rating });
+    } catch (error) {
+      console.error("get support feedback failed", error);
+      res.status(500).json({ error: "Failed to load feedback" });
+    }
+  },
+);
+
+// GET /api/support/quality-metrics — เมตริกคุณภาพ: feedback ratio, อัตราตอบ "ไม่มีข้อมูล", คำถามที่ตอบไม่ได้บ่อย
+supportRouter.get(
+  "/quality-metrics",
+  authenticate,
+  requireRole("support", "admin", "admin_metrics"),
+  async (req, res) => {
+    try {
+      const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+      const since = new Date(Date.now() - days * 86400000);
+      // ข้อความที่บ่งบอกว่าบอทตอบ "ไม่มีข้อมูล/ไม่พบ" = knowledge อาจขาด
+      const NO_DATA_MARKERS = ["ไม่มีข้อมูล", "ยังไม่พบข้อมูลที่ตรง", "ไม่มีอยู่ในฐานข้อมูล"];
+      const noDataWhere = {
+        role: "model",
+        createdAt: { gte: since },
+        OR: NO_DATA_MARKERS.map((m) => ({ content: { contains: m } })),
+      };
+
+      const [up, down, totalAnswers, noDataTotal, noDataMsgs] = await Promise.all([
+        prisma.messageFeedback.count({ where: { rating: "up", createdAt: { gte: since } } }),
+        prisma.messageFeedback.count({ where: { rating: "down", createdAt: { gte: since } } }),
+        prisma.message.count({ where: { role: "model", createdAt: { gte: since } } }),
+        prisma.message.count({ where: noDataWhere }),
+        prisma.message.findMany({
+          where: noDataWhere,
+          select: { conversationId: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 150,
+        }),
+      ]);
+
+      // จัดกลุ่มคำถามที่นำไปสู่คำตอบ "ไม่มีข้อมูล" — ชี้ว่าควรเติม knowledge เรื่องไหน
+      const questionCounts = new Map();
+      await Promise.all(
+        noDataMsgs.map(async (m) => {
+          if (!m.conversationId || !m.createdAt) return;
+          const prev = await prisma.message.findFirst({
+            where: { conversationId: m.conversationId, role: "user", createdAt: { lt: m.createdAt } },
+            orderBy: { createdAt: "desc" },
+            select: { content: true },
+          });
+          const q = String(prev?.content || "").trim().slice(0, 200);
+          if (!q) return;
+          questionCounts.set(q, (questionCounts.get(q) || 0) + 1);
+        }),
+      );
+      const topNoDataQuestions = Array.from(questionCounts.entries())
+        .map(([question, count]) => ({ question, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 15);
+
+      const feedbackTotal = up + down;
+      res.json({
+        days,
+        feedback: {
+          up,
+          down,
+          total: feedbackTotal,
+          downRate: feedbackTotal ? down / feedbackTotal : 0,
+        },
+        answers: {
+          total: totalAnswers,
+          noData: noDataTotal,
+          noDataRate: totalAnswers ? noDataTotal / totalAnswers : 0,
+        },
+        topNoDataQuestions,
+      });
+    } catch (error) {
+      console.error("get quality-metrics failed", error);
+      res.status(500).json({ error: "Failed to load quality metrics" });
+    }
+  },
+);
 
 async function hasUserExpiresAtColumn() {
   try {
@@ -485,4 +639,101 @@ supportRouter.get("/report", authenticate, requireRole("support", "admin", "admi
     uploadBatchesCount,
     timestamp: new Date().toISOString(),
   });
+});
+
+// ===== คำพ้องความหมาย (Synonyms) — จัดการโดย support/admin เพื่อช่วย RAG เชื่อมภาษาพูด ↔ คำทางการ =====
+const cleanSynonymList = (value) => {
+  const arr = Array.isArray(value) ? value : String(value ?? "").split(/[,\n]/);
+  return Array.from(new Set(arr.map((s) => String(s).trim()).filter(Boolean)));
+};
+
+supportRouter.get("/synonyms", authenticate, requireRole("admin"), async (_req, res) => {
+  const items = await prisma.synonym.findMany({ orderBy: { updatedAt: "desc" } });
+  res.json(items);
+});
+
+supportRouter.post("/synonyms", authenticate, requireRole("admin"), async (req, res) => {
+  const term = String(req.body?.term ?? "").trim();
+  const synonyms = cleanSynonymList(req.body?.synonyms);
+  const note = req.body?.note ? String(req.body.note).trim().slice(0, 300) : null;
+  const enabled = req.body?.enabled === undefined ? true : Boolean(req.body.enabled);
+  if (!term) { res.status(400).json({ error: "term is required" }); return; }
+  if (synonyms.length === 0) { res.status(400).json({ error: "synonyms must not be empty" }); return; }
+  const item = await prisma.synonym.create({ data: { term, synonyms, note, enabled } });
+  await logEvent({ event: "synonym.created", actorId: req.user?.id, targetType: "synonym", targetId: item.id, meta: { term } }).catch(() => {});
+  res.status(201).json(item);
+});
+
+supportRouter.patch("/synonyms/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const data = {};
+  if (req.body?.term !== undefined) {
+    const t = String(req.body.term).trim();
+    if (!t) { res.status(400).json({ error: "term must not be empty" }); return; }
+    data.term = t;
+  }
+  if (req.body?.synonyms !== undefined) {
+    const s = cleanSynonymList(req.body.synonyms);
+    if (s.length === 0) { res.status(400).json({ error: "synonyms must not be empty" }); return; }
+    data.synonyms = s;
+  }
+  if (req.body?.note !== undefined) data.note = req.body.note ? String(req.body.note).trim().slice(0, 300) : null;
+  if (req.body?.enabled !== undefined) data.enabled = Boolean(req.body.enabled);
+  const item = await prisma.synonym.update({ where: { id: req.params.id }, data }).catch(() => null);
+  if (!item) { res.status(404).json({ error: "not found" }); return; }
+  const onlyEnabledChanged = Object.keys(data).length === 1 && data.enabled !== undefined;
+  const patchEvent = onlyEnabledChanged ? (data.enabled ? "synonym.enabled" : "synonym.disabled") : "synonym.updated";
+  await logEvent({ event: patchEvent, actorId: req.user?.id, targetType: "synonym", targetId: item.id, meta: { term: item.term, enabled: item.enabled } }).catch(() => {});
+  res.json(item);
+});
+
+supportRouter.delete("/synonyms/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const removed = await prisma.synonym.delete({ where: { id: req.params.id } }).catch(() => null);
+  if (removed) {
+    await logEvent({ event: "synonym.deleted", actorId: req.user?.id, targetType: "synonym", targetId: req.params.id, meta: { term: removed.term } }).catch(() => {});
+  }
+  res.json({ ok: true });
+});
+
+// ===== อัตราค่าบริการ (ServiceRate) — admin แก้เพื่อให้เครื่องคำนวณราคาใช้ค่าล่าสุด =====
+supportRouter.get("/service-rates", authenticate, requireRole("admin"), async (_req, res) => {
+  const items = await prisma.serviceRate.findMany({
+    orderBy: [{ service: "asc" }, { kind: "asc" }, { speed: "asc" }],
+  });
+  res.json(items);
+});
+
+supportRouter.post("/service-rates", authenticate, requireRole("admin"), async (req, res) => {
+  const service = String(req.body?.service) === "lite" ? "lite" : "corp";
+  const kind = String(req.body?.kind) === "local" ? "local" : "intl";
+  const speed = Math.round(Number(req.body?.speed));
+  const rate = Math.round(Number(req.body?.rate));
+  if (!Number.isFinite(speed) || speed <= 0) { res.status(400).json({ error: "speed invalid" }); return; }
+  if (!Number.isFinite(rate) || rate < 0) { res.status(400).json({ error: "rate invalid" }); return; }
+  const item = await prisma.serviceRate.upsert({
+    where: { service_kind_speed: { service, kind, speed } },
+    update: { rate },
+    create: { service, kind, speed, rate },
+  });
+  invalidateRateCache();
+  await logEvent({ event: "service_rate.updated", actorId: req.user?.id, targetType: "service_rate", targetId: item.id, meta: { service, kind, speed, rate } }).catch(() => {});
+  res.status(201).json(item);
+});
+
+supportRouter.patch("/service-rates/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const rate = Math.round(Number(req.body?.rate));
+  if (!Number.isFinite(rate) || rate < 0) { res.status(400).json({ error: "rate invalid" }); return; }
+  const item = await prisma.serviceRate.update({ where: { id: req.params.id }, data: { rate } }).catch(() => null);
+  if (!item) { res.status(404).json({ error: "not found" }); return; }
+  invalidateRateCache();
+  await logEvent({ event: "service_rate.updated", actorId: req.user?.id, targetType: "service_rate", targetId: item.id, meta: { service: item.service, kind: item.kind, speed: item.speed, rate: item.rate } }).catch(() => {});
+  res.json(item);
+});
+
+supportRouter.delete("/service-rates/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const removed = await prisma.serviceRate.delete({ where: { id: req.params.id } }).catch(() => null);
+  invalidateRateCache();
+  if (removed) {
+    await logEvent({ event: "service_rate.deleted", actorId: req.user?.id, targetType: "service_rate", targetId: req.params.id, meta: { service: removed.service, kind: removed.kind, speed: removed.speed } }).catch(() => {});
+  }
+  res.json({ ok: true });
 });

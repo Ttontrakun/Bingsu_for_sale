@@ -8,7 +8,10 @@ import {
   HiBookOpen, 
   HiSupport,
   HiViewGrid,
-  HiClipboardList
+  HiClipboardList,
+  HiThumbUp,
+  HiTranslate,
+  HiCurrencyDollar
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
@@ -59,11 +62,14 @@ function Navbar({ onCollapseChange, userRole }) {
   const canSeeDashboard = userRole === 'admin' || userRole === 'admin_metrics';
   const canSeeBots = userRole === 'admin' || userRole === 'support';
   const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
+  const canSeeFeedback = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
+  const canSeeSynonyms = userRole === 'admin';
+  const canSeeRates = userRole === 'admin';
 
   return (
     <>
     <aside className={`bg-gray-200 flex flex-col py-6 transition-all duration-500 ease-in-out relative ${
-      isCollapsed ? 'w-0 px-0 overflow-hidden' : 'w-52 px-6 overflow-visible'
+      isCollapsed ? 'w-16 px-2 overflow-visible' : 'w-52 px-6 overflow-visible'
     }`}>
       {/* Toggle Button */}
       <button
@@ -79,7 +85,7 @@ function Navbar({ onCollapseChange, userRole }) {
       {/* Expand Button (shown when collapsed) */}
       <button
         onClick={toggleSidebar}
-        className={`fixed left-0 top-8 bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-gray-400 rounded-r-full p-2.5 z-30 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out ml-0 flex items-center justify-center ${
+        className={`absolute -right-3 top-8 bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-gray-400 rounded-full p-2 z-30 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out flex items-center justify-center ${
           isCollapsed ? 'opacity-100 scale-100' : 'opacity-0 pointer-events-none scale-0'
         }`}
         title="ขยาย sidebar"
@@ -90,27 +96,27 @@ function Navbar({ onCollapseChange, userRole }) {
       {/* Logo */}
       <div 
         className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-300 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'opacity-0 overflow-hidden' : 'opacity-100'
+          isCollapsed ? 'opacity-100 justify-center' : 'opacity-100'
         }`}
         onClick={() => navigate('/homepage')}
       >
         <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
-        <span className='text-orange-500 font-bold text-base leading-tight'>
-          <span className='block'>Enterprise AI</span>
-          <span className='block'>Chatbot</span>
-        </span>
+        {!isCollapsed && (
+          <span className='text-orange-500 font-bold text-lg leading-tight'>
+            <span className='block'>Enterprise AI</span>
+            <span className='block'>Chatbot</span>
+          </span>
+        )}
       </div>
 
       {/* Navigation */}
-      <nav className={`flex flex-col gap-6 flex-1 min-h-0 transition-all duration-300 ease-in-out ${
-        isCollapsed ? 'opacity-0 overflow-hidden' : 'opacity-100'
-      }`}>
+      <nav className="flex flex-col gap-6 flex-1 min-h-0 transition-all duration-300 ease-in-out opacity-100">
         {/* Fixed Navigation Items */}
         <div className='flex flex-col gap-6 flex-shrink-0'>
           {canSeeDashboard && (
             <div 
               onClick={() => navigate('/dashboard')}
-              className={`nav-item ${isActive('/dashboard') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+              className={`nav-item ${isActive('/dashboard') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
             >
               <HiViewGrid className='text-xl flex-shrink-0' />
               {!isCollapsed && <span>Dashboard</span>}
@@ -118,7 +124,7 @@ function Navbar({ onCollapseChange, userRole }) {
           )}
           <div 
             onClick={() => navigate('/homepage')}
-            className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+            className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
           >
             <HiHome className='text-xl flex-shrink-0' />
             {!isCollapsed && <span>Manual</span>}
@@ -126,7 +132,7 @@ function Navbar({ onCollapseChange, userRole }) {
           {canSeeBots && (
             <div 
               onClick={() => navigate('/bots')}
-              className={`nav-item ${location.pathname.startsWith('/bots') || location.pathname.startsWith('/create-bot') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+              className={`nav-item ${location.pathname.startsWith('/bots') || location.pathname.startsWith('/create-bot') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
             >
               <HiDesktopComputer className='text-xl flex-shrink-0' />
               {!isCollapsed && <span>Bots</span>}
@@ -134,22 +140,49 @@ function Navbar({ onCollapseChange, userRole }) {
           )}
           <div 
             onClick={() => navigate('/knowledge')}
-            className={`nav-item ${isActive('/knowledge') || location.pathname.includes('/knowledge') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+            className={`nav-item ${isActive('/knowledge') || location.pathname.includes('/knowledge') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
           >
             <HiBookOpen className='text-xl flex-shrink-0' />
             {!isCollapsed && <span>Knowledge</span>}
           </div>
           <div 
             onClick={() => navigate('/support-panel')}
-            className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+            className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
           >
             <HiSupport className='text-xl flex-shrink-0' />
             {!isCollapsed && <span>Support Panel</span>}
           </div>
+          {canSeeFeedback && (
+            <div
+              onClick={() => navigate('/feedback')}
+              className={`nav-item ${isActive('/feedback') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiThumbUp className="text-xl flex-shrink-0" />
+              {!isCollapsed && <span>Feedback</span>}
+            </div>
+          )}
+          {canSeeSynonyms && (
+            <div
+              onClick={() => navigate('/synonyms')}
+              className={`nav-item ${isActive('/synonyms') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiTranslate className="text-xl flex-shrink-0" />
+              {!isCollapsed && <span>Synonyms</span>}
+            </div>
+          )}
+          {canSeeRates && (
+            <div
+              onClick={() => navigate('/service-rates')}
+              className={`nav-item ${isActive('/service-rates') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiCurrencyDollar className="text-xl flex-shrink-0" />
+              {!isCollapsed && <span>Service Rates</span>}
+            </div>
+          )}
           {canSeeLogs && (
             <div
               onClick={() => navigate('/logs')}
-              className={`nav-item ${isActive('/logs') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2`}
+              className={`nav-item ${isActive('/logs') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
             >
               <HiClipboardList className="text-xl flex-shrink-0" />
               {!isCollapsed && <span>Logs</span>}
@@ -161,7 +194,7 @@ function Navbar({ onCollapseChange, userRole }) {
       {/* Profile */}
       <div 
         className={`flex items-center gap-3 pt-4 border-t border-gray-300 cursor-pointer hover:bg-gray-100 rounded-lg p-2 transition-all duration-300 ease-in-out ${
-          isCollapsed ? 'opacity-0 overflow-hidden' : 'opacity-100'
+          isCollapsed ? 'opacity-100 justify-center' : 'opacity-100'
         }`}
         onClick={() => setIsProfileModalOpen(true)}
       >
