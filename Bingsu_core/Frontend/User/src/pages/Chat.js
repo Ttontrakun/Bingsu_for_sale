@@ -57,7 +57,11 @@ const BOT_MARKDOWN_COMPONENTS = {
   strong: ({ node, ...props }) => <strong className='font-semibold' {...props} />,
   ul: ({ node, ...props }) => <ul className='list-disc list-inside my-2 space-y-1' {...props} />,
   ol: ({ node, ...props }) => <ol className='list-decimal list-inside my-2 space-y-1 pl-4' {...props} />,
-  li: ({ node, ...props }) => <li className='ml-1 pl-1 leading-7' {...props} />,
+  li: ({ node, children, ...props }) => {
+    // ถ้า list item มี blockquote อยู่ข้างใน (เกิดจาก AI เขียน "- > ...") → ซ่อนจุด bullet ที่ว่าง แต่เก็บกล่องเหลืองไว้
+    const hasBlockquote = Array.isArray(node?.children) && node.children.some((c) => c && c.tagName === 'blockquote');
+    return <li className={`${hasBlockquote ? 'list-none ml-0 pl-0' : 'ml-1 pl-1'} leading-7`} {...props}>{children}</li>;
+  },
   blockquote: ({ node, ...props }) => (
     <blockquote className='border-l-4 border-yellow-300 bg-yellow-50/60 rounded-r-md px-3 py-2 my-2 text-gray-700' {...props} />
   ),
@@ -1851,6 +1855,13 @@ function Chat() {
                   
                   const isUser = message.sender === 'user';
                   const botFullWidth = BOT_FULL_WIDTH && !isUser;
+                  // บอทกำลังคิด (ยังไม่มีข้อความ) — โชว์แค่จุด ไม่ต้องมีกล่องบับเบิลเปล่า
+                  const isBotThinking = message.sender === 'bot' && isTyping && index === messages.length - 1 && !(streamTextRef.current || message.text);
+                  const bubbleClass = isBotThinking
+                    ? 'block w-full bg-transparent px-2 py-1 relative group/timestamp'
+                    : botFullWidth
+                      ? 'block w-full bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp'
+                      : `inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${isUser ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md' : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'}`;
 
                   return (
                     <div key={message.id} className='group'>
@@ -1863,8 +1874,8 @@ function Chat() {
                       )}
                       
                       <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                        {/* Avatar */}
-                        <div className='flex-shrink-0 w-8 h-8 mt-1'>
+                        {/* Avatar — โหมดเต็มความกว้าง: จอใหญ่ดัน avatar ไปช่องว่างซ้าย (lg:-ml-11) ให้บับเบิลกว้างเต็มตรงช่องพิมพ์; จอเล็กซ่อน avatar กันโดนขอบจอตัด (บับเบิลก็ยังเต็มความกว้าง) */}
+                        <div className={`flex-shrink-0 w-8 h-8 mt-1 ${botFullWidth ? 'hidden lg:block lg:-ml-11' : ''}`}>
                           {isUser ? (
                             <div className='w-8 h-8 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full flex items-center justify-center shadow-sm'>
                               <HiOutlineUser className='text-white text-sm' />
@@ -1878,16 +1889,9 @@ function Chat() {
                         
                         {/* Message Content — min-w-0 ให้ flex อนุญาตให้หดตาม max-w-[80%] ได้ */}
                         <div className={`flex-1 min-w-0 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
-                          <div className={`${botFullWidth ? 'w-full' : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
+                          <div className={`${botFullWidth ? 'w-full pr-11' : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
                             <div
-                              className={`${botFullWidth
-                                ? 'block w-full bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp'
-                                : `inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${
-                                    isUser
-                                      ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md'
-                                      : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'
-                                  }`
-                              } ${message.sender === 'bot' && isTyping && index === messages.length - 1 && !(streamTextRef.current || message.text) ? 'min-h-[52px] flex items-center' : ''}`}
+                              className={bubbleClass}
                               style={{
                                 maxWidth: '100%',
                                 overflowWrap: 'anywhere',
