@@ -186,8 +186,12 @@ const termOverlapScore = (query, text) => {
 const splitSubQuestions = (query) => {
   const text = String(query || "").trim();
   if (!text) return [];
-  // 1) แยกด้วยเครื่องหมายคำถาม / ขึ้นบรรทัดใหม่ ก่อน (ชัดเจนสุด)
-  let parts = text.split(/[?？\n]+/).map((s) => s.trim()).filter(Boolean);
+  // 1) แยกด้วยเครื่องหมายคำถาม / ขึ้นบรรทัดใหม่ / รายการที่ขึ้นต้นด้วยเลข (เช่น "1. ... 2. ... 3. ..." หรือ "1) 2)")
+  //    รองรับทั้งกรณีขึ้นบรรทัดใหม่ และกรณีผู้ใช้พิมพ์ติดกันบรรทัดเดียว
+  let parts = text
+    .split(/[?？\n]+|(?:^|\s)\d{1,2}[.)]+\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   // 2) ถ้ายังเป็นก้อนเดียว ลองแยกด้วยตัวเชื่อมที่มักคั่นหลายประเด็น
   if (parts.length < 2) {
     parts = text
@@ -249,7 +253,8 @@ const retrieveForSingleQuery = async (docIds, query, { fast = false, extraSynony
   })(), RAG_TIMEOUT_MS);
 
   let results = initialList.slice(0, qdrantTopK);
-  if (useRerank && initialList.length > qdrantTopK) {
+  // rerank ทุกครั้งที่มี candidate มากกว่า 1 (เดิมทำเฉพาะเมื่อ > qdrantTopK) เพื่อให้ทุก chunk ได้คะแนน rerank ติดไปเสมอ
+  if (useRerank && initialList.length > 1) {
     try {
       const externalReranked = await rerankRetrievedChunks(query, initialList, qdrantTopK);
       if (Array.isArray(externalReranked) && externalReranked.length > 0) {
@@ -260,7 +265,7 @@ const retrieveForSingleQuery = async (docIds, query, { fast = false, extraSynony
           .map((item) => ({ item, rerank: 0.7 * (item.score || 0) + 0.3 * termScore(item) }))
           .sort((a, b) => b.rerank - a.rerank)
           .slice(0, qdrantTopK)
-          .map(({ item }) => item);
+          .map(({ item, rerank }) => ({ ...item, rerankScore: rerank }));
       }
     } catch (rerankError) {
       console.warn("Rerank failed, using base retrieval results", rerankError);
@@ -292,7 +297,8 @@ export const retrieveGroundingChunks = async (documentIds, query, { fast = false
       subQuestions.map((q) => retrieveForSingleQuery(docIds, q, { fast, extraSynonyms })),
     );
 
-    const maxTotal = Math.min(qdrantTopK * 2, 18);
+    // ให้ "แต่ละคำถาม" ได้ chunk ลึกใกล้เคียงตอนถามเดี่ยว (เดิม 18 รวม ทำให้แต่ละข้อได้น้อยจนชิ้นที่มีคำตอบหลุด)
+    const maxTotal = Math.min(qdrantTopK * subQuestions.length, 40);
     const seen = new Set();
     const combined = [];
     const maxLen = Math.max(0, ...perQuestionLists.map((l) => l.length));
@@ -312,4 +318,21 @@ export const retrieveGroundingChunks = async (documentIds, query, { fast = false
     console.warn("Qdrant search failed, falling back to empty context", error);
     return [];
   }
+};
+
+/**
+ * ค้นแบบ "แยกกลุ่มต่อคำถาม" สำหรับโหมดหลายคำถาม — คืน [{ question, chunks }]
+ * ใช้ประกอบ context แบบแยกบล็อก (sectioned) กันข้อมูลแต่ละข้อปนกันจนโมเดลสับสน
+ * (ใช้ cache ร่วมกับ retrieveGroundingChunks จึงแทบไม่เพิ่มภาระเวลาเรียกซ้ำ)
+ */
+export const retrieveGroundingGroups = async (documentIds, query, { fast = false } = {}) => {
+  const docIds = Array.from(new Set((documentIds || []).filter(Boolean))).sort();
+  if (!docIds.length) return [];
+  const subQuestions = splitSubQuestions(query);
+  if (subQuestions.length < 2) return [];
+  const extraSynonyms = fast ? {} : await getDbSynonyms();
+  const lists = await Promise.all(
+    subQuestions.map((q) => retrieveForSingleQuery(docIds, q, { fast, extraSynonyms })),
+  );
+  return subQuestions.map((q, i) => ({ question: q, chunks: lists[i] || [] }));
 };

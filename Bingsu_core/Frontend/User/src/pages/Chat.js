@@ -15,6 +15,7 @@ import {
   HiThumbUp,
   HiThumbDown,
   HiChevronDown,
+  HiRefresh,
 } from 'react-icons/hi';
 import { HiChatBubbleLeftRight } from 'react-icons/hi2';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
@@ -276,6 +277,10 @@ const TypingIndicator = ({ isTyping, messages, typingStage }) => {
   );
 };
 
+// สวิตช์: คำตอบบอท "บับเบิลขาวแบบเต็มความกว้าง" (มีบับเบิล แต่กว้างเต็ม ไม่ใช่ 80%)
+// อยากกลับไปบับเบิลแบบเดิม (แคบ 80%) → เปลี่ยนบรรทัดนี้เป็น false บรรทัดเดียวจบ
+const BOT_FULL_WIDTH = true;
+
 function Chat() {
   const { chatId } = useParams();
   const navigate = useNavigate();
@@ -286,6 +291,12 @@ function Chat() {
   const [typingStage, setTypingStage] = useState(0);
   const [showScrollDown, setShowScrollDown] = useState(false);
   const [chatName, setChatName] = useState('');
+  // อัปเดตชื่อบนแท็บเบราว์เซอร์ให้ตรงกับหัวข้อแชทที่เปิดอยู่ (เหมือนที่เห็นในแอปอื่นๆ)
+  useEffect(() => {
+    const base = 'AI Chatbot Sale';
+    document.title = (chatName && chatName !== 'New Chat') ? `${chatName} - ${base}` : base;
+    return () => { document.title = base; };
+  }, [chatName]);
   // help bot: ใช้ซ่อนปุ่มคำสั่งลัดเฉพาะแชทบอทช่วยสอน
   const [helpBotId, setHelpBotId] = useState(null);
   const [chatBotId, setChatBotId] = useState(null);
@@ -1602,6 +1613,20 @@ function Chat() {
     return fallbackQuestion;
   };
 
+  // ทำซ้ำ: หาคำถามผู้ใช้ก่อนหน้าคำตอบบอทนี้ แล้วส่งซ้ำเพื่อให้ได้คำตอบใหม่
+  const handleRegenerate = (botMessage) => {
+    if (isTyping) return;
+    const idx = messages.findIndex((m) => m.id === botMessage.id);
+    const question = idx >= 0 ? getPreviousUserQuestion(idx) : '';
+    if (!question) {
+      setErrorMessage('ไม่พบคำถามก่อนหน้าสำหรับทำซ้ำ');
+      const t = setTimeout(() => setErrorMessage(null), 2500);
+      timeoutRefs.current.regenerate = t;
+      return;
+    }
+    handleSendMessage({ preventDefault: () => {} }, question);
+  };
+
   const openSourceReference = (message, ref) => {
     if (!ENABLE_SOURCE_REFERENCES) return;
     if (!message || !ref?.docId) return;
@@ -1825,7 +1850,8 @@ function Chat() {
                     new Date(message.timestamp) - new Date(messages[index - 1].timestamp) > 300000;
                   
                   const isUser = message.sender === 'user';
-                  
+                  const botFullWidth = BOT_FULL_WIDTH && !isUser;
+
                   return (
                     <div key={message.id} className='group'>
                       {showTimestamp && (
@@ -1852,12 +1878,15 @@ function Chat() {
                         
                         {/* Message Content — min-w-0 ให้ flex อนุญาตให้หดตาม max-w-[80%] ได้ */}
                         <div className={`flex-1 min-w-0 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
-                          <div className={`max-w-[80%] min-w-0 text-left relative group/message`}>
+                          <div className={`${botFullWidth ? 'w-full' : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
                             <div
-                              className={`inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${
-                                isUser
-                                  ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md'
-                                  : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'
+                              className={`${botFullWidth
+                                ? 'block w-full bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp'
+                                : `inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${
+                                    isUser
+                                      ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md'
+                                      : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'
+                                  }`
                               } ${message.sender === 'bot' && isTyping && index === messages.length - 1 && !(streamTextRef.current || message.text) ? 'min-h-[52px] flex items-center' : ''}`}
                               style={{
                                 maxWidth: '100%',
@@ -2060,6 +2089,15 @@ function Chat() {
                                     title='ไม่มีประโยชน์'
                                   >
                                     <HiThumbDown className='text-base' />
+                                  </button>
+                                  <button
+                                    type='button'
+                                    onClick={(e) => { e.stopPropagation(); handleRegenerate(message); }}
+                                    disabled={isTyping}
+                                    className='rounded p-1.5 hover:bg-gray-100 opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700 disabled:opacity-40'
+                                    title='ทำซ้ำ (สร้างคำตอบใหม่)'
+                                  >
+                                    <HiRefresh className='text-base' />
                                   </button>
                                 </>
                               )}

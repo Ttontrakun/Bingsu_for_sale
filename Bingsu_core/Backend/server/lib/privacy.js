@@ -44,6 +44,30 @@ export const redactSensitiveText = (input) => {
   return text;
 };
 
+/**
+ * ตรวจว่าข้อความของผู้ใช้มีข้อมูลส่วนบุคคลไหม (เลขบัตรประชาชน / เบอร์โทร / ที่อยู่)
+ * ใช้เพื่อ "แจ้งเตือน" ผู้ใช้ ไม่ให้กรอกข้อมูลส่วนตัวลงในแชท — คืนชนิดที่พบ (ไทย) หรือ null
+ * ใช้ regex ชุดใหม่ (ไม่มี flag g) เพื่อเลี่ยงปัญหา lastIndex ค้างของ regex แบบ global
+ */
+export const detectPersonalInfoType = (input) => {
+  const text = String(input || "");
+  // เลขบัตรประชาชนไทย = 13 หลักเป๊ะ (มี/ไม่มีขีดคั่นก็ได้)
+  if (/\b\d[-\s]?\d{4}[-\s]?\d{5}[-\s]?\d{2}[-\s]?\d\b/.test(text)) return "เลขบัตรประชาชน";
+  // เบอร์โทรไทย (ขึ้นต้น 0 หรือ +66)
+  if (/(?:\+?66|0)\d[\d\s-]{7,12}\d/.test(text)) return "เบอร์โทรศัพท์";
+  // ที่อยู่: มีคำบ่งชี้ที่อยู่ตั้งแต่ 2 คำ หรือมี 1 คำ + รหัสไปรษณีย์ 5 หลัก
+  const addrHits = (text.match(/บ้านเลขที่|เลขที่|หมู่ที่|หมู่บ้าน|ซอย|ถนน|ตำบล|แขวง|อำเภอ|เขต|จังหวัด|รหัสไปรษณีย์/g) || []).length;
+  if (addrHits >= 2 || (addrHits >= 1 && /\b\d{5}\b/.test(text))) return "ที่อยู่";
+  return null;
+};
+
+/** ข้อความแจ้งเตือนเมื่อผู้ใช้พิมพ์ข้อมูลส่วนตัว — คืน string หรือ null ถ้าไม่พบ */
+export const buildPersonalInfoWarning = (input) => {
+  const kind = detectPersonalInfoType(input);
+  if (!kind) return null;
+  return `⚠️ เพื่อความปลอดภัยของคุณ กรุณาอย่าพิมพ์ข้อมูลส่วนตัว เช่น เลขบัตรประชาชน เบอร์โทรศัพท์ หรือที่อยู่ ลงในแชท\n\nระบบตรวจพบว่าข้อความของคุณอาจมี${kind} — หากต้องการสอบถามข้อมูล กรุณาถามใหม่โดยไม่ใส่ข้อมูลส่วนบุคคลนะครับ`;
+};
+
 const maskNestedMeta = (meta = {}) => {
   const out = { ...meta };
   if (typeof out.email === "string") out.email = maskEmail(out.email);

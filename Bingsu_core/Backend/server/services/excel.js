@@ -127,6 +127,11 @@ export const extractExcelText = ({ buffer, fileName = "file.xlsx" }) => {
         .map((colName, colIdx) => {
           const value = normalizeCell(row?.[colIdx]);
           if (!value) return null;
+          // เครื่องหมายติ๊กในตาราง (P, /, x, ✓ ฯลฯ) = "ช่องนี้ใช่/มีค่า" ไม่ใช่ข้อความข้อมูล
+          // แปลงให้ชัดเจน กัน AI อ่าน "P" เป็นตัวย่อตำแหน่ง
+          if (/^[/\\xX✓✔✗●•√pP]$/.test(value)) {
+            return `${colName}: ✓ (ใช่/มีอำนาจ)`;
+          }
           return `${colName}: ${value}`;
         })
         .filter(Boolean);

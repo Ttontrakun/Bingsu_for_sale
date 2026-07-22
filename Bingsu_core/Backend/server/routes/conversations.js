@@ -12,10 +12,11 @@ import {
   userCacheKey,
 } from "../lib/cache.js";
 import { buildContextPiecesWithNeighbors, ensureSourceFileBlocks, getFallbackContextFromDocuments, filterContextDocsByIds, stripRedundantShortSummary, buildFallbackGroundingChunksFromDocuments, mergeHybridChunks } from "../services/text.js";
-import { retrieveGroundingChunks, invalidateRagCacheForDocument, invalidateAllRagCache } from "../services/rag.js";
+import { retrieveGroundingChunks, retrieveGroundingGroups, invalidateRagCacheForDocument, invalidateAllRagCache } from "../services/rag.js";
 import { updateChunkText, replaceTextInDocument, deleteDocumentVectors, indexDocumentChunks } from "../services/vectorDb.js";
 import { callOpenAiGateway, callOpenAiGatewayStream, isGreeting, isGreetingOnly } from "../services/chat.js";
 import { getOrCreateUsageDaily } from "../services/usage.js";
+import { buildPersonalInfoWarning } from "../lib/privacy.js";
 import { CONTEXT_NEIGHBOR_WINDOW, FREE_DAILY_TOKEN_LIMIT, FREE_KNOWLEDGE_LIMIT, GREETING_REPLY, MAX_CHAT_HISTORY_MESSAGES, MAX_CONTEXT_PIECES, MAX_DAILY_CHAT_MESSAGES, openaiModel, deterministicRulesEnabled } from "../config.js";
 
 export const conversationsRouter = express.Router();
@@ -219,6 +220,7 @@ const sanitizeRedactedContentForClient = (content) => {
 const GROUNDING_FACT_RULES = [
   "- ข้อเท็จจริง/ตัวเลข/ราคา/อำนาจอนุมัติ ต้องยึดจาก Context (ฐานข้อมูลระบบ) เท่านั้น ห้ามนำตัวเลขหรือข้อเท็จจริงจากประวัติสนทนามาตอบ — ใช้ประวัติเพียงเพื่อเข้าใจว่าผู้ใช้กำลังอ้างถึงอะไร",
   "- ถ้า Context ไม่มีข้อมูลของสิ่งที่ผู้ใช้ถามถึงโดยตรง (ชื่อบริการ/รายการที่ระบุ) ห้ามเดา ห้ามหยิบตัวเลข/ราคา/ส่วนลดจากบริการอื่นที่ใกล้เคียงมาตอบแทน และห้ามแต่งตัวเลขขึ้นเอง — ให้ตอบตรงๆ ว่า 'ไม่พบข้อมูลรายการนี้ในเอกสาร' ถ้าพบเฉพาะข้อมูลใกล้เคียงให้ระบุชัดว่าเป็นของบริการอื่น (ไม่ใช่สิ่งที่ถาม)",
+  "- เลขคำสั่ง/เลขที่เอกสาร/เลขบันทึก (เช่น รบ.7/2569, มต./2159) ให้ตอบได้เฉพาะเมื่อ Context ผูกเลขนั้นกับ 'บริการ/หัวข้อที่ผู้ใช้ถามโดยตรง' ในเนื้อหาชิ้นเดียวกันเท่านั้น ห้ามหยิบเลขคำสั่งจากเอกสารคนละหัวข้อ (เช่น ถามเรื่องเสาโทรคมนาคม แต่ Context มีแต่เลขคำสั่งของ Dark Fiber) มาตอบ และห้ามอนุมานเองว่าเอกสารหนึ่งครอบคลุมอีกหัวข้อ — ถ้าไม่พบเลขคำสั่งที่ผูกกับหัวข้อที่ถามตรงๆ ให้ตอบว่า 'ไม่พบคำสั่ง/เอกสารอ้างอิงสำหรับรายการนี้ในเอกสาร' อย่าเดาและอย่าแต่งเหตุผลโยงไปเอกสารอื่น",
 ];
 
 const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
@@ -240,8 +242,28 @@ const GEMINI_LIKE_RESPONSE_FORMAT_RULES = [
 ];
 
 /* analysis-feature edits: query-rewriting, multi-question, grounding */
+/**
+ * ประกอบ context แบบแยกบล็อกตามคำถาม (sectioned) สำหรับโหมดหลายคำถาม
+ * แต่ละข้อได้บล็อกป้ายกำกับของตัวเอง เพื่อให้โมเดลไม่สับสนว่าข้อมูล/เลขคำสั่งชิ้นไหนของข้อไหน
+ */
+const buildSectionedContext = (groups, perQuestionPieces = 5) => {
+  const blocks = [];
+  (groups || []).forEach((g, i) => {
+    const texts = (g?.chunks || [])
+      .map((c) => c?.retrievedContext?.text ?? c?.payload?.text)
+      .filter(Boolean)
+      .slice(0, perQuestionPieces);
+    if (!texts.length) return;
+    blocks.push(`【ข้อมูลสำหรับคำถามข้อ ${i + 1}: ${g.question}】\n${texts.join("\n\n")}`);
+  });
+  return blocks.join("\n\n==============================\n\n");
+};
+
 /** สร้างรายการอ้างอิง (เอกสารที่ใช้ตอบ) จาก groundingChunks + contextDocuments */
 function buildReferences(groundingChunks, contextDocuments, primaryDocument) {
+  // ชุดนี้มี chunk ที่ผ่าน reranker แล้วหรือไม่ — ถ้ามี chunk ที่ "ไม่ผ่าน rerank" (เช่นมาจาก keyword merge)
+  // จะถือว่าเกี่ยวข้องน้อย เพื่อไม่ให้เอกสารนอกเรื่อง (ที่ keyword ดึงมา) โผล่เป็นแหล่งอ้างอิง
+  const anyReranked = (groundingChunks || []).some((c) => Number.isFinite(Number(c?.rerankScore)));
   const docMap = new Map((contextDocuments || []).map((d) => [d?.id, d?.displayName || d?.fileName || "เอกสาร"]));
   const refsByDoc = new Map();
   const normalizeQuote = (input) => {
@@ -270,7 +292,14 @@ function buildReferences(groundingChunks, contextDocuments, primaryDocument) {
     const textRaw = String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? "").trim();
     const { lineHint, page } = buildLineHint({ label, chunkIndex, textRaw });
     const quote = normalizeQuote(textRaw);
-    const score = Number.isFinite(Number(chunk?.score)) ? Number(chunk.score) : 0;
+    // ใช้คะแนน rerank เป็นหลัก (แยก "เกี่ยว/ไม่เกี่ยว" ได้ขาดกว่า vector score)
+    // ถ้าชุดนี้มี rerank แต่ chunk นี้ไม่มี (มาจาก keyword merge) → ให้คะแนน 0 = เกี่ยวน้อย จะได้ถูกกรองออก
+    // ถ้าทั้งชุดไม่มี rerank เลย (rerank ปิด/ล้มเหลว) → fallback เป็น vector score ตามเดิม
+    const rerank = Number(chunk?.rerankScore);
+    let score;
+    if (Number.isFinite(rerank)) score = rerank;
+    else if (anyReranked) score = 0;
+    else score = Number.isFinite(Number(chunk?.score)) ? Number(chunk.score) : 0;
     return { chunkIndex, label, lineHint, page, quote, score };
   };
   const refs = [];
@@ -514,6 +543,14 @@ const buildPolicyPrompt = ({ isHelpBot, message, overviewRequest = false, analyt
       ? "- เมื่อไม่มี Context หรือ Context ไม่ตรง: ตอบสนทนาทั่วไปได้อย่างกระชับ"
       : "- เมื่อไม่มี Context: ตอบสนทนาทั่วไปได้อย่างกระชับ",
     "- ถ้าคำถามมีเงื่อนไขหลายกรณี (เช่น เปรียบเทียบ 2 ระดับส่วนลด): ให้แยกตอบเป็นรายกรณีอย่างชัดเจนในกรอบข้อมูลที่มี",
+    ...(hasMultipleQuestions(message)
+      ? [
+          "- คำถามนี้มีหลายข้อ: ตอบ **แยกทีละข้อตามลำดับ (1, 2, 3, ...)**",
+          "- Context จะมี chunk ของหลายหัวข้อปนกัน เป็นเรื่องปกติ — สำหรับแต่ละข้อ ให้ **มองหา chunk ที่ตรงกับหัวข้อของข้อนั้น** แล้วดึงคำตอบจาก chunk นั้นมาตอบตามปกติ (เช่น ข้อถามเรื่องเสาโทรคมนาคม ถ้ามี chunk ที่ระบุ 'คำสั่งของการให้บริการเสาโทรคมนาคม' ให้ตอบเลขคำสั่งนั้นได้ทันที ไม่ต้องลังเล)",
+          "- ห้ามเอาคำตอบ/ตัวเลข/เลขคำสั่งของ 'หัวข้ออื่น' มาตอบข้ามข้อ (เช่น อย่าเอาเลขคำสั่งของ Dark Fiber มาตอบเรื่องเสาโทรคมนาคม) — แต่ถ้ามี chunk ที่ตรงหัวข้อของข้อนั้นจริง ต้องตอบ",
+          "- ใช้ 'ไม่พบข้อมูลสำหรับข้อนี้ในเอกสาร' **เฉพาะเมื่อไม่มี chunk ที่ตรงกับหัวข้อของข้อนั้นเลยจริงๆ** เท่านั้น — ถ้ามี chunk ตรงหัวข้ออยู่ใน Context ห้ามเลี่ยงตอบหรือตอบว่าไม่พบ",
+        ]
+      : []),
     analytical
       ? "- จำบทสนทนาก่อนหน้าเสมอ — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่"
       : "- จำบทสนทนาก่อนหน้า — คำถามต่อเนื่อง (อธิบายเพิ่ม, แล้วล่ะ, ขั้นตอนถัดไป, สรุปอีกที) ให้ตอบต่อจากประเด็นที่คุยอยู่",
@@ -565,6 +602,11 @@ const resolveAuthorityDocIds = (docs = [], fallbackDocIds = []) => {
 };
 
 const resolveRetrievalTargets = (message, rawContextDocs = [], defaultDocumentIds = []) => {
+  // คำถามหลายข้อมักครอบหลายหัวข้อ/หลายเอกสาร — ห้ามหด scope เป็น "เฉพาะเอกสารอำนาจอนุมัติ"
+  // เพราะบางข้ออาจอยู่คนละเอกสาร (เช่น ข้อเรื่องเสาโทรคมนาคมปนกับข้อเรื่องอำนาจอนุมัติ) → ใช้ทุกเอกสารในชุด Knowledge
+  if (hasMultipleQuestions(message)) {
+    return { primaryDocumentIds: defaultDocumentIds, secondaryDocumentIds: null };
+  }
   const primaryDocumentIds = isAuthorityDecisionQuery(message)
     ? resolveAuthorityDocIds(rawContextDocs, defaultDocumentIds)
     : defaultDocumentIds;
@@ -650,6 +692,9 @@ const hasMultipleQuestions = (message) => {
   // เครื่องหมายคำถามตั้งแต่ 2 ตัวขึ้นไป = หลายคำถามชัดเจน
   const qMarks = (m.match(/[?？]/g) || []).length;
   if (qMarks >= 2) return true;
+  // รายการที่ขึ้นต้นด้วยเลขตั้งแต่ 2 ข้อ เช่น "1. ... 2. ... 3. ..." = หลายคำถามชัดเจน (สอดคล้องกับตัวแยกใน rag.js)
+  const numberedItems = (m.match(/(?:^|\s)\d{1,2}[.)]+\s+\S/g) || []).length;
+  if (numberedItems >= 2) return true;
   // นับ "คำบ่งชี้คำถาม" และตัวเชื่อมที่มักคั่นหลายประเด็น
   const questionCueCount = (m.match(/(เท่าไหร่|เท่าไร|กี่|อะไร|ยังไง|อย่างไร|ทำไม|ที่ไหน|ใคร|เมื่อไหร่|ไหม|มั้ย|หรือไม่|ขั้นต่ำ|สูงสุด|นานสุด)/g) || []).length;
   const conjCount = (m.match(/(และ|กับ|อีกอย่าง|อีกข้อ|อีกคำถาม|รวมถึง|พร้อมทั้ง|แล้วก็|และก็|ส่วน)/g) || []).length;
@@ -1849,7 +1894,9 @@ chatRouter.get("/:conversationId/debug-context", authenticate, async (req, res) 
     }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
-    maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
+    maxPieces: hasMultipleQuestions(message)
+      ? Math.min((Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12) * 2, 28)
+      : (Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12),
     neighborWindow: Number.isFinite(CONTEXT_NEIGHBOR_WINDOW) ? CONTEXT_NEIGHBOR_WINDOW : 0,
   });
 
@@ -1965,6 +2012,39 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
         done: true,
         messageId: modelMessage.id,
         reply: fallbackReply,
+        references: [],
+        groundingChunks: [],
+      })}\n\n`,
+    );
+    res.end();
+    return;
+  }
+
+  const privacyWarning = buildPersonalInfoWarning(message);
+  if (privacyWarning) {
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: privacyWarning, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    res.write(`data: ${JSON.stringify({ content: privacyWarning })}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        done: true,
+        messageId: modelMessage.id,
+        reply: privacyWarning,
         references: [],
         groundingChunks: [],
       })}\n\n`,
@@ -2110,10 +2190,20 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
-    maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
+    maxPieces: hasMultipleQuestions(message)
+      ? Math.min((Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12) * 2, 28)
+      : (Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12),
     neighborWindow: Number.isFinite(CONTEXT_NEIGHBOR_WINDOW) ? CONTEXT_NEIGHBOR_WINDOW : 0,
   });
   let contextText = contextPieces.join("\n\n---\n\n");
+  // โหมดหลายคำถาม: ประกอบ context ใหม่แบบแยกบล็อกต่อข้อ (sectioned) กันข้อมูล/เลขคำสั่งแต่ละข้อปนกันจนโมเดลสับสน
+  if (hasMultipleQuestions(message)) {
+    try {
+      const sectionedGroups = await retrieveGroundingGroups(retrievalDocumentIds, retrievalQuery, { fast: false });
+      const sectionedContext = buildSectionedContext(sectionedGroups);
+      if (sectionedContext) contextText = sectionedContext;
+    } catch (_) {}
+  }
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
   const followUpIntent = isLikelyFollowUp(message);
@@ -2565,6 +2655,24 @@ chatRouter.post("/", authenticate, async (req, res) => {
     return;
   }
 
+  const privacyWarning = buildPersonalInfoWarning(message);
+  if (privacyWarning) {
+    await prisma.message.create({
+      data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
+    });
+    const modelMessage = await prisma.message.create({
+      data: { conversationId, role: "model", content: privacyWarning, platform: getPlatform(req) },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, req.user.id);
+    res.json({ reply: privacyWarning, groundingChunks: [], references: [], messageId: modelMessage.id });
+    return;
+  }
+
   const greetingOnly = isGreetingOnly(message);
   if (greetingOnly) {
     res.json({ reply: GREETING_REPLY, groundingChunks: [] });
@@ -2708,10 +2816,20 @@ chatRouter.post("/", authenticate, async (req, res) => {
     }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
-    maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
+    maxPieces: hasMultipleQuestions(message)
+      ? Math.min((Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12) * 2, 28)
+      : (Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12),
     neighborWindow: Number.isFinite(CONTEXT_NEIGHBOR_WINDOW) ? CONTEXT_NEIGHBOR_WINDOW : 0,
   });
   let contextText = contextPieces.join("\n\n---\n\n");
+  // โหมดหลายคำถาม: ประกอบ context ใหม่แบบแยกบล็อกต่อข้อ (sectioned) กันข้อมูล/เลขคำสั่งแต่ละข้อปนกันจนโมเดลสับสน
+  if (hasMultipleQuestions(message)) {
+    try {
+      const sectionedGroups = await retrieveGroundingGroups(retrievalDocumentIds, retrievalQuery, { fast: false });
+      const sectionedContext = buildSectionedContext(sectionedGroups);
+      if (sectionedContext) contextText = sectionedContext;
+    } catch (_) {}
+  }
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
   const followUpIntent = isLikelyFollowUp(message);
@@ -3055,6 +3173,23 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   let groundingChunks = [];
   const contextDocumentsFrom = (ids) => filterContextDocsByIds(rawContextDocs, ids);
 
+  const privacyWarning = buildPersonalInfoWarning(message);
+  if (privacyWarning) {
+    await prisma.message.create({
+      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
+    });
+    await prisma.message.create({
+      data: { conversationId, role: "model", content: privacyWarning, platform: LINE_PLATFORM },
+    });
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
+    });
+    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
+    await invalidateConversationCaches(conversation.id, userId);
+    return { reply: privacyWarning };
+  }
+
   if (isGreetingOnly(message)) {
     await prisma.message.create({
       data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
@@ -3107,10 +3242,20 @@ export async function getChatReplyForLine(conversationId, message, userId) {
     }
   }
   const contextPieces = buildContextPiecesWithNeighbors(groundingChunks, contextDocuments, message, {
-    maxPieces: Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 6,
+    maxPieces: hasMultipleQuestions(message)
+      ? Math.min((Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12) * 2, 28)
+      : (Number.isFinite(MAX_CONTEXT_PIECES) ? MAX_CONTEXT_PIECES : 12),
     neighborWindow: Number.isFinite(CONTEXT_NEIGHBOR_WINDOW) ? CONTEXT_NEIGHBOR_WINDOW : 0,
   });
   let contextText = contextPieces.join("\n\n---\n\n");
+  // โหมดหลายคำถาม: ประกอบ context ใหม่แบบแยกบล็อกต่อข้อ (sectioned) กันข้อมูล/เลขคำสั่งแต่ละข้อปนกันจนโมเดลสับสน
+  if (hasMultipleQuestions(message)) {
+    try {
+      const sectionedGroups = await retrieveGroundingGroups(retrievalDocumentIds, retrievalQuery, { fast: false });
+      const sectionedContext = buildSectionedContext(sectionedGroups);
+      if (sectionedContext) contextText = sectionedContext;
+    } catch (_) {}
+  }
   const isHelpBot = conversation.bot?.name === HELP_BOT_NAME;
   const overviewRequest = !isHelpBot && isOverviewStyleQuery(message);
   const followUpIntent = isLikelyFollowUp(message);

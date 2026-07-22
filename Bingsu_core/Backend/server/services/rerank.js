@@ -89,7 +89,8 @@ export const rerankRetrievedChunks = async (query, chunks, topK) => {
     return deduped
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(1, Math.min(Number(topK) || deduped.length, deduped.length)))
-      .map(({ item }) => item);
+      // แนบคะแนน rerank ไว้กับ chunk เพื่อให้ชั้นถัดไป (กรองอ้างอิง) ใช้แยก "เกี่ยว/ไม่เกี่ยว" ได้ขาดกว่า vector score
+      .map(({ item, score }) => ({ ...item, rerankScore: score }));
   } catch (error) {
     if (error?.name === "AbortError") {
       console.warn("[RAG] external reranker timed out; fallback to local rerank.");
