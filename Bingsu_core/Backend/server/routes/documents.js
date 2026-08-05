@@ -624,7 +624,10 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
         },
       };
     } else {
-      const provider = isPdf ? "typhoon" : "paddle";
+      const configuredProviderRaw = (process.env.OCR_PROVIDER || "paddle").trim().toLowerCase();
+      const provider = ["typhoon", "paddle", "paddle_vl", "text"].includes(configuredProviderRaw)
+        ? configuredProviderRaw
+        : "paddle";
       body = await runOcrExtract({
         buffer: req.file.buffer,
         fileName,

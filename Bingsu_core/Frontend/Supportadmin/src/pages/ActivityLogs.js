@@ -6,20 +6,43 @@ import { api } from '../services/api';
 const EVENT_LABEL_TH = {
   'auth.login': 'เข้าสู่ระบบ',
   'auth.logout': 'ออกจากระบบ',
+  'auth.login.rejected.invalid_user': 'ล็อกอินล้มเหลว — ไม่พบบัญชี',
+  'auth.login.rejected.disabled': 'ล็อกอินล้มเหลว — บัญชีถูกปิด',
+  'auth.login.rejected.email_not_verified': 'ล็อกอินล้มเหลว — ยังไม่ยืนยันอีเมล',
+  'auth.login.rejected.pending_approval': 'ล็อกอินล้มเหลว — รออนุมัติ',
+  'auth.login.rejected.locked': 'ล็อกอินล้มเหลว — บัญชีถูกล็อก',
+  'auth.login.rejected.invalid_password': 'ล็อกอินล้มเหลว — รหัสผ่านผิด',
   'auth.email.verified': 'ยืนยันอีเมล',
   'auth.email.resend': 'ส่งอีเมลยืนยันอีกครั้ง',
+  'auth.email.resend.ignored': 'ข้ามการส่งอีเมลยืนยัน',
+  'auth.email.verification.sent': 'ส่งอีเมลยืนยันแล้ว',
+  'auth.email.verification.failed': 'ส่งอีเมลยืนยันล้มเหลว',
+  'auth.email.verification.resent': 'ส่งอีเมลยืนยันซ้ำแล้ว',
+  'auth.email.verification.resend.failed': 'ส่งอีเมลยืนยันซ้ำล้มเหลว',
+  'auth.email.verify.rejected.invalid_token': 'ยืนยันอีเมลล้มเหลว — token ไม่ถูกต้อง',
+  'auth.email.verify.rejected.expired_token': 'ยืนยันอีเมลล้มเหลว — token หมดอายุ',
   'auth.password.reset.requested': 'ขอรีเซ็ตรหัสผ่าน',
   'auth.password.reset': 'รีเซ็ตรหัสผ่านแล้ว',
+  'auth.password.reset.rejected.invalid_token': 'รีเซ็ตรหัสผ่านล้มเหลว — token ไม่ถูกต้อง',
+  'auth.password.reset.email.sent': 'ส่งอีเมลรีเซ็ตรหัสผ่านแล้ว',
+  'auth.password.reset.email.failed': 'ส่งอีเมลรีเซ็ตรหัสผ่านล้มเหลว',
+  'auth.password.reset.request.ignored': 'ข้ามคำขอรีเซ็ตรหัสผ่าน',
+  'auth.password.set.initial': 'ตั้งรหัสผ่านครั้งแรก',
+  'auth.password.set.initial.rejected.invalid_token': 'ตั้งรหัสผ่านครั้งแรกล้มเหลว — token ไม่ถูกต้อง',
   'auth.password.changed': 'เปลี่ยนรหัสผ่านแล้ว',
   'user.profile.updated': 'อัปเดตโปรไฟล์',
-  'user.signup.pending': 'สมัครสมาชิก',
+  'user.signup.pending': 'สมัครสมาชิก (รออนุมัติ)',
+  'user.signup.approved': 'สมัครสมาชิก (อนุมัติอัตโนมัติ)',
+  'user.signup.rejected.duplicate_email': 'สมัครสมาชิกล้มเหลว — อีเมลซ้ำ',
   'user.approval.updated': 'อนุมัติ/ปฏิเสธบัญชี',
+  'user.approval.request.submitted': 'ส่งคำขออนุมัติบัญชี',
   'user.expiry.renewed': 'ต่ออายุการใช้งาน',
   'user.status.updated': 'เปลี่ยนสถานะผู้ใช้',
   'user.role.updated': 'เปลี่ยนบทบาทผู้ใช้',
   'user.private_context.updated': 'บันทึกความจำ/คำสั่งส่วนตัว (/จำ /สั่ง)',
   'http.error': 'ข้อผิดพลาดระบบ (HTTP)',
   'http.exception': 'ข้อผิดพลาดระบบ (Exception)',
+  'email.send.failed': 'ส่งอีเมลล้มเหลว',
   'integration.line.updated': 'ตั้งค่า LINE Integration',
   'integration.updated': 'ตั้งค่า Integration',
   'integration.update.failed': 'ตั้งค่า Integration (ล้มเหลว)',
@@ -33,16 +56,30 @@ const EVENT_LABEL_TH = {
   'synonym.enabled': 'เปิดใช้งานคำพ้องความหมาย',
   'synonym.disabled': 'ปิดใช้งานคำพ้องความหมาย',
   'synonym.deleted': 'ลบคำพ้องความหมาย',
+  'service_rate.updated': 'อัปเดตอัตราค่าบริการ',
+  'service_rate.deleted': 'ลบอัตราค่าบริการ',
   'upload.batch.completed': 'อัปโหลดไฟล์ (ครบชุด)',
+  'upload.batch.failed': 'อัปโหลดไฟล์ (ล้มเหลว)',
+  'admin.upload.batch.retry': 'Retry อัปโหลดไฟล์ (แอดมิน)',
   'admin.user.deleted': 'ลบผู้ใช้ (แอดมิน)',
+  'admin.user.password.reset': 'รีเซ็ตรหัสผ่านผู้ใช้ (แอดมิน)',
   'support.user.deleted': 'ลบผู้ใช้ (ซัพพอร์ต)',
+  'support.pending_approval.email.failed': 'แจ้งอีเมลรออนุมัติล้มเหลว',
   'bot.created': 'สร้างบอท',
   'bot.updated': 'แก้ไขบอท',
+  'admin.bot.created': 'สร้างบอท (แอดมิน)',
   'admin.bot.updated': 'แก้ไขบอท (แอดมิน)',
   'admin.guide.updated': 'แก้ไขคู่มือ (แอดมิน)',
   'bot.deleted': 'ลบบอท',
+  'admin.announcement.created': 'สร้างประกาศ',
+  'admin.announcement.updated': 'แก้ไขประกาศ',
+  'admin.announcement.enabled': 'เปิดแสดงประกาศ',
+  'admin.announcement.disabled': 'ปิดแสดงประกาศ',
+  'admin.announcement.deleted': 'ลบประกาศ',
   'admin.restore': 'กู้คืนข้อมูล',
   'admin.restore.failed': 'กู้คืนข้อมูล (ล้มเหลว)',
+  'chat.retention.pruned': 'ลบแชทเก่าอัตโนมัติ',
+  'system.log.retention.pruned': 'ลบ log เก่าอัตโนมัติ',
 };
 
 const POLL_MS = 8000;
@@ -70,7 +107,12 @@ function typeLabelTh(messageKey) {
 
 function isErrorEvent(messageKey) {
   const key = String(messageKey || '').toLowerCase();
-  return key === 'http.error' || key === 'http.exception' || key.endsWith('.failed');
+  return (
+    key === 'http.error'
+    || key === 'http.exception'
+    || key.endsWith('.failed')
+    || key.includes('.rejected.')
+  );
 }
 
 /** สรุปการแก้บอท — แสดงว่าแก้ prompt / ชื่อ / Knowledge ฯลฯ */
@@ -112,14 +154,54 @@ function formatAdminSummary(eventMessage, meta) {
       return m.email
         ? `ออกจากระบบ — บัญชี ${m.email}`
         : 'ออกจากระบบ';
+    case 'auth.login.rejected.invalid_user':
+      return m.email ? `พยายามล็อกอินด้วยอีเมล ${m.email} แต่ไม่พบบัญชี` : 'พยายามล็อกอินแต่ไม่พบบัญชี';
+    case 'auth.login.rejected.disabled':
+      return m.email ? `บัญชี ${m.email} ถูกปิดใช้งาน จึงล็อกอินไม่ได้` : 'บัญชีถูกปิดใช้งาน จึงล็อกอินไม่ได้';
+    case 'auth.login.rejected.email_not_verified':
+      return m.email ? `บัญชี ${m.email} ยังไม่ได้ยืนยันอีเมล` : 'ยังไม่ได้ยืนยันอีเมล';
+    case 'auth.login.rejected.pending_approval':
+      return m.email ? `บัญชี ${m.email} ยังรออนุมัติ` : 'บัญชียังรออนุมัติ';
+    case 'auth.login.rejected.locked':
+      return m.email ? `บัญชี ${m.email} ถูกล็อกชั่วคราว (ล็อกอินผิดหลายครั้ง)` : 'บัญชีถูกล็อกชั่วคราว';
+    case 'auth.login.rejected.invalid_password':
+      return m.email ? `รหัสผ่านไม่ถูกต้องสำหรับ ${m.email}` : 'รหัสผ่านไม่ถูกต้อง';
     case 'auth.email.verified':
       return m.email ? `ยืนยันอีเมลสำเร็จ — ${m.email}` : 'ยืนยันอีเมลสำเร็จ';
     case 'auth.email.resend':
-      return 'ส่งอีเมลยืนยันอีกครั้ง';
+    case 'auth.email.verification.resent':
+      return m.email ? `ส่งอีเมลยืนยันอีกครั้งไปที่ ${m.email}` : 'ส่งอีเมลยืนยันอีกครั้ง';
+    case 'auth.email.resend.ignored':
+      return m.email ? `ข้ามการส่งอีเมลยืนยัน (${m.email})` : 'ข้ามการส่งอีเมลยืนยัน';
+    case 'auth.email.verification.sent':
+      return m.email ? `ส่งอีเมลยืนยันไปที่ ${m.email}` : 'ส่งอีเมลยืนยันแล้ว';
+    case 'auth.email.verification.failed':
+    case 'auth.email.verification.resend.failed':
+      return m.error
+        ? `ส่งอีเมลยืนยันไม่สำเร็จ — ${String(m.error).slice(0, 160)}`
+        : 'ส่งอีเมลยืนยันไม่สำเร็จ';
+    case 'auth.email.verify.rejected.invalid_token':
+      return 'ยืนยันอีเมลไม่สำเร็จ — token ไม่ถูกต้องหรือถูกใช้แล้ว';
+    case 'auth.email.verify.rejected.expired_token':
+      return m.email ? `ยืนยันอีเมลไม่สำเร็จ — token ของ ${m.email} หมดอายุ` : 'ยืนยันอีเมลไม่สำเร็จ — token หมดอายุ';
     case 'auth.password.reset.requested':
-      return 'มีการขอรีเซ็ตรหัสผ่านทางอีเมล';
+      return m.email ? `มีการขอรีเซ็ตรหัสผ่านทางอีเมล — ${m.email}` : 'มีการขอรีเซ็ตรหัสผ่านทางอีเมล';
     case 'auth.password.reset':
       return 'รีเซ็ตรหัสผ่านสำเร็จ';
+    case 'auth.password.reset.rejected.invalid_token':
+      return 'รีเซ็ตรหัสผ่านไม่สำเร็จ — token ไม่ถูกต้องหรือหมดอายุ';
+    case 'auth.password.set.initial':
+      return 'ตั้งรหัสผ่านครั้งแรกสำเร็จ';
+    case 'auth.password.set.initial.rejected.invalid_token':
+      return 'ตั้งรหัสผ่านครั้งแรกไม่สำเร็จ — token ไม่ถูกต้องหรือหมดอายุ';
+    case 'auth.password.reset.email.sent':
+      return m.email ? `ส่งอีเมลรีเซ็ตรหัสผ่านไปที่ ${m.email}` : 'ส่งอีเมลรีเซ็ตรหัสผ่านแล้ว';
+    case 'auth.password.reset.email.failed':
+      return m.error
+        ? `ส่งอีเมลรีเซ็ตรหัสผ่านไม่สำเร็จ — ${String(m.error).slice(0, 160)}`
+        : 'ส่งอีเมลรีเซ็ตรหัสผ่านไม่สำเร็จ';
+    case 'auth.password.reset.request.ignored':
+      return m.email ? `ข้ามคำขอรีเซ็ตรหัสผ่าน (${m.email})` : 'ข้ามคำขอรีเซ็ตรหัสผ่าน';
     case 'auth.password.changed':
       return 'เปลี่ยนรหัสผ่านสำเร็จ';
     case 'user.profile.updated': {
@@ -135,6 +217,14 @@ function formatAdminSummary(eventMessage, meta) {
       return [m.name && `มีผู้สมัครใหม่ ชื่อ ${m.name}`, m.email && `อีเมล ${m.email}`]
         .filter(Boolean)
         .join(' — ') || 'มีผู้สมัครสมาชิกใหม่ (รออนุมัติ)';
+    case 'user.signup.approved':
+      return [m.name && `สมัครใหม่และอนุมัติอัตโนมัติ ชื่อ ${m.name}`, m.email && `อีเมล ${m.email}`]
+        .filter(Boolean)
+        .join(' — ') || 'สมัครสมาชิกใหม่ (อนุมัติอัตโนมัติ)';
+    case 'user.signup.rejected.duplicate_email':
+      return m.email ? `สมัครสมาชิกไม่สำเร็จ — อีเมล ${m.email} มีในระบบแล้ว` : 'สมัครสมาชิกไม่สำเร็จ — อีเมลซ้ำ';
+    case 'user.approval.request.submitted':
+      return m.email ? `ส่งคำขออนุมัติบัญชี — ${m.email}` : 'ส่งคำขออนุมัติบัญชี';
     case 'user.approval.updated': {
       const st = APPROVAL_TH[m.approvalStatus || m.status] || m.approvalStatus || m.status || '—';
       const who = [m.name, m.email].filter(Boolean).join(' · ');
@@ -223,13 +313,26 @@ function formatAdminSummary(eventMessage, meta) {
         ? `อัปโหลดชุดไฟล์เสร็จ ชื่อ ${q(know)} — ${files} กำลังเข้าคิวประมวลผลต่อ`
         : `อัปโหลดชุดไฟล์เสร็จ — ${files} กำลังเข้าคิวประมวลผลต่อ`;
     }
-    case 'bot.created': {
+    case 'upload.batch.failed': {
+      const msg = m.error ? String(m.error).slice(0, 180) : 'ไม่ทราบสาเหตุ';
+      return know
+        ? `ประมวลผลชุดไฟล์ล้มเหลว — ${q(know)} — ${msg}`
+        : `ประมวลผลชุดไฟล์ล้มเหลว — ${msg}`;
+    }
+    case 'admin.upload.batch.retry':
+      return know
+        ? `แอดมินกด Retry ประมวลผลไฟล์ชุด ${q(know)} ใหม่`
+        : 'แอดมินกด Retry ประมวลผลไฟล์ชุดใหม่';
+    case 'bot.created':
+    case 'admin.bot.created': {
+      const byAdmin = eventMessage === 'admin.bot.created';
       const n = m.knowledgeCount != null ? Number(m.knowledgeCount) : m.documentCount != null ? Number(m.documentCount) : null;
-      if (!botNm) return 'สร้างบอทใหม่';
+      const head = byAdmin ? 'แอดมินสร้างบอท' : 'สร้างบอทใหม่';
+      if (!botNm) return head;
       if (n != null && Number.isFinite(n) && n > 0) {
-        return `สร้างบอทใหม่ ชื่อ ${q(botNm)} — ผูก Knowledge ${n} ชุดตั้งแต่แรก`;
+        return `${head} ชื่อ ${q(botNm)} — ผูก Knowledge ${n} ชุดตั้งแต่แรก`;
       }
-      return `สร้างบอทใหม่ ชื่อ ${q(botNm)} — ยังไม่ผูก Knowledge`;
+      return `${head} ชื่อ ${q(botNm)} — ยังไม่ผูก Knowledge`;
     }
     case 'bot.updated':
       return formatBotEditSummary(m, false);
@@ -243,14 +346,69 @@ function formatAdminSummary(eventMessage, meta) {
       const who = [m.name, m.email].filter(Boolean).join(' · ');
       return who ? `ลบบัญชีผู้ใช้ ${who} ออกจากระบบ` : 'ลบบัญชีผู้ใช้ออกจากระบบ';
     }
+    case 'admin.user.password.reset': {
+      const who = [m.name, m.email].filter(Boolean).join(' · ');
+      return who
+        ? `แอดมินรีเซ็ตรหัสผ่านให้ ${who} (บังคับออกจากระบบทุก session)`
+        : 'แอดมินรีเซ็ตรหัสผ่านผู้ใช้';
+    }
     case 'support.user.deleted': {
       const who = [m.name, m.email].filter(Boolean).join(' · ');
       return who ? `ซัพพอร์ตลบบัญชีผู้ใช้ ${who}` : 'ซัพพอร์ตลบบัญชีผู้ใช้';
     }
+    case 'support.pending_approval.email.failed':
+      return m.error
+        ? `แจ้งอีเมลรออนุมัติไม่สำเร็จ — ${String(m.error).slice(0, 160)}`
+        : 'แจ้งอีเมลรออนุมัติไม่สำเร็จ';
     case 'admin.guide.updated':
       return know
         ? `อัปเดตเนื้อหาคู่มือ — เอกสาร ${q(know)}`
         : 'อัปเดตเนื้อหาคู่มือการใช้งาน';
+    case 'admin.announcement.created':
+      return m.message
+        ? `สร้างประกาศใหม่ — ${q(String(m.message).slice(0, 80))}`
+        : 'สร้างประกาศใหม่ถึงผู้ใช้';
+    case 'admin.announcement.updated':
+      return m.message
+        ? `แก้ไขประกาศ — ${q(String(m.message).slice(0, 80))}`
+        : 'แก้ไขประกาศถึงผู้ใช้';
+    case 'admin.announcement.enabled':
+      return m.message
+        ? `เปิดแสดงประกาศ — ${q(String(m.message).slice(0, 80))}`
+        : 'เปิดแสดงประกาศถึงผู้ใช้';
+    case 'admin.announcement.disabled':
+      return m.message
+        ? `ปิดแสดงประกาศ — ${q(String(m.message).slice(0, 80))}`
+        : 'ปิดแสดงประกาศถึงผู้ใช้';
+    case 'admin.announcement.deleted':
+      return m.message
+        ? `ลบประกาศ — ${q(String(m.message).slice(0, 80))}`
+        : 'ลบประกาศถึงผู้ใช้';
+    case 'synonym.created':
+      return m.term ? `เพิ่มคำพ้อง — คำในเอกสาร ${q(m.term)}` : 'เพิ่มคำพ้องความหมาย';
+    case 'synonym.updated':
+      return m.term ? `แก้ไขคำพ้อง — คำในเอกสาร ${q(m.term)}` : 'แก้ไขคำพ้องความหมาย';
+    case 'synonym.enabled':
+      return m.term ? `เปิดใช้งานคำพ้อง ${q(m.term)}` : 'เปิดใช้งานคำพ้องความหมาย';
+    case 'synonym.disabled':
+      return m.term ? `ปิดใช้งานคำพ้อง ${q(m.term)}` : 'ปิดใช้งานคำพ้องความหมาย';
+    case 'synonym.deleted':
+      return m.term ? `ลบคำพ้อง ${q(m.term)}` : 'ลบคำพ้องความหมาย';
+    case 'service_rate.updated': {
+      const svc = m.service === 'lite' ? 'Lite' : m.service === 'corp' ? 'Corporate' : m.service || '';
+      const kind = m.kind === 'intl' ? 'International' : m.kind === 'local' ? 'Local Access' : m.kind || '';
+      const speed = m.speed != null ? `${Number(m.speed).toLocaleString('en-US')} Mbps` : '';
+      const rate = m.rate != null ? `${Number(m.rate).toLocaleString('en-US')} บาท` : '';
+      const parts = [svc, kind, speed, rate && `→ ${rate}`].filter(Boolean);
+      return parts.length ? `อัปเดตอัตราค่าบริการ — ${parts.join(' · ')}` : 'อัปเดตอัตราค่าบริการ';
+    }
+    case 'service_rate.deleted': {
+      const svc = m.service === 'lite' ? 'Lite' : m.service === 'corp' ? 'Corporate' : m.service || '';
+      const kind = m.kind === 'intl' ? 'International' : m.kind === 'local' ? 'Local Access' : m.kind || '';
+      const speed = m.speed != null ? `${Number(m.speed).toLocaleString('en-US')} Mbps` : '';
+      const parts = [svc, kind, speed].filter(Boolean);
+      return parts.length ? `ลบอัตราค่าบริการ — ${parts.join(' · ')}` : 'ลบอัตราค่าบริการ';
+    }
     case 'admin.restore':
       return 'เริ่มกู้คืนข้อมูลจากสำรอง (backup)';
     case 'admin.restore.failed':
@@ -273,15 +431,36 @@ function formatAdminSummary(eventMessage, meta) {
       const state = m.enabled === true ? ' — เปิดโหมดส่วนตัว' : m.enabled === false ? ' — ปิดโหมดส่วนตัว' : '';
       return `ผู้ใช้ใช้งานโหมดส่วนตัว — ${what}${state}`;
     }
+    case 'email.send.failed':
+      return m.error
+        ? `ส่งอีเมลไม่สำเร็จ — ${String(m.error).slice(0, 160)}`
+        : 'ส่งอีเมลไม่สำเร็จ';
+    case 'chat.retention.pruned': {
+      const n = m.deletedCount != null ? Number(m.deletedCount) : m.count != null ? Number(m.count) : null;
+      return n != null && Number.isFinite(n)
+        ? `ระบบลบแชทเก่าอัตโนมัติ ${n.toLocaleString('th-TH')} รายการ`
+        : 'ระบบลบแชทเก่าอัตโนมัติ';
+    }
+    case 'system.log.retention.pruned': {
+      const n = m.deletedCount != null ? Number(m.deletedCount) : m.count != null ? Number(m.count) : null;
+      return n != null && Number.isFinite(n)
+        ? `ระบบลบ log เก่าอัตโนมัติ ${n.toLocaleString('th-TH')} รายการ`
+        : 'ระบบลบ log เก่าอัตโนมัติ';
+    }
     default:
       break;
   }
 
+  if (m.term) return `เกี่ยวกับคำพ้อง ${q(m.term)}`;
   if (know) return `เกี่ยวกับ Knowledge ชื่อ ${q(know)}`;
   if (botNm) return `เกี่ยวกับบอท ชื่อ ${q(botNm)}`;
   if (m.fileCount != null) return `เกี่ยวกับการอัปโหลด จำนวน ${m.fileCount} ไฟล์`;
   if (m.email) return `เกี่ยวกับบัญชี ${m.email}`;
-  return '—';
+  if (m.error) return String(m.error).slice(0, 180);
+  if (typeof m.message === 'string' && m.message && !String(eventMessage || '').startsWith('http.')) {
+    return String(m.message).slice(0, 160);
+  }
+  return EVENT_LABEL_TH[eventMessage] || (eventMessage ? `เหตุการณ์: ${eventMessage}` : '—');
 }
 
 /** จัด meta เป็น key-value สำหรับอ่านใน panel รายละเอียด */
@@ -299,7 +478,26 @@ function buildMetaEntries(meta) {
 const EVENT_FILTER_GROUPS = [
   {
     label: 'ปัญหา/ข้อผิดพลาดระบบ',
-    keys: ['http.error', 'http.exception'],
+    keys: [
+      'http.error',
+      'http.exception',
+      'email.send.failed',
+      'upload.batch.failed',
+      'document.vectorize.failed',
+      'integration.update.failed',
+      'admin.restore.failed',
+    ],
+  },
+  {
+    label: 'Security — ล็อกอินถูกปฏิเสธ',
+    keys: [
+      'auth.login.rejected.invalid_user',
+      'auth.login.rejected.invalid_password',
+      'auth.login.rejected.locked',
+      'auth.login.rejected.disabled',
+      'auth.login.rejected.email_not_verified',
+      'auth.login.rejected.pending_approval',
+    ],
   },
   {
     label: 'การเข้าใช้และรหัสผ่าน',
@@ -308,22 +506,68 @@ const EVENT_FILTER_GROUPS = [
       'auth.logout',
       'auth.email.verified',
       'auth.email.resend',
+      'auth.email.verification.sent',
+      'auth.email.verification.failed',
       'auth.password.reset.requested',
       'auth.password.reset',
+      'auth.password.reset.rejected.invalid_token',
+      'auth.password.reset.email.sent',
+      'auth.password.reset.email.failed',
+      'auth.password.set.initial',
       'auth.password.changed',
+      'admin.user.password.reset',
     ],
   },
   {
     label: 'สมัครสมาชิกและการอนุมัติ',
-    keys: ['user.signup.pending', 'user.approval.updated', 'user.expiry.renewed'],
+    keys: [
+      'user.signup.pending',
+      'user.signup.approved',
+      'user.signup.rejected.duplicate_email',
+      'user.approval.request.submitted',
+      'user.approval.updated',
+      'user.expiry.renewed',
+    ],
   },
   {
     label: 'จัดการผู้ใช้',
-    keys: ['user.status.updated', 'user.role.updated', 'admin.user.deleted', 'support.user.deleted'],
+    keys: [
+      'user.profile.updated',
+      'user.status.updated',
+      'user.role.updated',
+      'admin.user.deleted',
+      'support.user.deleted',
+    ],
   },
   {
     label: 'Knowledge และการอัปโหลด',
-    keys: ['document.created', 'document.updated', 'document.ocr.structured', 'document.vectorize.failed', 'document.deleted', 'upload.batch.completed'],
+    keys: [
+      'document.created',
+      'document.updated',
+      'document.ocr.structured',
+      'document.vectorize.failed',
+      'document.deleted',
+      'upload.batch.completed',
+      'upload.batch.failed',
+      'admin.upload.batch.retry',
+    ],
+  },
+  {
+    label: 'Synonyms / Service Rates / ประกาศ',
+    keys: [
+      'synonym.created',
+      'synonym.updated',
+      'synonym.enabled',
+      'synonym.disabled',
+      'synonym.deleted',
+      'service_rate.updated',
+      'service_rate.deleted',
+      'admin.announcement.created',
+      'admin.announcement.updated',
+      'admin.announcement.enabled',
+      'admin.announcement.disabled',
+      'admin.announcement.deleted',
+    ],
   },
   {
     label: 'การใช้งานของผู้ใช้ (โหมดส่วนตัว)',
@@ -338,11 +582,14 @@ const EVENT_FILTER_GROUPS = [
     keys: [
       'bot.created',
       'bot.updated',
+      'admin.bot.created',
       'admin.bot.updated',
       'bot.deleted',
       'admin.guide.updated',
       'admin.restore',
       'admin.restore.failed',
+      'chat.retention.pruned',
+      'system.log.retention.pruned',
     ],
   },
 ];
@@ -442,7 +689,7 @@ function ActivityLogs({ userRole }) {
   }
 
   return (
-    <div className="w-full h-full p-6 min-h-screen">
+    <div className="w-full">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
@@ -581,8 +828,8 @@ function ActivityLogs({ userRole }) {
               <tr className="bg-[#F5C200] border-b border-[#E6B800] text-left text-gray-900 shadow-sm sticky top-0 z-10">
                 <th className="px-4 py-3 font-bold whitespace-nowrap">เวลา</th>
                 <th className="px-4 py-3 font-bold whitespace-nowrap">ประเภท</th>
-                <th className="px-4 py-3 font-bold whitespace-nowrap">ผู้ดำเนินการ / บัญชีที่เกี่ยวข้อง</th>
-                <th className="px-4 py-3 font-bold min-w-[360px]">รายละเอียด</th>
+                <th className="px-4 py-3 font-bold whitespace-nowrap">ผู้ดำเนินการ</th>
+                <th className="px-4 py-3 font-bold">รายละเอียด</th>
               </tr>
             </thead>
             <tbody>
@@ -601,11 +848,9 @@ function ActivityLogs({ userRole }) {
               ) : (
                 rows.map((row) => {
                   const u = row.user;
-                  const who = u
-                    ? `${u.name || '—'} · ${u.email || ''}`
-                    : row.meta?.email
-                      ? String(row.meta.email)
-                      : '—';
+                  const whoName = u?.name || (row.meta?.email ? String(row.meta.email) : '—');
+                  const whoEmail = u?.email || '';
+                  const whoTitle = whoEmail ? `${whoName} · ${whoEmail}` : whoName;
                   const label = typeLabelTh(row.message);
                   const errorType = isErrorEvent(row.message);
                   const detail = formatAdminSummary(row.message, row.meta);
@@ -614,7 +859,7 @@ function ActivityLogs({ userRole }) {
                   const isLong = typeof detail === 'string' && detail.length > 180;
                   return (
                     <tr key={row.id} className="border-b border-gray-100 hover:bg-[#FFFBF0]/80">
-                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap align-top">
+                      <td className="px-4 py-3 text-gray-600 align-top whitespace-nowrap">
                         {row.createdAt
                           ? new Date(row.createdAt).toLocaleString('th-TH', {
                               year: 'numeric',
@@ -625,21 +870,23 @@ function ActivityLogs({ userRole }) {
                             })
                           : '—'}
                       </td>
-                      <td className="px-4 py-3 align-top whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold ${
-                            errorType
-                              ? 'border-red-200 bg-red-50 text-red-700'
-                              : 'border-gray-200 bg-gray-50 text-gray-800'
-                          }`}
-                        >
-                          {label}
-                        </span>
+                      <td
+                        className={`px-4 py-3 align-top whitespace-nowrap ${
+                          errorType ? 'text-red-700 font-medium' : 'text-gray-700'
+                        }`}
+                        title={label}
+                      >
+                        {label}
                       </td>
-                      <td className="px-4 py-3 text-gray-700 align-top max-w-[220px] break-words">{who}</td>
+                      <td className="px-4 py-3 text-gray-700 align-top whitespace-nowrap" title={whoTitle}>
+                        <div className="leading-tight">
+                          <div>{whoName}</div>
+                          {whoEmail ? <div className="text-xs text-gray-500">{whoEmail}</div> : null}
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-gray-800 align-top text-sm leading-relaxed">
                         <div className="space-y-2">
-                          <div className={isExpanded ? 'whitespace-pre-wrap' : 'whitespace-nowrap overflow-hidden text-ellipsis'}>
+                          <div className={isExpanded ? 'whitespace-pre-wrap break-words' : 'break-words line-clamp-2'}>
                             {detail}
                           </div>
                           {(isLong || metaEntries.length > 0) ? (

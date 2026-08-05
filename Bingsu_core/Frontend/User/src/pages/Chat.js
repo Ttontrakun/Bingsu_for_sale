@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 import Sidebar from '../components/Sidebar';
+import AnnouncementBanner from '../components/AnnouncementBanner';
+import BotMarkdown from '../components/chat/BotMarkdown';
+import TypingIndicator from '../components/chat/TypingIndicator';
+import ReferenceChips from '../components/chat/ReferenceChips';
 import { 
   HiArrowLeft, 
   HiOutlinePaperAirplane, 
@@ -22,74 +23,6 @@ import bingsuLogo from '../assets/images/หน่องบิงไม่มี
 import { showToast } from '../components/ToastNotification';
 import { chatMessageAPI, chatAPI, botAPI, userAPI, privateContextAPI, getErrorMessage } from '../services/api';
 
-// ตัวเรนเดอร์ Markdown ของบอท — แยกออกมาและหุ้ม memo เพื่อไม่ให้ re-render
-// ตาม state อื่น ๆ ของหน้าแชท (โหลด quota ทุก 12 วิ, hover, scroll ฯลฯ)
-// เพราะการ re-render ReactMarkdown ระหว่างลากเมาส์จะทำให้ selection หลุด
-// ต้องกดค้างตลอด — memo ช่วยให้ DOM คงเดิม เลือก/คัดลอกได้เหมือนข้อความผู้ใช้
-const BOT_MARKDOWN_COMPONENTS = {
-  h1: ({ node, children, ...props }) => <h1 className='text-lg font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h1>,
-  h2: ({ node, children, ...props }) => <h2 className='text-base font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h2>,
-  h3: ({ node, children, ...props }) => <h3 className='text-[15px] font-semibold mt-2.5 mb-1.5 text-gray-900' {...props}>{children}</h3>,
-  table: ({ node, ...props }) => (
-    <table
-      className='w-full max-w-full table-fixed border border-gray-200 rounded-lg overflow-hidden my-2 text-sm'
-      style={{ tableLayout: 'fixed' }}
-      {...props}
-    />
-  ),
-  thead: ({ node, ...props }) => <thead className='bg-gray-100' {...props} />,
-  th: ({ node, ...props }) => (
-    <th
-      className='border border-gray-200 px-3 py-2 text-left font-semibold text-gray-700 align-top break-words whitespace-normal sm:whitespace-nowrap'
-      style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
-      {...props}
-    />
-  ),
-  td: ({ node, ...props }) => (
-    <td
-      className='border border-gray-200 px-3 py-2 text-gray-800 align-top break-words whitespace-pre-wrap'
-      style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
-      {...props}
-    />
-  ),
-  tr: ({ node, ...props }) => <tr className='border-b border-gray-200' {...props} />,
-  p: ({ node, ...props }) => <p className='whitespace-pre-wrap my-2 text-[15px] leading-7' {...props} />,
-  strong: ({ node, ...props }) => <strong className='font-semibold' {...props} />,
-  ul: ({ node, ...props }) => <ul className='list-disc list-inside my-2 space-y-1' {...props} />,
-  ol: ({ node, ...props }) => <ol className='list-decimal list-inside my-2 space-y-1 pl-4' {...props} />,
-  li: ({ node, children, ...props }) => {
-    // ถ้า list item มี blockquote อยู่ข้างใน (เกิดจาก AI เขียน "- > ...") → ซ่อนจุด bullet ที่ว่าง แต่เก็บกล่องเหลืองไว้
-    const hasBlockquote = Array.isArray(node?.children) && node.children.some((c) => c && c.tagName === 'blockquote');
-    return <li className={`${hasBlockquote ? 'list-none ml-0 pl-0' : 'ml-1 pl-1'} leading-7`} {...props}>{children}</li>;
-  },
-  blockquote: ({ node, ...props }) => (
-    <blockquote className='border-l-4 border-yellow-300 bg-yellow-50/60 rounded-r-md px-3 py-2 my-2 text-gray-700' {...props} />
-  ),
-  code: ({ inline, children, ...props }) =>
-    inline ? (
-      <code className='px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 text-[13px]' {...props}>
-        {children}
-      </code>
-    ) : (
-      <code className='block rounded-lg bg-gray-900 text-gray-100 p-3 text-[13px] leading-6 overflow-x-auto' {...props}>
-        {children}
-      </code>
-    ),
-};
-
-const BotMarkdown = memo(function BotMarkdown({ text }) {
-  return (
-    <div className='gemini-markdown max-w-full min-w-0 overflow-x-auto select-text [&_*]:select-text [&_ol_li>p]:inline [&_ol_li>p]:my-0 [&_ul_li>p]:inline [&_ul_li>p]:my-0 [&_table]:max-w-full [&_th:first-child]:w-32 [&_td:first-child]:w-32'>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
-        components={BOT_MARKDOWN_COMPONENTS}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-});
 
 const formatToken = (n) => {
   const x = Number(n || 0);
@@ -214,18 +147,6 @@ const isAbortError = (error) => {
   return name === 'AbortError' || message.includes('aborted') || message.includes('abort');
 };
 
-const getReferenceFileMeta = (displayName) => {
-  const name = String(displayName || 'เอกสาร');
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.pdf')) return { icon: '📄', type: 'PDF', previewClass: 'from-rose-600 to-red-700' };
-  if (lower.endsWith('.xlsx') || lower.endsWith('.xls') || lower.endsWith('.csv'))
-    return { icon: '📊', type: 'EXCEL/CSV', previewClass: 'from-emerald-600 to-teal-700' };
-  if (lower.endsWith('.doc') || lower.endsWith('.docx')) return { icon: '📝', type: 'WORD', previewClass: 'from-blue-600 to-indigo-700' };
-  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp'))
-    return { icon: '🖼️', type: 'IMAGE', previewClass: 'from-violet-500 to-purple-700' };
-  return { icon: '📎', type: 'DOC', previewClass: 'from-slate-500 to-slate-700' };
-};
-
 const isGeneratedFollowUpPrompt = (text) => {
   const t = String(text || '').trim();
   if (!t) return false;
@@ -249,41 +170,12 @@ const parseRememberedItems = (content) =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-// ตัวบ่งชี้ "กำลังพิมพ์" ของบอท — แสดงเฉพาะตอนรอคำตอบแต่ยังไม่มีบับเบิลบอท (ไม่ทับตอนสตรีม)
-const TypingIndicator = ({ isTyping, messages, typingStage }) => {
-  if (!isTyping) return null;
-  const lastMsg = messages[messages.length - 1];
-  if (lastMsg?.sender === 'bot') return null;
-  return (
-    <div className='flex gap-3 justify-start'>
-      <div className='flex-shrink-0 w-8 h-8 mt-1'>
-        <div className='w-8 h-8 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-sm'>
-          <HiChatBubbleLeftRight className='text-white text-sm' />
-        </div>
-      </div>
-      <div className='flex-1'>
-        <div className='inline-flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-white border border-gray-200 shadow-sm'>
-          <div className='flex gap-1.5'>
-            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '0ms' }}></div>
-            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '150ms' }}></div>
-            <div className='w-2 h-2 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '300ms' }}></div>
-          </div>
-          <span className='text-xs text-gray-500'>
-            {typingStage === 0
-              ? 'กำลังค้นหาข้อมูลที่เกี่ยวข้อง…'
-              : typingStage === 1
-                ? 'กำลังเรียบเรียงคำตอบ…'
-                : 'ใกล้เสร็จแล้ว กำลังตรวจสอบความถูกต้อง…'}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 // สวิตช์: คำตอบบอท "บับเบิลขาวแบบเต็มความกว้าง" (มีบับเบิล แต่กว้างเต็ม ไม่ใช่ 80%)
 // อยากกลับไปบับเบิลแบบเดิม (แคบ 80%) → เปลี่ยนบรรทัดนี้เป็น false บรรทัดเดียวจบ
 const BOT_FULL_WIDTH = true;
+// ถ้าคำตอบบอทสั้นมาก ให้ย่อบับเบิลตามข้อความ (แต่ความกว้างสูงสุดยังเท่าเดิม)
+const SHORT_BOT_BUBBLE_CHAR_LIMIT = 120;
 
 function Chat() {
   const { chatId } = useParams();
@@ -316,7 +208,7 @@ function Chat() {
   const [editingUserMsgId, setEditingUserMsgId] = useState(null);
   const [editingUserText, setEditingUserText] = useState('');
   // โหมดส่วนตัว: จัดการเนื้อหา/คำสั่งที่หน้า /private — ในแชทเหลือสวิตช์เปิด/ปิด
-  const [privateMode, setPrivateMode] = useState(false);
+  const [privateMode, setPrivateMode] = useState(() => Boolean(location.state?.privateMode));
   // โหมดคำตอบ: 'fast' (Qwen เร็ว) หรือ 'detailed' (120B ละเอียด) — จำค่าไว้ข้ามการใช้งาน
   const [answerMode, setAnswerMode] = useState(() => {
     if (!ENABLE_MODE_SELECTOR) return 'detailed';
@@ -330,15 +222,20 @@ function Chat() {
     setModeMenuOpen(false);
   };
   const [usePrivateContent, setUsePrivateContent] = useState(true);
-  const [privateHasData, setPrivateHasData] = useState(false);
-  const [privateInstructionsText, setPrivateInstructionsText] = useState('');
-  const [privateRememberItems, setPrivateRememberItems] = useState([]);
-  const [privateMemoryPanelOpen, setPrivateMemoryPanelOpen] = useState(false);
+  const [, setPrivateHasData] = useState(false);
   const [composerPrivateCommand, setComposerPrivateCommand] = useState(null); // 'remember' | 'instruction' | null
   const privateModeRef = useRef(false);
   const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [sourceModalData, setSourceModalData] = useState(null);
+  // คำถามต่อเนื่องจาก AI (สไตล์ Cursor) — แสดงใต้คำตอบบอทล่าสุด ถ้าว่างจะ fallback เป็นปุ่ม rule-based เดิม
+  const [aiFollowUps, setAiFollowUps] = useState([]);
+  const followUpRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    setAiFollowUps([]);
+    followUpRequestIdRef.current += 1;
+  }, [chatId]);
   const [isSelectingText, setIsSelectingText] = useState(false);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
@@ -432,12 +329,9 @@ function Chat() {
   const refreshPrivateMemory = useCallback(async () => {
     try {
       const data = await privateContextAPI.get();
-      const instructions = String(data?.instructions || '').trim();
-      const content = String(data?.content || '');
-      const remembered = parseRememberedItems(content);
-      setPrivateInstructionsText(instructions);
-      setPrivateRememberItems(remembered);
-      setPrivateHasData(Boolean(instructions || remembered.length));
+      const hasInstructions = String(data?.instructions || '').trim().length > 0;
+      const hasRemembered = parseRememberedItems(String(data?.content || '')).length > 0;
+      setPrivateHasData(Boolean(hasInstructions || hasRemembered));
     } catch (_) {
       // ignore
     }
@@ -801,6 +695,63 @@ function Chat() {
           console.error('Invalid chat ID');
           return;
         }
+
+        // ข้อความแรกที่เป็น /จำ หรือ /สั่ง ต้องบันทึกเข้าคลังข้อมูลทันที (ไม่ส่งไปถามบอท)
+        const firstPrivateCmd = parsePrivateCommand(firstMessage);
+        if (firstPrivateCmd && privateModeRef.current) {
+          if (!firstPrivateCmd.payload) {
+            setMessages(prev => [
+              ...prev,
+              { id: `temp-user-${Date.now()}`, text: firstMessage, sender: 'user', timestamp: new Date() },
+              {
+                id: `temp-bot-cmd-empty-${Date.now()}`,
+                text: firstPrivateCmd.kind === 'remember'
+                  ? 'รูปแบบที่ถูกต้อง: /จำ <ข้อมูลที่ต้องการให้ AI จำ>'
+                  : 'รูปแบบที่ถูกต้อง: /สั่ง <คำสั่งการตอบของ AI>',
+                sender: 'bot',
+                timestamp: new Date(),
+              },
+            ]);
+            return;
+          }
+          setMessages(prev => [
+            ...prev,
+            { id: `temp-user-${Date.now()}`, text: firstMessage, sender: 'user', timestamp: new Date() },
+            {
+              id: `temp-bot-cmd-${Date.now()}`,
+              text: firstPrivateCmd.kind === 'remember'
+                ? 'บันทึกข้อมูลส่วนตัวแล้ว ใช้ต่อในแชทใหม่ได้ทันที'
+                : 'บันทึกคำสั่ง AI แล้ว ระบบจะใช้รูปแบบนี้ในการตอบถัดไป',
+              sender: 'bot',
+              timestamp: new Date(),
+            },
+          ]);
+          try {
+            const current = await privateContextAPI.get();
+            const maxChars = Number.isFinite(current?.maxChars) ? Number(current.maxChars) : 12000;
+            const maxInstructionsChars = Number.isFinite(current?.maxInstructionsChars) ? Number(current.maxInstructionsChars) : 2000;
+            const nextContent = firstPrivateCmd.kind === 'remember'
+              ? [firstPrivateCmd.payload, String(current?.content || '').trim()].filter(Boolean).join('\n')
+              : String(current?.content || '');
+            // /สั่ง: เก็บเฉพาะคำสั่งล่าสุดเท่านั้น (แทนที่ของเดิม)
+            const nextInstructions = firstPrivateCmd.kind === 'instruction'
+              ? firstPrivateCmd.payload
+              : String(current?.instructions || '');
+            await privateContextAPI.save({
+              content: nextContent.slice(0, maxChars),
+              instructions: nextInstructions.slice(0, maxInstructionsChars),
+              enabled: true,
+            });
+            await refreshPrivateMemory();
+            setSuccessMessage(firstPrivateCmd.kind === 'remember' ? 'จำข้อมูลให้แล้ว' : 'อัปเดตคำสั่งล่าสุดแล้ว (แทนของเดิม)');
+            setTimeout(() => setSuccessMessage(null), 2200);
+          } catch (err) {
+            setErrorMessage(getErrorMessage(err) || 'บันทึกคำสั่งส่วนตัวไม่สำเร็จ');
+            const t = setTimeout(() => setErrorMessage(null), 4000);
+            timeoutRefs.current.privateCmdFirstMessage = t;
+          }
+          return;
+        }
         
         if (selectedBot && selectedBot.enabled === false) {
           showToast('Bot นี้ถูก inactive แล้ว กรุณาไปเปิด Bot เป็น active ในหน้า Bots ก่อนส่งข้อความ', 'warning');
@@ -844,6 +795,9 @@ function Chat() {
               streamBotIdRef.current = null;
               streamAbortControllerRef.current = null;
               loadMessages();
+              // ให้ sidebar โหลดรายการแชทใหม่ — backend เพิ่งตั้งชื่อแชทจากข้อความแรก
+              window.dispatchEvent(new CustomEvent('chatsUpdated'));
+              fetchFollowUpSuggestions(firstMessage, (data?.reply ?? streamTextRef.current ?? '').trim());
             },
           });
         } catch (botError) {
@@ -864,6 +818,7 @@ function Chat() {
               privateMode: privateModeRef.current,
             });
             await loadMessages();
+            window.dispatchEvent(new CustomEvent('chatsUpdated'));
           } catch (fallbackErr) {
             if (isConversationNotFoundError(fallbackErr) && !missingConversationHandledRef.current) {
               missingConversationHandledRef.current = true;
@@ -1087,34 +1042,10 @@ function Chat() {
     setTimeout(() => setSuccessMessage(null), 1800);
   };
 
-  const handleDeletePrivateInstruction = async () => {
-    try {
-      await privateContextAPI.save({ instructions: '', enabled: true });
-      await refreshPrivateMemory();
-      setSuccessMessage('ลบคำสั่ง AI แล้ว');
-      setTimeout(() => setSuccessMessage(null), 1800);
-    } catch (err) {
-      setErrorMessage(getErrorMessage(err) || 'ลบคำสั่ง AI ไม่สำเร็จ');
-      setTimeout(() => setErrorMessage(null), 2500);
-    }
-  };
-
-  const handleDeleteRememberItem = async (index) => {
-    try {
-      const nextItems = privateRememberItems.filter((_, i) => i !== index);
-      await privateContextAPI.save({ content: nextItems.join('\n'), enabled: true });
-      await refreshPrivateMemory();
-      setSuccessMessage('ลบข้อมูลหน่วยความจำแล้ว');
-      setTimeout(() => setSuccessMessage(null), 1800);
-    } catch (err) {
-      setErrorMessage(getErrorMessage(err) || 'ลบข้อมูลไม่สำเร็จ');
-      setTimeout(() => setErrorMessage(null), 2500);
-    }
-  };
-
-  const handleSendMessage = async (e, overrideMessage = null) => {
+  const handleSendMessage = async (e, overrideMessage = null, options = {}) => {
     e.preventDefault();
     const shouldClearComposer = overrideMessage == null;
+    const replaceFromMessageId = options?.replaceFromMessageId || null;
     const messageText = (overrideMessage != null && String(overrideMessage).trim() !== '')
       ? String(overrideMessage).trim()
       : chatInput.trim();
@@ -1127,6 +1058,9 @@ function Chat() {
 
     if (!finalText.trim()) return;
     if (isTyping) return;
+    // ล้างคำถามต่อเนื่องชุดเดิม + ยกเลิกผลของคำขอที่ยังค้างอยู่
+    setAiFollowUps([]);
+    followUpRequestIdRef.current += 1;
     const { outboundText } = buildStyledPrompt(finalText);
     const shouldRestoreInputOnError = overrideMessage == null;
     const restoreInputOnError = () => {
@@ -1200,6 +1134,7 @@ function Chat() {
         const nextContent = privateCmd.kind === 'remember'
           ? [privateCmd.payload, String(current?.content || '').trim()].filter(Boolean).join('\n')
           : String(current?.content || '');
+        // /สั่ง: เก็บเฉพาะคำสั่งล่าสุดเท่านั้น (แทนที่ของเดิม)
         const nextInstructions = privateCmd.kind === 'instruction'
           ? privateCmd.payload
           : String(current?.instructions || '');
@@ -1209,7 +1144,7 @@ function Chat() {
           enabled: true,
         });
         await refreshPrivateMemory();
-        setSuccessMessage(privateCmd.kind === 'remember' ? 'จำข้อมูลให้แล้ว' : 'ตั้งค่าคำสั่ง AI แล้ว');
+        setSuccessMessage(privateCmd.kind === 'remember' ? 'จำข้อมูลให้แล้ว' : 'อัปเดตคำสั่งล่าสุดแล้ว (แทนของเดิม)');
         setTimeout(() => setSuccessMessage(null), 2200);
       } catch (err) {
         setMessages(prev => prev.filter(m => m.id !== botTempId));
@@ -1285,7 +1220,15 @@ function Chat() {
       sender: 'bot',
       timestamp: new Date(),
     };
-    setMessages(prev => [...prev, userMsg, botMsgPlaceholder]);
+    setMessages(prev => {
+      const base = replaceFromMessageId
+        ? (() => {
+            const idx = prev.findIndex((m) => m.id === replaceFromMessageId);
+            return idx >= 0 ? prev.slice(0, idx) : prev;
+          })()
+        : prev;
+      return [...base, userMsg, botMsgPlaceholder];
+    });
     setShowScrollDown(false);
     requestAnimationFrame(() => scrollToBottom('smooth'));
     setIsTyping(true);
@@ -1325,6 +1268,9 @@ function Chat() {
             }
           }
           loadMessages();
+          // ให้ sidebar อัปเดตชื่อ/ลำดับแชท (ชื่อถูกตั้งจากข้อความแรกฝั่ง backend)
+          window.dispatchEvent(new CustomEvent('chatsUpdated'));
+          fetchFollowUpSuggestions(outboundText, (data?.reply ?? streamTextRef.current ?? '').trim());
         },
       });
     } catch (botError) {
@@ -1354,6 +1300,7 @@ function Chat() {
           }
         }
         await loadMessages();
+        window.dispatchEvent(new CustomEvent('chatsUpdated'));
       } catch (fallbackErr) {
         if (isConversationNotFoundError(fallbackErr) && !missingConversationHandledRef.current) {
           missingConversationHandledRef.current = true;
@@ -1539,13 +1486,27 @@ function Chat() {
     setEditingUserMsgId(null);
     setEditingUserText('');
   };
-  // บันทึกการแก้ → ส่งคำถามที่แก้ไปใหม่ (เหมือนถามใหม่ด้วยข้อความที่แก้แล้ว)
-  const handleResendEditedUserMessage = () => {
+  // บันทึกการแก้ → แทนข้อความเก่า (ตัดคำตอบและข้อความถัดไป) แล้วส่งใหม่เหมือน Gemini
+  const handleResendEditedUserMessage = async () => {
     const text = (editingUserText || '').trim();
-    if (!text || isTyping) return;
+    const editId = editingUserMsgId;
+    if (!text || !editId || isTyping) return;
+
+    // ตัดใน DB ก่อน เพื่อไม่ให้ history ของโมเดลเห็น branch เก่า
+    if (chatId && !String(editId).startsWith('temp-')) {
+      try {
+        await chatMessageAPI.truncateFromMessage(chatId, editId);
+      } catch (err) {
+        setErrorMessage(getErrorMessage(err) || 'ไม่สามารถแทนข้อความเก่าได้');
+        const t = setTimeout(() => setErrorMessage(null), 4000);
+        timeoutRefs.current.truncateEdit = t;
+        return;
+      }
+    }
+
     setEditingUserMsgId(null);
     setEditingUserText('');
-    handleSendMessage({ preventDefault: () => {} }, text);
+    handleSendMessage({ preventDefault: () => {} }, text, { replaceFromMessageId: editId });
   };
 
   // กดโหวตคำตอบ 👍/👎 — กดซ้ำที่ปุ่มเดิม = ยกเลิก พร้อมแจ้งเตือนมุมบนขวา
@@ -1677,6 +1638,32 @@ function Chat() {
     setIsSourceModalOpen(true);
   };
 
+  /** ขอคำถามต่อเนื่องจาก AI หลังบอทตอบเสร็จ — ถ้าคำขอเก่ากว่าล่าสุดจะทิ้งผลไป (กัน race) */
+  const fetchFollowUpSuggestions = async (question, answer) => {
+    const replyText = String(answer || '').trim();
+    const questionText = String(question || '').trim();
+    if (!replyText || questionText.startsWith('/')) return;
+    const requestId = ++followUpRequestIdRef.current;
+    try {
+      const items = await chatMessageAPI.getFollowUpSuggestions(chatId, questionText, replyText);
+      if (followUpRequestIdRef.current === requestId && Array.isArray(items) && items.length > 0) {
+        setAiFollowUps(items);
+      }
+    } catch {
+      // เงียบไว้ — ปุ่ม rule-based เดิมยังแสดงเป็น fallback
+    }
+  };
+
+  const handleEditFollowUp = (question) => {
+    setChatInput(String(question || ''));
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+      }
+      adjustTextareaHeight();
+    });
+  };
+
   const getSuggestedFollowUps = (botText, userQuestion = '') => {
     const text = String(botText || '').trim();
     const question = String(userQuestion || '').trim();
@@ -1743,10 +1730,15 @@ function Chat() {
   return (
     <div className='flex h-screen bg-[#f7f7f8] relative'>
       {/* Sidebar Component */}
-      <Sidebar onCollapseChange={setIsSidebarCollapsed} privateWorkspace={privateMode} />
+      <Sidebar
+        onCollapseChange={setIsSidebarCollapsed}
+        privateWorkspace={privateMode}
+        showMemoryControl={privateMode}
+      />
 
       {/* Main Content */}
       <main className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16' : ''}`}>
+        <AnnouncementBanner />
         {/* Error Message Toast */}
         {errorMessage && (
           <div className='fixed top-4 right-4 z-50 animate-slide-in-right'>
@@ -1857,10 +1849,21 @@ function Chat() {
                   const botFullWidth = BOT_FULL_WIDTH && !isUser;
                   // บอทกำลังคิด (ยังไม่มีข้อความ) — โชว์แค่จุด ไม่ต้องมีกล่องบับเบิลเปล่า
                   const isBotThinking = message.sender === 'bot' && isTyping && index === messages.length - 1 && !(streamTextRef.current || message.text);
+                  const plainBotText = !isUser
+                    ? String(message.text || '')
+                        .replace(/<br\s*\/?>/gi, '\n')
+                        .trim()
+                    : '';
+                  const isShortBotReply =
+                    botFullWidth &&
+                    !isBotThinking &&
+                    !!plainBotText &&
+                    plainBotText.length <= SHORT_BOT_BUBBLE_CHAR_LIMIT &&
+                    !plainBotText.includes('\n');
                   const bubbleClass = isBotThinking
                     ? 'block w-full bg-transparent px-2 py-1 relative group/timestamp'
                     : botFullWidth
-                      ? 'block w-full bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp'
+                      ? `${isShortBotReply ? 'inline-block w-auto max-w-full' : 'block w-full'} bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp`
                       : `inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${isUser ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md' : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'}`;
 
                   return (
@@ -1889,7 +1892,7 @@ function Chat() {
                         
                         {/* Message Content — min-w-0 ให้ flex อนุญาตให้หดตาม max-w-[80%] ได้ */}
                         <div className={`flex-1 min-w-0 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
-                          <div className={`${botFullWidth ? 'w-full pr-11' : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
+                          <div className={`${botFullWidth ? (isShortBotReply ? 'max-w-full pr-11' : 'w-full pr-11') : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
                             <div
                               className={bubbleClass}
                               style={{
@@ -1978,7 +1981,12 @@ function Chat() {
                                       if (message.sender === 'bot' && displayText) {
                                         const textWithNewlines = String(displayText).replace(/<br\s*\/?>/gi, '\n');
                                         const textNormalized = normalizeMarkdownTable(textWithNewlines);
-                                        return <BotMarkdown text={textNormalized} />;
+                                        return (
+                                          <BotMarkdown
+                                            text={textNormalized}
+                                            citationCount={Array.isArray(message.references) ? message.references.length : 0}
+                                          />
+                                        );
                                       }
                                       return (
                                         <span
@@ -2016,46 +2024,12 @@ function Chat() {
                               )}
                             </div>
 
-                            {/* แหล่งที่มาจากเอกสาร — แยกจากฟองข้อความ เหมือนไฟล์แนบ / ภาพย่อ */}
-                            {ENABLE_SOURCE_REFERENCES && !isUser && message.sender === 'bot' && message.references?.length > 0 && (
-                              <div className='mt-1.5 space-y-1.5 w-full max-w-xs'>
-                                {message.references.map((ref, i) => {
-                                  const meta = getReferenceFileMeta(ref.displayName);
-                                  const isPrivateRef = String(ref.docId) === '__private__';
-                                  const pageLabel = isPrivateRef
-                                    ? 'เนื้อหาส่วนตัว'
-                                    : Array.isArray(ref.positions) && Number.isFinite(ref.positions[0]?.page)
-                                      ? `หน้า ${ref.positions[0].page}`
-                                      : Array.isArray(ref.positions) && ref.positions[0]?.lineHint
-                                        ? ref.positions[0].lineHint
-                                        : 'ไม่ระบุหน้า';
-                                  return (
-                                    <button
-                                      key={ref.docId || i}
-                                      type='button'
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        openSourceReference(message, ref);
-                                      }}
-                                      className='flex w-full max-w-xs min-w-0 rounded-lg border border-gray-200 bg-white shadow-sm overflow-hidden text-left hover:border-gray-300 hover:bg-gray-50/80 transition-colors'
-                                      title={`เปิดแหล่งที่มา: ${ref.displayName}`}
-                                    >
-                                      <div
-                                        className={`flex-shrink-0 w-11 sm:w-12 bg-gradient-to-br ${meta.previewClass} flex flex-col items-center justify-center text-white px-1.5 py-1.5 border-r border-black/10`}
-                                        aria-hidden
-                                      >
-                                        <span className='text-[9px] font-bold tracking-wide opacity-95'>{meta.type}</span>
-                                        <span className='text-base leading-none mt-0.5 drop-shadow-sm'>{meta.icon}</span>
-                                      </div>
-                                      <div className='min-w-0 flex-1 px-2.5 py-1.5'>
-                                        <p className='text-[10px] text-gray-500 uppercase tracking-wide'>แหล่งที่มา</p>
-                                        <p className='text-xs font-medium text-gray-900 truncate mt-0.5'>{ref.displayName}</p>
-                                        <p className='text-[11px] text-gray-600 mt-0.5 truncate'>ตำแหน่ง: {pageLabel}</p>
-                                      </div>
-                                    </button>
-                                  );
-                                })}
-                              </div>
+                            {/* แหล่งอ้างอิง — ชิปเลขกำกับใต้คำตอบ เลขตรงกับ [n] ในเนื้อความ */}
+                            {ENABLE_SOURCE_REFERENCES && !isUser && message.sender === 'bot' && (
+                              <ReferenceChips
+                                references={message.references}
+                                onOpenReference={(ref) => openSourceReference(message, ref)}
+                              />
                             )}
                             
                             {/* Copy, แก้ไข, โหวต (บอท) + แนะนำคำถามถัดไป */}
@@ -2154,19 +2128,43 @@ function Chat() {
                                 const isLastBot = index === lastBotIdx && !(isTyping && index === messages.length - 1);
                                 if (!isLastBot) return null;
                                 const previousQuestion = getPreviousUserQuestion(index);
-                                const suggestions = getSuggestedFollowUps(message.text, previousQuestion);
+                                const usingAiFollowUps = aiFollowUps.length > 0;
+                                const suggestions = usingAiFollowUps
+                                  ? aiFollowUps
+                                  : getSuggestedFollowUps(message.text, previousQuestion);
+                                const suggestDisabled = isTyping || (selectedBot && selectedBot.enabled === false);
                                 return (
-                                  <div className='flex flex-wrap gap-2 mt-2'>
+                                  <div className='flex flex-col items-start gap-1.5 mt-2'>
                                     {suggestions.map((q) => (
-                                      <button
-                                        key={q}
-                                        type='button'
-                                        onClick={() => handleSuggestedFollowUpClick(q, message, index)}
-                                        disabled={isTyping || (selectedBot && selectedBot.enabled === false)}
-                                        className='px-3 py-1.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200 disabled:opacity-50'
-                                      >
-                                        {q}
-                                      </button>
+                                      <div key={q} className='group flex items-center gap-1 max-w-full'>
+                                        <button
+                                          type='button'
+                                          onClick={() => {
+                                            if (usingAiFollowUps) {
+                                              handleSendMessage({ preventDefault: () => {} }, q);
+                                            } else {
+                                              handleSuggestedFollowUpClick(q, message, index);
+                                            }
+                                          }}
+                                          disabled={suggestDisabled}
+                                          title='ส่งคำถามนี้'
+                                          className='inline-flex items-center gap-2 max-w-full rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 shadow-sm hover:border-amber-300 hover:bg-amber-50/70 transition-colors disabled:opacity-50 text-left'
+                                        >
+                                          <span className='truncate'>{q}</span>
+                                          <HiOutlinePaperAirplane className='rotate-90 text-sm text-gray-400 flex-shrink-0' />
+                                        </button>
+                                        {usingAiFollowUps && (
+                                          <button
+                                            type='button'
+                                            onClick={() => handleEditFollowUp(q)}
+                                            disabled={suggestDisabled}
+                                            title='แก้ไขก่อนส่ง'
+                                            className='p-1.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0 disabled:opacity-0'
+                                          >
+                                            <HiPencil className='text-sm' />
+                                          </button>
+                                        )}
+                                      </div>
                                     ))}
                                   </div>
                                 );
@@ -2251,66 +2249,7 @@ function Chat() {
                   </span>
                   <span className='text-xs font-semibold text-gray-800'>ใช้หน่วยความจำส่วนตัว {usePrivateContent ? '(เปิด)' : '(ปิด)'}</span>
                 </button>
-                <button
-                  type='button'
-                  onClick={() => setPrivateMemoryPanelOpen((v) => !v)}
-                  className='px-2.5 py-1.5 text-xs font-medium rounded-full border border-gray-300 bg-white text-gray-700 hover:border-yellow-400 transition-colors'
-                >
-                  หน่วยความจำ
-                </button>
-                <span className='text-xs text-gray-500'>
-                  {privateHasData
-                    ? 'ใช้ /จำ เพื่อเพิ่มข้อมูล, ใช้ /สั่ง เพื่อตั้งรูปแบบคำตอบ'
-                    : 'ยังไม่มีข้อมูลส่วนตัว — ลองพิมพ์ /จำ <ข้อมูล> หรือ /สั่ง <คำสั่ง>'}
-                </span>
-                <span className='text-xs text-gray-500'>
-                  เปิด = ส่วนตัว + เอกสารระบบ, ปิด = ปิดเฉพาะส่วนตัว
-                </span>
               </div>
-              {privateMemoryPanelOpen && (
-                <div className='mt-2 rounded-xl border border-gray-200 bg-white p-3 space-y-2'>
-                  <p className='text-xs font-semibold text-gray-700'>หน่วยความจำที่บันทึกไว้ (ระดับผู้ใช้)</p>
-                  <div className='space-y-2 max-h-56 overflow-y-auto overflow-x-hidden pr-1'>
-                    {privateInstructionsText ? (
-                      <div className='rounded-lg border border-blue-200 bg-blue-50 p-2'>
-                        <div className='flex items-start justify-between gap-2'>
-                          <div>
-                            <p className='text-[11px] font-semibold text-blue-700'>คำสั่ง AI (/สั่ง)</p>
-                            <p className='text-xs text-gray-700 whitespace-pre-wrap break-words'>{privateInstructionsText}</p>
-                          </div>
-                          <button
-                            type='button'
-                            onClick={handleDeletePrivateInstruction}
-                            className='text-xs text-red-600 hover:text-red-700'
-                          >
-                            ลบ
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
-                    {privateRememberItems.map((item, idx) => (
-                      <div key={`mem-${idx}`} className='rounded-lg border border-yellow-200 bg-yellow-50 p-2'>
-                        <div className='flex items-start justify-between gap-2'>
-                          <div>
-                            <p className='text-[11px] font-semibold text-yellow-700'>ข้อมูลที่จำไว้ #{idx + 1}</p>
-                            <p className='text-xs text-gray-700 whitespace-pre-wrap break-words'>{item}</p>
-                          </div>
-                          <button
-                            type='button'
-                            onClick={() => handleDeleteRememberItem(idx)}
-                            className='text-xs text-red-600 hover:text-red-700'
-                          >
-                            ลบ
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                    {!privateInstructionsText && privateRememberItems.length === 0 && (
-                      <p className='text-xs text-gray-500'>ยังไม่มีข้อมูลที่จำไว้</p>
-                    )}
-                  </div>
-                </div>
-              )}
             </div>
             )}
             <form onSubmit={handleSendMessage} className='relative'>

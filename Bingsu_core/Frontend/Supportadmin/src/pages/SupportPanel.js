@@ -16,6 +16,8 @@ import {
   HiOutlineKey,
   HiOutlineUserRemove,
   HiOutlinePencil,
+  HiSupport,
+  HiRefresh,
 } from 'react-icons/hi';
 import { api, mapAdminUserToDisplay, getStoredUser, normalizeDashboardRole } from '../services/api';
 
@@ -35,8 +37,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
       avatar: (name[0] || 'ก').toUpperCase(),
     };
   };
-  const [activeTab, setActiveTab] = useState('overview');
   const [searchQuery, setSearchQuery] = useState('');
+  const tableScrollRef = useRef(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState(null);
   const [showRoleChangeModal, setShowRoleChangeModal] = useState(false);
@@ -285,7 +287,6 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
       return;
     }
 
-    setActiveTab('overview');
     setSearchQuery('');
     setRoleFilters([]);
 
@@ -517,7 +518,12 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     return filteredUsers.slice(startIndex, endIndex);
   }, [filteredUsers, currentPage, itemsPerPage]);
 
-  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / itemsPerPage));
+
+  // เปลี่ยนหน้าแล้วเลื่อนเฉพาะตาราง ไม่ขยับแถบเลขหน้า
+  useEffect(() => {
+    if (tableScrollRef.current) tableScrollRef.current.scrollTop = 0;
+  }, [currentPage]);
 
   const userByIdMap = useMemo(() => {
     return users.reduce((accumulator, user) => {
@@ -817,37 +823,35 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   return (
-    <div className="w-full px-8 py-8">
-      {/* Header with Tabs */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center space-x-8">
-          <button
-            onClick={() => setActiveTab('overview')}
-            className={`flex items-center space-x-2 pb-2 border-b-2 transition-colors ${
-              activeTab === 'overview'
-                ? 'border-gray-900 text-gray-900'
-                : 'border-transparent text-gray-400'
-            }`}
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
-            </svg>
-            <span className="font-medium">Overview</span>
-          </button>
+    <div className="w-full h-[calc(100vh-7.5rem)] flex flex-col px-0 py-0">
+      {/* Header — สไตล์เดียวกับหน้าอื่น */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
+            <HiSupport className="text-white text-2xl" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-800">Support Panel</h1>
+            <p className="text-sm text-gray-600">จัดการผู้ใช้และอนุมัติบัญชี</p>
+          </div>
         </div>
+        {typeof onRefreshPending === 'function' && (
+          <button
+            type="button"
+            onClick={() => onRefreshPending()}
+            className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 self-start"
+          >
+            <HiRefresh />
+            รีเฟรช
+          </button>
+        )}
       </div>
 
-      {activeTab === 'overview' ? (
-        // Overview Tab Content
-        <>
-          {/* User Count */}
-          <div className="mb-4">
-            <h2 className="text-2xl font-semibold text-gray-900">User <span className="font-normal">{filteredUsers.length}</span></h2>
-          </div>
-
-      {/* Search Bar */}
-      <div className="mb-6">
-        <div className="relative max-w-md">
+      <div className="mb-3 shrink-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <h2 className="text-xl font-semibold text-gray-900">
+          User <span className="font-normal text-gray-600">{filteredUsers.length}</span>
+        </h2>
+        <div className="relative max-w-md w-full sm:w-80">
           <HiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
           <input
             type="text"
@@ -859,13 +863,12 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
         </div>
       </div>
 
-      {/* Users Table */}
-      <div className="bg-white rounded-lg overflow-visible">
-        <div className="overflow-visible">
+      {/* Users Table — เลื่อนเฉพาะส่วนนี้ */}
+      <div ref={tableScrollRef} className="flex-1 min-h-0 overflow-auto bg-white rounded-lg border border-gray-100">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-white border-b border-gray-200">
+          <thead className="bg-white border-b border-gray-200 sticky top-0 z-10">
             <tr>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">
                 <div className="flex items-center space-x-2 relative" ref={filterRef}>
                   <span>บทบาท</span>
                   <button
@@ -910,13 +913,13 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                   )}
                 </div>
               </th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">ชื่อ</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">อีเมล</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">ชื่อ</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">อีเมล</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">
                 <span className="block">ใช้งานล่าสุด</span>
               </th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">สร้างเมื่อ</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">สร้างเมื่อ</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">
                 <div className="flex items-center space-x-2 relative" ref={expiryFilterRef}>
                   <span>วันหมดอายุ</span>
                   <button
@@ -960,8 +963,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                   )}
                 </div>
               </th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">สถานะ</th>
-              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">การจัดการ</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">สถานะ</th>
+              <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">การจัดการ</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-gray-200">
@@ -1158,13 +1161,13 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
             ))}
           </tbody>
         </table>
-        </div>
       </div>
 
-      {/* Pagination */}
-      <div className="flex items-center justify-center space-x-2 mt-6">
+      {/* Pagination — ตรึงล่างสุด ไม่เลื่อนตามตาราง */}
+      <div className="shrink-0 flex items-center justify-center gap-2 pt-4 pb-1 border-t border-gray-100 bg-white mt-3">
         <button
-          onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+          type="button"
+          onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
           disabled={currentPage === 1}
           className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -1173,6 +1176,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
         {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
           <button
             key={page}
+            type="button"
             onClick={() => setCurrentPage(page)}
             className={`px-4 py-2 rounded-lg ${
               currentPage === page
@@ -1184,121 +1188,14 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
           </button>
         ))}
         <button
-          onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+          type="button"
+          onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
           disabled={currentPage === totalPages}
           className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           ถัดไป
         </button>
       </div>
-        </>
-      ) : (
-        // Groups Tab Content
-        <>
-          {/* Group Count and Search */}
-          <div className="mb-4">
-            <h2 className="text-2xl font-semibold text-gray-900">Group <span className="font-normal">{groups.length}</span></h2>
-          </div>
-
-          {/* Search and Create Button */}
-          <div className="flex items-center justify-between mb-6">
-            <div className="relative flex-1 mr-4">
-              <HiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
-                type="text"
-                placeholder="Search Group"
-                value={groupSearchQuery}
-                onChange={(e) => setGroupSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent text-gray-700 placeholder-gray-400"
-              />
-            </div>
-            <button
-              onClick={handleOpenCreateGroupModal}
-              className="flex items-center space-x-2 bg-yellow-400 text-gray-900 px-4 py-2 rounded-lg hover:bg-yellow-500 transition-colors font-medium"
-            >
-              <span>Create group</span>
-              <HiPlus className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Groups Table */}
-          <div className="bg-white rounded-lg overflow-visible">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-white border-b border-gray-200">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">กลุ่ม</th>
-                  <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">คำอธิบาย</th>
-                  <th className="px-4 py-3 text-left text-sm font-normal text-gray-600">จำนวนผู้ใช้</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {groups
-                  .filter(group => group.name.toLowerCase().includes(groupSearchQuery.toLowerCase()))
-                  .map((group) => (
-                    <tr key={group.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-medium">
-                            {group.avatar}
-                          </div>
-                          <span className="text-gray-900">{group.name}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4 text-gray-600">{group.description || '-'}</td>
-                      <td className="px-4 py-4">
-                        <div className="flex items-center space-x-2 text-gray-700">
-                          <HiUserGroup className="w-5 h-5" />
-                          <span>{getGroupMemberCount(group)}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-4">
-                        <div className="relative" ref={openGroupActionMenuId === group.id ? groupActionMenuRef : null}>
-                          <button
-                            onClick={() => setOpenGroupActionMenuId((previousId) => (previousId === group.id ? null : group.id))}
-                            className="text-gray-600 hover:text-gray-900"
-                          >
-                            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
-                            </svg>
-                          </button>
-
-                          {openGroupActionMenuId === group.id && (
-                            <div className="absolute right-0 mt-2 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-[120] overflow-hidden">
-                              <button
-                                onClick={() => handleOpenGroupProfileModal(group.id)}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 inline-flex items-center gap-2"
-                              >
-                                <HiOutlinePencil className="w-4 h-4" />
-                                โปรไฟล์กลุ่ม
-                              </button>
-                              <button
-                                onClick={() => handleOpenEditMembersModal(group.id)}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 border-t border-gray-100 inline-flex items-center gap-2"
-                              >
-                                <HiOutlineUserRemove className="w-4 h-4" />
-                                แก้ไขสมาชิก
-                              </button>
-                              {getSessionRole() === 'admin' && (
-                                <button
-                                  onClick={() => handleDeleteGroup(group.id)}
-                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100 inline-flex items-center gap-2"
-                                >
-                                  <HiTrash className="w-4 h-4" />
-                                  ลบกลุ่ม
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
 
       {/* Confirmation Modal */}
       {showConfirmModal && (

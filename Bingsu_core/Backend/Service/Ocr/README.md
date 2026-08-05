@@ -5,7 +5,7 @@ OCR (Optical Character Recognition) service สำหรับดึงข้อ
 ## Features
 
 - ✅ รองรับ PDF และรูปภาพ (PNG, JPG, etc.)
-- ✅ รองรับ 2 providers: PaddleOCR และ Typhoon OCR
+- ✅ รองรับ 3 providers: PaddleOCR, PaddleOCR-VL และ Typhoon OCR
 - ✅ Multi-page PDF processing
 - ✅ Configurable DPI, language, max pages
 - ✅ Confidence scores (PaddleOCR only)
@@ -30,7 +30,8 @@ OCR_LANG="th"                    # Language code (th, en, etc.)
 OCR_MAX_PAGES="30"               # Maximum pages to process
 OCR_DPI="200"                    # DPI for PDF rendering
 OCR_USE_ANGLE_CLS="true"         # Use angle classification
-OCR_PROVIDER="paddle"            # "paddle" or "typhoon"
+OCR_PROVIDER="paddle_vl"         # "paddle", "paddle_vl" or "typhoon"
+OCR_PADDLE_VL_PIPELINE_VERSION="v1.5"
 
 # For Typhoon OCR (if using)
 TYPHOON_OCR_API_KEY="your-api-key"
@@ -141,7 +142,7 @@ curl -X POST "http://localhost:8001/api/ocr/extract" \
 
 ## OCR Providers
 
-### PaddleOCR (Default)
+### PaddleOCR (Classic)
 
 - ✅ Free and open-source
 - ✅ Works offline
@@ -149,6 +150,14 @@ curl -X POST "http://localhost:8001/api/ocr/extract" \
 - ✅ Provides confidence scores
 - ⚠️ First-time model download is large (~500MB)
 - ⚠️ Requires more memory
+
+### PaddleOCR-VL (Recommended for scanned PDFs)
+
+- ✅ Free and open-source
+- ✅ Strong on scanned document parsing/layout
+- ✅ Works offline
+- ⚠️ Heavier than classic OCR
+- ⚠️ `avgConfidence` is not provided by the VL pipeline
 
 ### Typhoon OCR
 
@@ -168,7 +177,8 @@ curl -X POST "http://localhost:8001/api/ocr/extract" \
 | `OCR_MAX_PAGES` | `30` | Maximum pages to process |
 | `OCR_DPI` | `200` | DPI for PDF rendering |
 | `OCR_USE_ANGLE_CLS` | `"true"` | Use angle classification |
-| `OCR_PROVIDER` | `"paddle"` | OCR provider: "paddle" or "typhoon" |
+| `OCR_PROVIDER` | `"paddle"` | OCR provider: "paddle", "paddle_vl" or "typhoon" |
+| `OCR_PADDLE_VL_PIPELINE_VERSION` | `"v1.5"` | PaddleOCR-VL pipeline version (`v1`, `v1.5`, `v1.6`) |
 | `TYPHOON_OCR_API_KEY` | `""` | API key for Typhoon OCR |
 
 ## Troubleshooting

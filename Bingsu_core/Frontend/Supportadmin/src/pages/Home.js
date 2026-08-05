@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { HiLightBulb, HiChevronDown, HiChevronRight, HiBookOpen, HiCurrencyDollar, HiPresentationChartBar, HiPencil, HiSave, HiX, HiPlus, HiTrash, HiDownload } from 'react-icons/hi';
+import { HiLightBulb, HiChevronDown, HiChevronRight, HiBookOpen, HiCurrencyDollar, HiPresentationChartBar, HiPencil, HiSave, HiX, HiPlus, HiTrash, HiDownload, HiHome } from 'react-icons/hi';
 import { Document, Page, pdfjs } from 'react-pdf';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -391,26 +391,31 @@ function Home() {
   const isAdmin = typeof window !== 'undefined' && window.userRole !== 'support';
 
   return (
-    <div className='w-full h-full p-4 md:p-6'>
-      <div className='mb-6 flex items-end justify-between gap-3'>
-        <div>
-          <h1 className='text-3xl font-bold text-gray-800 mb-2'>Manual</h1>
-          <p className='text-sm text-gray-600'>เอกสารคู่มือการใช้งานระบบ</p>
+    <div className='w-full'>
+      {/* Header — สไตล์เดียวกับหน้าอื่น */}
+      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6'>
+        <div className='flex items-center gap-3'>
+          <div className='bg-[#F5C200] rounded-xl p-3 shadow-lg'>
+            <HiHome className='text-white text-2xl' />
+          </div>
+          <div>
+            <h1 className='text-2xl font-bold text-gray-800'>Manual</h1>
+            <p className='text-sm text-gray-600'>เอกสารคู่มือการใช้งานระบบ</p>
+          </div>
         </div>
         {isAdmin && (
-          <div className='flex items-center gap-2'>
-            <button
-              onClick={() => setIsEditMode(!isEditMode)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md shadow-sm hover:shadow transition-all duration-200 active:scale-95 text-sm font-semibold ${
-                isEditMode
-                  ? 'bg-red-500 hover:bg-red-600 text-white'
-                  : 'bg-blue-600 hover:bg-blue-700 text-white'
-              }`}
-            >
-              <span>{isEditMode ? 'ออกจากโหมดแก้ไข' : 'แก้ไข'}</span>
-              {isEditMode ? <HiX className='text-base' /> : <HiPencil className='text-base' />}
-            </button>
-          </div>
+          <button
+            type='button'
+            onClick={() => setIsEditMode(!isEditMode)}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg shadow-sm transition-all text-sm font-semibold self-start ${
+              isEditMode
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : 'bg-gray-800 hover:bg-gray-700 text-white'
+            }`}
+          >
+            {isEditMode ? <HiX className='text-base' /> : <HiPencil className='text-base' />}
+            <span>{isEditMode ? 'ออกจากโหมดแก้ไข' : 'แก้ไข'}</span>
+          </button>
         )}
       </div>
 

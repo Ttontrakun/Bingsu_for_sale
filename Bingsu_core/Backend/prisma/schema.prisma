@@ -75,6 +75,8 @@ model Conversation {
   botId      String?
   title      String?
   private    Boolean  @default(false)
+  // แชทที่ปักหมุด: ห้ามลบ และไม่ถูกล้างโดย chat retention จนกว่าจะเลิกปักหมุด
+  pinned     Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -386,6 +388,18 @@ model Synonym {
   updatedAt DateTime @updatedAt
 
   @@index([term])
+}
+
+/** ประกาศจาก admin ถึงผู้ใช้ — แสดงเป็น banner ในหน้าแชท (level: "info" | "warning") */
+model Announcement {
+  id        String   @id @default(cuid())
+  message   String
+  level     String   @default("info")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
 }
 
 /** อัตราค่าบริการ NT Corporate Internet / Lite — แก้ไขได้ผ่านหน้า admin เพื่อให้เครื่องคำนวณราคาใช้ค่าล่าสุด

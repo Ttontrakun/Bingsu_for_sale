@@ -21,6 +21,21 @@ const normalizeFileExt = (fileName = "") => {
   return lower.slice(lastDot);
 };
 
+/**
+ * ทำชื่อคอลัมน์ให้ไม่ซ้ำกันใน sheet เดียว
+ * เช่น "ความเร็ว (Mbps)" ซ้ำ 3 ชุด -> "ความเร็ว (Mbps) [1|2|3]"
+ * เพื่อกัน object key ทับกัน (เดิมค่าคอลัมน์หลังสุดจะทับคอลัมน์แรก)
+ */
+const makeUniqueHeaders = (headers = []) => {
+  const counts = new Map();
+  return headers.map((raw, idx) => {
+    const base = normalizeCell(raw) || `column_${idx + 1}`;
+    const next = (counts.get(base) || 0) + 1;
+    counts.set(base, next);
+    return next > 1 ? `${base} [${next}]` : base;
+  });
+};
+
 export const isExcelFile = ({ fileName = "", contentType = "" } = {}) => {
   const ext = normalizeFileExt(fileName);
   if (ext === ".xlsx" || ext === ".xls" || ext === ".csv") return true;
@@ -73,7 +88,7 @@ const buildHeaderAndStart = (rows, lookahead = 8) => {
 
   if (subRowIndex < 0) {
     // หัวตารางชั้นเดียว
-    const header = primary.map((cell, idx) => cell || `column_${idx + 1}`);
+    const header = makeUniqueHeaders(primary.map((cell, idx) => cell || `column_${idx + 1}`));
     return { header, headerRowIndex: hri };
   }
 
@@ -89,7 +104,7 @@ const buildHeaderAndStart = (rows, lookahead = 8) => {
     const label = [group || "", sub[i] || ""].filter(Boolean).join(" - ");
     header[i] = label || `column_${i + 1}`;
   }
-  return { header, headerRowIndex: subRowIndex };
+  return { header: makeUniqueHeaders(header), headerRowIndex: subRowIndex };
 };
 
 export const extractExcelText = ({ buffer, fileName = "file.xlsx" }) => {

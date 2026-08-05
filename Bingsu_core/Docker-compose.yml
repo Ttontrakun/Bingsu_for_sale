@@ -36,6 +36,26 @@ services:
     volumes:
       - bb_redis_data:/data
 
+  ocr:
+    build:
+      context: ./Backend/Service/Ocr
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./Backend/.env
+    ports:
+      - "8001:8001"
+    volumes:
+      # Cache downloaded OCR models so container recreation doesn't re-download them
+      - bb_ocr_models:/root/.paddlex
+      - bb_ocr_cache:/root/.cache
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   legacy:
     build:
       context: ./Backend
@@ -48,6 +68,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
       REDIS_URL: redis://redis:6379
       QDRANT_URL: http://qdrant:6333
+      OCR_API_URL: http://ocr:8001
       UPLOAD_QUEUE_MODE: redis
     depends_on:
       postgres:
@@ -55,6 +76,8 @@ services:
       qdrant:
         condition: service_started
       redis:
+        condition: service_started
+      ocr:
         condition: service_started
     ports:
       - "5052:5052"
@@ -89,3 +112,5 @@ volumes:
   bb_postgres_data:
   bb_qdrant_data:
   bb_redis_data:
+  bb_ocr_models:
+  bb_ocr_cache:

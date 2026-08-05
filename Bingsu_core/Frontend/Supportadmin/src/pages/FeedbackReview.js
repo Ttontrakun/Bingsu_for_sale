@@ -87,7 +87,7 @@ function FeedbackReview({ userRole }) {
   const noDataQuestions = Array.isArray(metrics?.topNoDataQuestions) ? metrics.topNoDataQuestions : [];
 
   return (
-    <div className="w-full h-full p-6 min-h-screen">
+    <div className="w-full">
       {/* Header — สไตล์เดียวกับหน้าอื่น */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">

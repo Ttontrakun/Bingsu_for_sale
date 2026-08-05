@@ -13,9 +13,8 @@ const GROUPS = [
 const fmt = (n) => Number(n).toLocaleString('en-US');
 const groupKey = (g) => `${g.service}:${g.kind}`;
 
-function ServiceRates({ userRole }) {
-  const isAdmin = userRole === 'admin';
-
+/** เนื้อหา Service Rates — ใช้ทั้งเป็นหน้าเดี่ยวและแท็บใน System */
+export function ServiceRatesPanel({ showHeader = true }) {
   const [rates, setRates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,7 +27,6 @@ function ServiceRates({ userRole }) {
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 2500); };
 
   const load = useCallback(async () => {
-    if (!isAdmin) return;
     setLoading(true); setError('');
     try {
       const data = await api.getServiceRates();
@@ -39,7 +37,7 @@ function ServiceRates({ userRole }) {
     } finally {
       setLoading(false);
     }
-  }, [isAdmin]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -53,8 +51,6 @@ function ServiceRates({ userRole }) {
     Object.values(map).forEach((arr) => arr.sort((a, b) => a.speed - b.speed));
     return map;
   }, [rates]);
-
-  if (!isAdmin) return <Navigate to="/knowledge" replace />;
 
   const saveRate = async (item) => {
     const val = Math.round(Number(edited[item.id]));
@@ -92,31 +88,48 @@ function ServiceRates({ userRole }) {
   };
 
   return (
-    <div className="w-full h-full p-6 min-h-screen">
+    <div className={showHeader ? 'w-full h-full p-6 min-h-screen' : 'w-full'}>
       {toast && (
         <div className="fixed top-4 right-4 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">{toast}</div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
-            <HiCurrencyDollar className="text-white text-2xl" />
+      {showHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
+              <HiCurrencyDollar className="text-white text-2xl" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">อัตราค่าบริการ (Service Rates)</h1>
+              <p className="text-sm text-gray-600">
+                เครื่องคำนวณราคาใช้ค่าจากที่นี่ · แก้ตัวเลขแล้วมีผลทันที (ภายใน ~1 นาที) โดยไม่ต้องแก้โค้ด · ราคาปกติ = International + Local Access
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">อัตราค่าบริการ (Service Rates)</h1>
-            <p className="text-sm text-gray-600">
-              เครื่องคำนวณราคาใช้ค่าจากที่นี่ · แก้ตัวเลขแล้วมีผลทันที (ภายใน ~1 นาที) โดยไม่ต้องแก้โค้ด · ราคาปกติ = International + Local Access
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 self-start"
+          >
+            <HiRefresh className={loading ? 'animate-spin' : ''} /> รีเฟรช
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={load}
-          className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 self-start"
-        >
-          <HiRefresh className={loading ? 'animate-spin' : ''} /> รีเฟรช
-        </button>
-      </div>
+      )}
+
+      {!showHeader && (
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-sm text-gray-600">
+            เครื่องคำนวณราคาใช้ค่าจากที่นี่ · แก้แล้วมีผลภายใน ~1 นาที · ราคาปกติ = International + Local Access
+          </p>
+          <button
+            type="button"
+            onClick={load}
+            className="inline-flex items-center gap-1.5 bg-gray-800 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-700 shrink-0"
+          >
+            <HiRefresh className={loading ? 'animate-spin' : ''} /> รีเฟรช
+          </button>
+        </div>
+      )}
 
       {error && <div className="text-sm text-red-600 mb-3">{error}</div>}
 
@@ -213,6 +226,11 @@ function ServiceRates({ userRole }) {
       )}
     </div>
   );
+}
+
+function ServiceRates({ userRole }) {
+  if (userRole !== 'admin') return <Navigate to="/knowledge" replace />;
+  return <ServiceRatesPanel showHeader />;
 }
 
 export default ServiceRates;

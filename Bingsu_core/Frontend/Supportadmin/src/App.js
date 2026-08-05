@@ -11,15 +11,14 @@ import SupportCreateKnowledge from './pages/SupportCreateKnowledge';
 import SupportPanel from './pages/SupportPanel';
 import ActivityLogs from './pages/ActivityLogs';
 import FeedbackReview from './pages/FeedbackReview';
-import Synonyms from './pages/Synonyms';
-import ServiceRates from './pages/ServiceRates';
+import SystemOps from './pages/SystemOps';
 import Login from './pages/Login';
 import Navbar from './components/Navbar';
 import NotificationBell from './components/NotificationBell';
 import { api, getStoredUser, mapAdminUserToDisplay, normalizeDashboardRole } from './services/api';
 
 function AppContent() {
-  const USERS_POLL_MS = 10000;
+  const USERS_POLL_MS = 60000;
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const storedUser = getStoredUser();
   const userRole = normalizeDashboardRole(storedUser?.role || 'support');
@@ -82,7 +81,6 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
           <Route path="/dashboard" element={canSeeDashboard ? <Dashboard users={users} groups={[]} userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
-          <Route path="/Dashboard " element={<Navigate to={defaultPath} replace />} />
           <Route path="/homepage" element={<Home />} />
           <Route path="/home" element={<Navigate to="/homepage" replace />} />
           <Route path="/bots" element={canSeeBots ? <Bots userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
@@ -94,8 +92,9 @@ function AppContent() {
           <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} groups={[]} setGroups={() => {}} onRefreshPending={loadUsers} />} />
           <Route path="/logs" element={canSeeLogs ? <ActivityLogs userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
           <Route path="/feedback" element={<FeedbackReview userRole={userRole} />} />
-          <Route path="/synonyms" element={isAdmin ? <Synonyms userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
-          <Route path="/service-rates" element={isAdmin ? <ServiceRates userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
+          <Route path="/synonyms" element={<Navigate to="/system?tab=synonyms" replace />} />
+          <Route path="/service-rates" element={<Navigate to="/system?tab=rates" replace />} />
+          <Route path="/system" element={<SystemOps userRole={userRole} />} />
         </Routes>
       </main>
     </div>

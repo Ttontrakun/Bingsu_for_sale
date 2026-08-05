@@ -1,4 +1,4 @@
-import { HiSearch, HiTrash } from 'react-icons/hi';
+import { HiSearch, HiTrash, HiDesktopComputer, HiPlus } from 'react-icons/hi';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, mapBotToDisplay } from '../services/api';
@@ -119,36 +119,42 @@ function Bots({ userRole = 'support' }) {
   };
 
   return (
-    <>
-      {/* Header */}
-      <div className='mb-6'>
-        <div className='flex items-center justify-between gap-3 mb-4'>
-          <h1 className='text-2xl font-semibold text-gray-800'>
-            Bots <span className='text-gray-600 font-normal'>{filteredBots.length}</span>
-          </h1>
-          {userRole === 'admin' && (
-            <button
-              type='button'
-              onClick={() => navigate('/bots/create')}
-              className='px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-800 font-semibold rounded-lg shadow-sm transition-all text-sm'
-            >
-              สร้างบอท
-            </button>
-          )}
+    <div className='w-full'>
+      {/* Header — สไตล์เดียวกับหน้าอื่น */}
+      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6'>
+        <div className='flex items-center gap-3'>
+          <div className='bg-[#F5C200] rounded-xl p-3 shadow-lg'>
+            <HiDesktopComputer className='text-white text-2xl' />
+          </div>
+          <div>
+            <h1 className='text-2xl font-bold text-gray-800'>
+              Bots <span className='text-gray-600 font-normal'>{filteredBots.length}</span>
+            </h1>
+            <p className='text-sm text-gray-600'>จัดการบอทและการตั้งค่า</p>
+          </div>
         </div>
-        
-        {/* Search Input */}
-        <div className='relative max-w-md'>
-          <HiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xl' />
-          <input
-            type='text'
-            placeholder='Search Bots / Username'
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className='w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent text-gray-700 placeholder-gray-400'
-            aria-label='Search bots'
-          />
-        </div>
+        {userRole === 'admin' && (
+          <button
+            type='button'
+            onClick={() => navigate('/bots/create')}
+            className='inline-flex items-center gap-2 px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-gray-800 font-semibold rounded-lg shadow-sm transition-all text-sm self-start'
+          >
+            <HiPlus className='text-lg' />
+            สร้างบอท
+          </button>
+        )}
+      </div>
+
+      <div className='relative max-w-md mb-6'>
+        <HiSearch className='absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xl' />
+        <input
+          type='text'
+          placeholder='Search Bots / Username'
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className='w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent text-gray-700 placeholder-gray-400'
+          aria-label='Search bots'
+        />
       </div>
 
       {loadError && (
@@ -348,7 +354,7 @@ function Bots({ userRole = 'support' }) {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

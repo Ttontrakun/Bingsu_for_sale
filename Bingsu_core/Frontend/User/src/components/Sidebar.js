@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
-  HiHome,
   HiChevronLeft,
   HiChevronRight,
   HiChat,
+  HiDatabase,
   HiCheck,
   HiX,
   HiDotsVertical,
   HiLockClosed,
-  HiPlus
+  HiPlus,
+  HiSearch,
+  HiAdjustments
 } from 'react-icons/hi';
 import { HiOutlineUser } from 'react-icons/hi2';
 import { BsPinAngleFill } from 'react-icons/bs';
@@ -17,6 +19,7 @@ import bingsuLogo from '../assets/images/หน่องบิงไม่มี
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
 import ChatMenuModal from './ChatMenuModal';
+import ChatSearchModal from './ChatSearchModal';
 import ConfirmModal from './ConfirmModal';
 import { showToast } from './ToastNotification';
 import { authAPI, chatAPI, userAPI } from '../services/api';
@@ -73,7 +76,12 @@ const getSidebarFirstName = (fullName) => {
   return firstToken || withoutTitle || raw;
 };
 
-function Sidebar({ onCollapseChange, privateWorkspace = false }) {
+function Sidebar({
+  onCollapseChange,
+  privateWorkspace = false,
+  showMemoryControl,
+  onMemoryClick = null,
+}) {
   // บนมือถือ: เริ่มต้นด้วยการหุบ sidebar (เปิดเป็น overlay เมื่อกด)
   const [isCollapsed, setIsCollapsed] = useState(() =>
     typeof window !== 'undefined' && window.innerWidth < 768
@@ -103,20 +111,32 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
   const [menuPosition, setMenuPosition] = useState({ top: 0, right: 0 });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [chatToDelete, setChatToDelete] = useState(null);
-  // ปักหมุดแชท (เก็บใน localStorage) — pinned = เลื่อนขึ้นบนสุด + ลบไม่ได้จนกว่าจะเลิกปักหมุด
-  const [pinnedIds, setPinnedIds] = useState(() => {
-    try { const arr = JSON.parse(localStorage.getItem('pinnedChats') || '[]'); return Array.isArray(arr) ? arr.map(String) : []; } catch { return []; }
+  // จำสถานะเปิด/ปิดประวัติแชทข้ามการรีเฟรช (ค่าเริ่มต้น = เปิด)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(() => {
+    try { return localStorage.getItem('historyOpen') !== '0'; } catch { return true; }
   });
-  const isPinned = (id) => pinnedIds.includes(String(id));
-  const togglePin = (chatId, e) => {
+  const [isChatSearchOpen, setIsChatSearchOpen] = useState(false);
+  const [isGroupMenuOpen, setIsGroupMenuOpen] = useState(false);
+  const [historyGroupBy, setHistoryGroupBy] = useState(() => {
+    try { return localStorage.getItem('historyGroupBy') || 'latest'; } catch { return 'latest'; }
+  });
+  const shouldShowMemoryControl = typeof showMemoryControl === 'boolean'
+    ? showMemoryControl
+    : privateWorkspace;
+  // ปักหมุดแชท (เก็บที่เซิร์ฟเวอร์) — pinned = อยู่บนสุด + ลบไม่ได้ และรอดจากการล้างแชทตามอายุ
+  const isPinned = (id) => chats.some((chat) => String(chat.id) === String(id) && chat.pinned === true);
+  const togglePin = async (chatId, e) => {
     if (e) e.stopPropagation();
-    setPinnedIds((prev) => {
-      const id = String(chatId);
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev];
-      try { localStorage.setItem('pinnedChats', JSON.stringify(next)); } catch {}
-      return next;
-    });
     setOpenMenuId(null);
+    const next = !isPinned(chatId);
+    try {
+      await chatAPI.setChatPinned(chatId, next);
+      await loadChats();
+      window.dispatchEvent(new Event('chatUpdated'));
+    } catch (error) {
+      console.error('Error updating pin state:', error);
+      showToast('ไม่สามารถเปลี่ยนสถานะปักหมุดได้', 'error');
+    }
   };
 
 
@@ -183,7 +203,10 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
         }
       } catch (error) {
         console.error('Error deleting chat:', error);
-        showToast('ไม่สามารถลบแชทได้', 'error');
+        const message = error?.response?.status === 409
+          ? (error.response.data?.error || 'แชทนี้ปักหมุดอยู่ — เลิกปักหมุดก่อนจึงจะลบได้')
+          : 'ไม่สามารถลบแชทได้';
+        showToast(message, error?.response?.status === 409 ? 'info' : 'error');
       }
       setChatToDelete(null);
     }
@@ -258,6 +281,13 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // เมื่อเปิดโหมด Private ให้แสดง sidebar ทันที เพื่อเห็น Memory โดยไม่ต้องกดปุ่มอื่น
+  useEffect(() => {
+    if (!privateWorkspace) return;
+    setIsCollapsed(false);
+    if (onCollapseChange) onCollapseChange(false);
+  }, [privateWorkspace, onCollapseChange]);
+
   // ปิดเมนู overlay เมื่อเปลี่ยนหน้า (มือถือ)
   useEffect(() => {
     if (window.innerWidth < 768) {
@@ -289,18 +319,60 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
     }
   };
 
-  const isActive = (path) => {
-    if (path === '/chat') {
-      return location.pathname.startsWith('/chat');
-    }
-    return location.pathname === path;
-  };
-
   // แยกประวัติ: โหมดส่วนตัวเห็นเฉพาะห้องส่วนตัว, โหมดปกติเห็นเฉพาะห้องปกติ
   const visibleChats = chats
     .filter((chat) => (privateWorkspace ? chat.private === true : chat.private !== true))
     .slice()
     .sort((a, b) => (isPinned(b.id) ? 1 : 0) - (isPinned(a.id) ? 1 : 0));
+
+  const updateHistoryOpen = (nextOpen) => {
+    setIsHistoryOpen(nextOpen);
+    try { localStorage.setItem('historyOpen', nextOpen ? '1' : '0'); } catch {}
+  };
+
+  const changeGroupBy = (value) => {
+    setHistoryGroupBy(value);
+    setIsGroupMenuOpen(false);
+    updateHistoryOpen(true);
+    try { localStorage.setItem('historyGroupBy', value); } catch {}
+  };
+
+  // จัดกลุ่มประวัติสนทนาตามตัวเลือกที่เลือก (ปักหมุด / วันที่ / ล่าสุด)
+  const buildChatGroups = () => {
+    if (historyGroupBy === 'latest') return [{ key: 'all', label: '', items: visibleChats }];
+
+    const groups = new Map();
+    const pushTo = (label, chat) => {
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push(chat);
+    };
+
+    if (historyGroupBy === 'pinned') {
+      ['Pinned', 'Others'].forEach((label) => groups.set(label, []));
+      visibleChats.forEach((chat) => pushTo(isPinned(chat.id) ? 'Pinned' : 'Others', chat));
+    } else {
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const dayMs = 86400000;
+      // เรียงลำดับหมวดล่วงหน้าเพื่อให้กลุ่มเรียงจากใหม่ไปเก่าเสมอ
+      ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'].forEach((label) => groups.set(label, []));
+      visibleChats.forEach((chat) => {
+        const time = new Date(chat.updatedAt || chat.createdAt || 0).getTime();
+        if (!time) return pushTo('Older', chat);
+        if (time >= startOfToday.getTime()) return pushTo('Today', chat);
+        if (time >= startOfToday.getTime() - dayMs) return pushTo('Yesterday', chat);
+        if (time >= startOfToday.getTime() - 7 * dayMs) return pushTo('Previous 7 days', chat);
+        if (time >= startOfToday.getTime() - 30 * dayMs) return pushTo('Previous 30 days', chat);
+        return pushTo('Older', chat);
+      });
+    }
+
+    return Array.from(groups.entries())
+      .filter(([, items]) => items.length > 0)
+      .map(([label, items]) => ({ key: label, label, items }));
+  };
+
+  const chatGroups = buildChatGroups();
 
   return (
     <>
@@ -312,7 +384,7 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
         aria-hidden='true'
       />
     )}
-    <aside className={`bg-gray-200 flex flex-col py-6 transition-all duration-300 ease-in-out fixed inset-y-0 left-0 z-40 md:relative md:inset-auto md:z-auto ${
+    <aside className={`bg-white border-r border-gray-200 flex flex-col py-6 transition-all duration-300 ease-in-out fixed inset-y-0 left-0 z-40 md:relative md:inset-auto md:z-auto ${
       isCollapsed ? 'w-0 md:w-16 px-0 md:px-2 overflow-hidden md:overflow-visible md:items-center' : 'w-60 px-6 overflow-visible'
     }`}>
       {/* Toggle Button */}
@@ -350,7 +422,7 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
 
       {/* Logo */}
       <div
-        className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-300 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
+        className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-200 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'justify-center' : ''
         }`}
         onClick={() => navigate(homePath)}
@@ -368,21 +440,28 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
       {/* Navigation */}
       <nav className='flex flex-col gap-4 flex-1 min-h-0 w-full transition-all duration-300 ease-in-out'>
         {/* Fixed Navigation Items */}
-        <div className='flex flex-col gap-6 flex-shrink-0'>
-        {/* หน้าหลักตามโหมดปัจจุบัน */}
-        <div
+        <div className='flex flex-col gap-3 flex-shrink-0'>
+        {/* แชทใหม่ */}
+        <button
+          type='button'
           onClick={() => navigate(homePath)}
-          className={`w-full py-2 px-3 flex items-center justify-center gap-2 text-center rounded-lg transition-colors bg-gray-300 hover:bg-gray-400 active:bg-gray-500 font-medium ${
-            isActive(homePath) ? 'text-gray-900 font-semibold' : 'text-gray-700'
-          }`}
+          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+          title='สร้างแชทใหม่'
         >
-          {privateWorkspace ? (
-            <HiLockClosed className='text-lg flex-shrink-0' />
-          ) : (
-            <HiHome className='text-lg flex-shrink-0' />
-          )}
-          {!isCollapsed && <span className='whitespace-nowrap'>Home</span>}
-        </div>
+          <HiPlus className='text-lg flex-shrink-0' />
+          {!isCollapsed && <span className='whitespace-nowrap'>New Chat</span>}
+        </button>
+
+        {/* ค้นหาแชท */}
+        <button
+          type='button'
+          onClick={() => setIsChatSearchOpen(true)}
+          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+          title='ค้นหาแชท'
+        >
+          <HiSearch className='text-lg flex-shrink-0' />
+          {!isCollapsed && <span className='whitespace-nowrap'>Chats</span>}
+        </button>
 
         {/* สวิตช์เปิด/ปิดโหมดส่วนตัว — เปิด = เข้าโหมดส่วนตัว, ปิด = กลับโหมดปกติ */}
         <button
@@ -390,13 +469,14 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
           role='switch'
           aria-checked={privateWorkspace}
           onClick={() => navigate(privateWorkspace ? '/homepage' : '/private')}
-          className='w-full py-2 px-3 flex items-center justify-center gap-2 rounded-lg transition-colors bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 font-medium'
+          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
           title={privateWorkspace ? 'ปิดเพื่อกลับโหมดปกติ' : 'เปิดเพื่อเข้าโหมดส่วนตัว'}
         >
           {isCollapsed ? (
             <HiLockClosed className={`text-lg flex-shrink-0 ${privateWorkspace ? 'text-green-600' : 'text-gray-500'}`} />
           ) : (
             <>
+              <HiLockClosed className={`text-lg flex-shrink-0 ${privateWorkspace ? 'text-green-600' : 'text-gray-500'}`} />
               <span className='whitespace-nowrap text-gray-900'>Private</span>
               <span className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${privateWorkspace ? 'bg-green-500' : 'bg-gray-400'}`}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${privateWorkspace ? 'translate-x-4' : 'translate-x-0.5'}`} />
@@ -404,53 +484,92 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
             </>
           )}
         </button>
-        </div>
 
-        {/* Collapsed (desktop rail): icon-only New Chat + History */}
-        {isCollapsed && (
-          <div className='hidden md:flex flex-col gap-3 items-center mt-2'>
-            <button
-              onClick={() => navigate(homePath)}
-              title='แชทใหม่ (New Chat)'
-              className='w-10 h-10 flex items-center justify-center rounded-lg bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700'
-            >
-              <HiPlus className='text-lg' />
-            </button>
-            <button
-              onClick={toggleSidebar}
-              title='ประวัติแชท (History)'
-              className='w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-300 text-gray-700'
-            >
-              <HiChat className='text-lg' />
-            </button>
-          </div>
+        {/* Memory (แสดงเมื่ออยู่โหมด Private) */}
+        {shouldShowMemoryControl && (
+          <button
+            type='button'
+            onClick={() => {
+              if (typeof onMemoryClick === 'function') {
+                onMemoryClick();
+              } else {
+                navigate('/private', { state: { privateMode: true, openMemory: true } });
+              }
+            }}
+            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+            title='Memory'
+          >
+            <HiDatabase className='text-lg flex-shrink-0' />
+            {!isCollapsed && <span className='whitespace-nowrap'>Memory</span>}
+          </button>
         )}
+
+        </div>
         
         {/* Divider */}
-        {!isCollapsed && (
-          <div className='border-t border-gray-300 mt-2 mb-2 flex-shrink-0'></div>
-        )}
+        {!isCollapsed && <div className='border-t border-gray-100 mt-1 mb-1 flex-shrink-0'></div>}
 
         {/* Scrollable Chat Section */}
         {!isCollapsed && (
           <div className='flex flex-col gap-2 flex-1 min-h-0'>
-            {/* New Chat Button */}
-            <button
-              onClick={() => navigate(homePath)}
-              className='w-full py-2 px-3 mb-1 bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 font-medium rounded-lg transition-colors flex items-center justify-center gap-2 flex-shrink-0'
-            >
-              <HiChat className='text-lg' />
-              <span>New Chat</span>
-            </button>
-            {/* หัวข้อ "ล่าสุด" แบบ Gemini */}
+            {/* หัวข้อ "ประวัติสนทนา" + เมนูจัดกลุ่ม */}
             {visibleChats.length > 0 && (
-              <div className='px-2 mb-0.5 text-xs font-medium text-gray-400 flex-shrink-0'>ล่าสุด</div>
+              <div className='relative flex items-center justify-between gap-1 pl-2 pr-0 mb-0.5 flex-shrink-0'>
+                <button
+                  type='button'
+                  onClick={() => updateHistoryOpen(!isHistoryOpen)}
+                  className='group min-w-0 text-xs font-medium text-gray-400 inline-flex items-center gap-1.5 text-left hover:text-gray-500'
+                >
+                  <HiChat className='text-sm flex-shrink-0' />
+                  <span className='truncate'>Chat History</span>
+                  <span className='text-sm leading-none opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100'>
+                    {isHistoryOpen ? '>' : '<'}
+                  </span>
+                </button>
+                <button
+                  type='button'
+                  onClick={() => setIsGroupMenuOpen((v) => !v)}
+                  className='p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 flex-shrink-0'
+                  title='จัดกลุ่มประวัติสนทนา'
+                  aria-label='จัดกลุ่มประวัติสนทนา'
+                >
+                  <HiAdjustments className='text-sm rotate-90' />
+                </button>
+
+                {isGroupMenuOpen && (
+                  <>
+                    <div className='fixed inset-0 z-40' onClick={() => setIsGroupMenuOpen(false)} aria-hidden='true' />
+                    <div className='absolute right-0 top-6 z-50 w-40 rounded-xl border border-gray-200 bg-white shadow-lg py-1'>
+                      <p className='px-3 py-1 text-[11px] text-gray-400'>Group by</p>
+                      {[
+                        { id: 'pinned', label: 'Pinned' },
+                        { id: 'date', label: 'Date' },
+                        { id: 'latest', label: 'Latest' },
+                      ].map((option) => (
+                        <button
+                          key={option.id}
+                          type='button'
+                          onClick={() => changeGroupBy(option.id)}
+                          className='w-full px-3 py-1.5 flex items-center justify-between gap-2 text-sm text-gray-700 hover:bg-gray-100'
+                        >
+                          <span>{option.label}</span>
+                          {historyGroupBy === option.id && <HiCheck className='text-base text-blue-600' />}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
             {/* Scrollable Chat List — scrollbar ชิดขอบขวาสุดของ sidebar (ยื่น -mr-6 ชนขอบ, pr-3 กันข้อความชน) */}
-            <div className='thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden -mr-6 pr-3'>
+            <div className={`thin-scrollbar flex-1 overflow-y-auto overflow-x-hidden -mr-6 pr-3 ${isHistoryOpen ? '' : 'hidden'}`}>
               <div className='flex flex-col gap-2'>
-                {visibleChats.map((chat) => {
-                  const isChatActive = location.pathname === `/chat/${chat.id}`;
+                {chatGroups.map((group) => (
+                  <div key={group.key} className='flex flex-col gap-2'>
+                    {group.label && (
+                      <p className='px-2 pt-1 text-[11px] font-medium text-gray-400 truncate'>{group.label}</p>
+                    )}
+                    {group.items.map((chat) => {
                   const isEditing = editingChatId === chat.id;
                   
                   return (
@@ -460,8 +579,8 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
                     >
                       {isEditing ? (
                         // Edit Mode
-                        <div className='nav-item nav-item-inactive rounded-lg w-full py-1 px-2 flex items-center gap-2'>
-                          <HiChat className='text-xl flex-shrink-0' />
+                        <div className='rounded-lg w-full py-1.5 px-2 flex items-center gap-2 text-gray-700 bg-gray-50'>
+                          <HiChat className='text-base flex-shrink-0' />
                           <input
                             type='text'
                             value={editingName}
@@ -505,7 +624,7 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
                               navigate(`/chat/${chat.id}`);
                               setOpenMenuId(null);
                             }}
-                            className={`nav-item ${isChatActive ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 pl-2 pr-8`}
+                            className='cursor-pointer rounded-lg transition-colors w-full py-1.5 pl-2 pr-8 flex items-center gap-2 text-gray-700 hover:bg-gray-100'
           >
                             {isPinned(chat.id) && <BsPinAngleFill className='text-[11px] text-yellow-500 flex-shrink-0' />}
                             <span className='flex-1 truncate text-[13px]'>{chat.name}</span>
@@ -524,7 +643,9 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
                       )}
                     </div>
                   );
-                })}
+                    })}
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -533,7 +654,7 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
 
       {/* Profile */}
       <div
-        className={`flex items-center gap-3 pt-4 border-t border-gray-300 cursor-pointer hover:bg-gray-100 rounded-lg p-2 transition-colors ${
+        className={`flex items-center gap-3 pt-4 border-t border-gray-200 cursor-pointer hover:bg-gray-100 rounded-lg p-2 transition-colors ${
           isCollapsed ? 'justify-center' : ''
         }`}
         onClick={() => setIsProfileModalOpen(true)}
@@ -595,6 +716,15 @@ function Sidebar({ onCollapseChange, privateWorkspace = false }) {
           position={menuPosition}
         />
       ))}
+
+      {/* Chat Search Modal */}
+      <ChatSearchModal
+        isOpen={isChatSearchOpen}
+        onClose={() => setIsChatSearchOpen(false)}
+        chats={chats}
+        onSelectChat={(chat) => navigate(`/chat/${chat.id}`)}
+        onNewChat={() => navigate(homePath)}
+      />
 
       {/* Confirm Delete Modal */}
       <ConfirmModal

@@ -14,10 +14,8 @@ const fmtDate = (v) => {
 
 const joinSyn = (arr) => (Array.isArray(arr) ? arr.join(', ') : '');
 
-function Synonyms({ userRole }) {
-  const canView = userRole === 'admin';
-  const canEdit = userRole === 'admin';
-
+/** เนื้อหา Synonyms — ใช้ทั้งเป็นหน้าเดี่ยวและแท็บใน System */
+export function SynonymsPanel({ canEdit = true, showHeader = true }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -42,7 +40,6 @@ function Synonyms({ userRole }) {
   };
 
   const load = useCallback(async () => {
-    if (!canView) return;
     setLoading(true);
     setError('');
     try {
@@ -53,11 +50,9 @@ function Synonyms({ userRole }) {
     } finally {
       setLoading(false);
     }
-  }, [canView]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
-
-  if (!canView) return <Navigate to="/knowledge" replace />;
 
   const handleCreate = async () => {
     if (!term.trim() || !synonyms.trim()) {
@@ -133,36 +128,54 @@ function Synonyms({ userRole }) {
   };
 
   return (
-    <div className="w-full h-full p-6 min-h-screen">
+    <div className={showHeader ? 'w-full h-full p-6 min-h-screen' : 'w-full'}>
       {toast && (
         <div className="fixed top-4 right-4 z-50 bg-gray-900 text-white text-sm px-4 py-2 rounded-lg shadow-lg">
           {toast}
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
-            <HiTranslate className="text-white text-2xl" />
+      {showHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div className="flex items-center gap-3">
+            <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
+              <HiTranslate className="text-white text-2xl" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">คำพ้องความหมาย (Synonyms)</h1>
+              <p className="text-sm text-gray-600">
+                จับคู่ “คำที่คนพิมพ์” (ภาษาพูด) กับ “คำในเอกสาร” ช่วยให้บอทเจอคำตอบแม้ผู้ใช้ใช้ภาษาพูด · มีผลทั้งระบบ (อัปเดต ~1 นาที)
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">คำพ้องความหมาย (Synonyms)</h1>
-            <p className="text-sm text-gray-600">
-              จับคู่ “คำที่คนพิมพ์” (ภาษาพูด) กับ “คำในเอกสาร” ช่วยให้บอทเจอคำตอบแม้ผู้ใช้ใช้ภาษาพูด · มีผลทั้งระบบ (อัปเดต ~1 นาที)
-            </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={load}
+              className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700"
+            >
+              <HiRefresh className={loading ? 'animate-spin' : ''} />
+              รีเฟรช
+            </button>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+      )}
+
+      {!showHeader && (
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <p className="text-sm text-gray-600">
+            จับคู่ “คำที่คนพิมพ์” กับ “คำในเอกสาร” · มีผลทั้งระบบ (อัปเดต ~1 นาที)
+          </p>
           <button
             type="button"
             onClick={load}
-            className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700"
+            className="inline-flex items-center gap-1.5 bg-gray-800 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-700 shrink-0"
           >
             <HiRefresh className={loading ? 'animate-spin' : ''} />
             รีเฟรช
           </button>
         </div>
-      </div>
+      )}
 
       {canEdit && (
         <div className="border border-gray-200 rounded-xl p-4 mb-6 bg-gray-50/60">
@@ -303,6 +316,12 @@ function Synonyms({ userRole }) {
       )}
     </div>
   );
+}
+
+function Synonyms({ userRole }) {
+  const canView = userRole === 'admin';
+  if (!canView) return <Navigate to="/knowledge" replace />;
+  return <SynonymsPanel canEdit={userRole === 'admin'} showHeader />;
 }
 
 export default Synonyms;

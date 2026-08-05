@@ -7,12 +7,17 @@ let retentionTimer = null;
 const pruneOldChatData = async () => {
   if (!Number.isFinite(chatRetentionDays) || chatRetentionDays <= 0) return;
   const cutoff = new Date(Date.now() - chatRetentionDays * 24 * 60 * 60 * 1000);
+  // แชทที่ปักหมุดไว้จะไม่ถูกล้างตามอายุ จนกว่าผู้ใช้จะเลิกปักหมุด
   const deletedMessages = await prisma.message.deleteMany({
-    where: { createdAt: { lt: cutoff } },
+    where: {
+      createdAt: { lt: cutoff },
+      conversation: { pinned: false },
+    },
   });
   const deletedConversations = await prisma.conversation.deleteMany({
     where: {
       updatedAt: { lt: cutoff },
+      pinned: false,
       messages: { none: {} },
     },
   });

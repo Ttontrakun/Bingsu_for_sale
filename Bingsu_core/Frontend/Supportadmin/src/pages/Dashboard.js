@@ -6,7 +6,6 @@ import {
   HiBookOpen, 
   HiUserGroup,
   HiExclamationCircle,
-  HiQuestionMarkCircle,
   HiTrendingUp,
   HiArrowUp,
   HiArrowDown,
@@ -29,7 +28,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer
 } from 'recharts';
 import { api } from '../services/api';
@@ -526,9 +524,11 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 failed: 0,
                 other: 0,
               };
-              const label = range === 'week'
-                ? (i === 0 ? 'วันนี้' : i === 1 ? 'เมื่อวาน' : `${i} วันก่อน`)
-                : d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+              const label = d.toLocaleDateString('th-TH', {
+                day: 'numeric',
+                month: 'short',
+                ...(range === 'week' ? { weekday: 'short' } : {}),
+              });
               chart.push({
                 date: label,
                 count: point.total,
@@ -541,12 +541,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           }
 
           const categoryStats = {
-            upload: { key: 'upload', label: 'Upload Error', count: 0, latestAt: null, latestMessage: '' },
-            ocr: { key: 'ocr', label: 'OCR Error', count: 0, latestAt: null, latestMessage: '' },
-            vector: { key: 'vector', label: 'Vector Error', count: 0, latestAt: null, latestMessage: '' },
-            http: { key: 'http', label: 'HTTP Error', count: 0, latestAt: null, latestMessage: '' },
-            failed: { key: 'failed', label: 'งานที่ล้มเหลว (.failed)', count: 0, latestAt: null, latestMessage: '' },
-            other: { key: 'other', label: 'Error อื่นๆ', count: 0, latestAt: null, latestMessage: '' },
+            upload: { key: 'upload', label: 'อัปโหลดไฟล์', count: 0, latestAt: null, latestMessage: '' },
+            ocr: { key: 'ocr', label: 'OCR', count: 0, latestAt: null, latestMessage: '' },
+            vector: { key: 'vector', label: 'Vector / Embed', count: 0, latestAt: null, latestMessage: '' },
+            http: { key: 'http', label: 'HTTP / API', count: 0, latestAt: null, latestMessage: '' },
+            failed: { key: 'failed', label: 'งานที่ล้มเหลว', count: 0, latestAt: null, latestMessage: '' },
+            other: { key: 'other', label: 'อื่นๆ', count: 0, latestAt: null, latestMessage: '' },
           };
           scopedRows.forEach((row) => {
             const categoryKey = getErrorCategoryKey(row);
@@ -599,12 +599,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           { date: 'วันนี้', count: 0, httpError: 0, httpException: 0, failed: 0, other: 0 },
         ];
         const emptyCategories = [
-          { key: 'upload', label: 'Upload Error', count: 0, latestAt: null, latestMessage: '' },
-          { key: 'ocr', label: 'OCR Error', count: 0, latestAt: null, latestMessage: '' },
-          { key: 'vector', label: 'Vector Error', count: 0, latestAt: null, latestMessage: '' },
-          { key: 'http', label: 'HTTP Error', count: 0, latestAt: null, latestMessage: '' },
-          { key: 'failed', label: 'งานที่ล้มเหลว (.failed)', count: 0, latestAt: null, latestMessage: '' },
-          { key: 'other', label: 'Error อื่นๆ', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'upload', label: 'อัปโหลดไฟล์', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'ocr', label: 'OCR', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'vector', label: 'Vector / Embed', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'http', label: 'HTTP / API', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'failed', label: 'งานที่ล้มเหลว', count: 0, latestAt: null, latestMessage: '' },
+          { key: 'other', label: 'อื่นๆ', count: 0, latestAt: null, latestMessage: '' },
         ];
         setErrorLogOverview({
           count24h: 0,
@@ -1096,16 +1096,16 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   };
   
   return (
-    <div className="w-full h-full p-6 min-h-screen">
+    <div className="w-full">
       {/* Header with Animation */}
       <div className={`mb-8 transition-all duration-500 ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="bg-[#8B8680] rounded-xl p-3 shadow-lg">
+            <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
               <HiSparkles className="text-white text-3xl" />
             </div>
             <div>
-              <h1 className="text-4xl font-bold text-[#8B8680]">
+              <h1 className="text-4xl font-bold text-gray-800">
                 Dashboard
               </h1>
               <p className="text-sm text-gray-600 mt-1">ภาพรวมระบบและสถิติการใช้งานแบบ Real-time</p>
@@ -1675,88 +1675,119 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       </div>
       )}
 
-      {/* Error Logs Chart */}
+      {/* Error Logs Chart — แท่งเดียว = รวมทุกประเภท อ่านแนวโน้มง่าย / แยกประเภทดูในตารางด้านล่าง */}
       {filter !== 'system' && isAdmin && (
       <div
         ref={errorLogsChartRef}
         className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 mb-8 hover:shadow-2xl transition-all duration-300"
       >
-        <div className="flex items-center justify-between gap-3 mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <div className="bg-red-500 rounded-xl p-3 shadow-lg">
               <HiExclamationCircle className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">จำนวน Log ประเภท Error</h3>
-              <p className="text-sm text-gray-600">{getErrorRangeLabel(errorRange)} (http.error, http.exception, *.failed)</p>
+              <h3 className="text-2xl font-bold text-gray-800">จำนวน Error</h3>
+              <p className="text-sm text-gray-600">
+                {getErrorRangeLabel(errorRange)}
+                <span className="text-gray-400"> · รวม </span>
+                <span className="font-semibold text-red-600">
+                  {(metrics.errorLogsChart || []).reduce((s, d) => s + (Number(d.count) || 0), 0).toLocaleString('th-TH')}
+                </span>
+                <span className="text-gray-400"> ครั้ง</span>
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setErrorRange('day')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                errorRange === 'day'
-                  ? 'bg-red-500 text-white shadow'
-                  : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-              }`}
-            >
-              วัน
-            </button>
-            <button
-              onClick={() => setErrorRange('week')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                errorRange === 'week'
-                  ? 'bg-red-500 text-white shadow'
-                  : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-              }`}
-            >
-              สัปดาห์
-            </button>
-            <button
-              onClick={() => setErrorRange('month')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                errorRange === 'month'
-                  ? 'bg-red-500 text-white shadow'
-                  : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
-              }`}
-            >
-              เดือน
-            </button>
+            {[
+              { id: 'day', label: '24 ชม.' },
+              { id: 'week', label: '7 วัน' },
+              { id: 'month', label: '30 วัน' },
+            ].map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setErrorRange(opt.id)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                  errorRange === opt.id
+                    ? 'bg-red-500 text-white shadow'
+                    : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={metrics.errorLogsChart}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" opacity={0.5} />
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart
+            data={metrics.errorLogsChart}
+            margin={{ top: 8, right: 8, left: 0, bottom: errorRange === 'month' ? 36 : 8 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
             <XAxis
               dataKey="date"
-              stroke="#6B7280"
-              style={{ fontSize: '12px', fontWeight: '500' }}
+              stroke="#9CA3AF"
               tickLine={false}
+              axisLine={false}
+              interval={errorRange === 'day' ? 2 : errorRange === 'month' ? 2 : 0}
+              angle={errorRange === 'month' ? -30 : 0}
+              textAnchor={errorRange === 'month' ? 'end' : 'middle'}
+              height={errorRange === 'month' ? 48 : 28}
+              tick={{ fontSize: 11, fontWeight: 500, fill: '#6B7280' }}
             />
             <YAxis
-              stroke="#6B7280"
-              style={{ fontSize: '12px', fontWeight: '500' }}
+              stroke="#9CA3AF"
               tickLine={false}
+              axisLine={false}
+              allowDecimals={false}
+              width={36}
+              tick={{ fontSize: 11, fontWeight: 500, fill: '#6B7280' }}
             />
-            <Tooltip content={<CustomTooltip />} />
-            <Legend />
-            <Bar dataKey="httpError" name="HTTP Error (4xx/5xx)" stackId="errorType" fill="#DC2626" radius={[8, 8, 0, 0]} />
-            <Bar dataKey="httpException" name="Exception ในระบบ" stackId="errorType" fill="#F97316" />
-            <Bar dataKey="failed" name="งานที่ล้มเหลว (.failed)" stackId="errorType" fill="#F59E0B" />
-            <Bar dataKey="other" name="Error อื่นๆ" stackId="errorType" fill="#A855F7" />
+            <Tooltip
+              cursor={{ fill: 'rgba(220, 38, 38, 0.06)' }}
+              content={({ active, payload, label }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0]?.payload || {};
+                const parts = [
+                  row.httpError > 0 && `HTTP ${row.httpError}`,
+                  row.httpException > 0 && `Exception ${row.httpException}`,
+                  row.failed > 0 && `ล้มเหลว ${row.failed}`,
+                  row.other > 0 && `อื่นๆ ${row.other}`,
+                ].filter(Boolean);
+                return (
+                  <div className="bg-white px-3 py-2.5 border border-gray-200 rounded-xl shadow-xl min-w-[140px]">
+                    <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+                    <p className="text-lg font-bold text-red-600 leading-tight">
+                      {(row.count || 0).toLocaleString('th-TH')} <span className="text-sm font-medium text-gray-500">ครั้ง</span>
+                    </p>
+                    {parts.length > 0 && (
+                      <p className="text-[11px] text-gray-400 mt-1 leading-snug">{parts.join(' · ')}</p>
+                    )}
+                  </div>
+                );
+              }}
+            />
+            <Bar
+              dataKey="count"
+              name="จำนวน Error"
+              fill="#DC2626"
+              radius={[6, 6, 0, 0]}
+              maxBarSize={errorRange === 'day' ? 28 : 44}
+            />
           </BarChart>
         </ResponsiveContainer>
         <div className="mt-5 rounded-xl border border-gray-200 overflow-hidden">
           <div className="px-4 py-2 bg-gray-50 border-b border-gray-200 text-sm font-semibold text-gray-700">
-            ตารางประเภท Error ({getErrorRangeLabel(errorRange)})
+            แยกตามประเภท ({getErrorRangeLabel(errorRange)})
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-white">
                 <tr className="text-left text-gray-600 border-b border-gray-200">
                   <th className="px-4 py-2.5 font-semibold">ประเภท</th>
-                  <th className="px-4 py-2.5 font-semibold">จำนวน</th>
-                  <th className="px-4 py-2.5 font-semibold">ล่าสุด</th>
+                  <th className="px-4 py-2.5 font-semibold w-24">จำนวน</th>
+                  <th className="px-4 py-2.5 font-semibold w-40">ล่าสุด</th>
                   <th className="px-4 py-2.5 font-semibold">ข้อความล่าสุด</th>
                 </tr>
               </thead>
@@ -1770,7 +1801,9 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                         ? new Date(row.latestAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
                         : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-gray-600">{row.latestMessage || '—'}</td>
+                    <td className="px-4 py-2.5 text-gray-600 max-w-md truncate" title={row.latestMessage || ''}>
+                      {row.latestMessage || '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -344,6 +344,12 @@ export const conversationsAPI = {
         const response = await api.patch(`/conversations/${encodeURIComponent(sid)}`, { title });
         return response.data;
     },
+    updatePinned: async (id, pinned) => {
+        const sid = id != null ? String(id).trim() : '';
+        if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid conversation ID');
+        const response = await api.patch(`/conversations/${encodeURIComponent(sid)}`, { pinned: pinned === true });
+        return response.data;
+    },
     delete: async (id) => {
         const sid = id != null ? String(id).trim() : '';
         if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid conversation ID');
@@ -368,6 +374,9 @@ export const chatAPI = {
     },
     updateChat: async (chatId, name) => {
         return conversationsAPI.updateTitle(chatId, name);
+    },
+    setChatPinned: async (chatId, pinned) => {
+        return conversationsAPI.updatePinned(chatId, pinned);
     },
     deleteChat: async (chatId) => {
         return conversationsAPI.delete(chatId);
@@ -436,6 +445,28 @@ export const chatMessageAPI = {
         const mid = messageId != null ? String(messageId).trim() : '';
         if (!sid || !mid) throw new Error('Invalid chat ID or message ID');
         const response = await api.delete(`/conversations/${encodeURIComponent(sid)}/messages/${encodeURIComponent(mid)}`);
+        return response.data;
+    },
+
+    /** ขอคำถามต่อเนื่อง (follow-up suggestions) จากคำถาม-คำตอบล่าสุด — คืน array ของ string */
+    getFollowUpSuggestions: async (chatId, question, answer) => {
+        const sid = chatId != null ? String(chatId).trim() : '';
+        if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid chat ID');
+        const response = await api.post(
+            `/conversations/${encodeURIComponent(sid)}/followup-suggestions`,
+            { question, answer },
+        );
+        return Array.isArray(response.data?.suggestions) ? response.data.suggestions : [];
+    },
+
+    /** แก้ไขข้อความผู้ใช้แบบ Gemini: ลบข้อความนี้และข้อความทั้งหมดที่ตามมา แล้วค่อยส่งข้อความใหม่ */
+    truncateFromMessage: async (chatId, messageId) => {
+        const sid = chatId != null ? String(chatId).trim() : '';
+        const mid = messageId != null ? String(messageId).trim() : '';
+        if (!sid || !mid) throw new Error('Invalid chat ID or message ID');
+        const response = await api.delete(
+            `/conversations/${encodeURIComponent(sid)}/messages/${encodeURIComponent(mid)}/from-here`,
+        );
         return response.data;
     },
 
@@ -536,6 +567,14 @@ export const chatMessageAPI = {
         } finally {
             reader.releaseLock();
         }
+    },
+};
+
+// ประกาศจาก admin — แสดงเป็น banner ในหน้าแชท
+export const announcementAPI = {
+    getActive: async () => {
+        const response = await api.get('/announcements/active');
+        return Array.isArray(response.data?.announcements) ? response.data.announcements : [];
     },
 };
 

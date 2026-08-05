@@ -186,6 +186,22 @@ export const api = {
     return request(`/api/support/logs?${sp.toString()}`);
   },
   getAdminUsers: () => request('/api/admin/users'),
+  // System page: รายงานคำถามที่ตอบไม่ได้ / สถานะคิวไฟล์ / ประกาศ
+  getNoAnswerQuestions: (days = 30) => request(`/api/admin/no-answer-questions?days=${encodeURIComponent(days)}`),
+  getUploadBatches: (status = '') =>
+    request(`/api/admin/upload-batches${status ? `?status=${encodeURIComponent(status)}` : ''}`),
+  retryUploadBatch: (id) =>
+    request(`/api/admin/upload-batches/${encodeURIComponent(String(id || ''))}/retry`, { method: 'POST' }),
+  getAnnouncements: () => request('/api/admin/announcements'),
+  createAnnouncement: (payload) =>
+    request('/api/admin/announcements', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  updateAnnouncement: (id, payload) =>
+    request(`/api/admin/announcements/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
+  deleteAnnouncement: (id) =>
+    request(`/api/admin/announcements/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
   getAdminBots: () => request('/api/admin/bots'),
   getAdminGroups: () => request('/api/admin/groups'),
   createAdminGroup: (payload) =>

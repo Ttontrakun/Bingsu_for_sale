@@ -33,7 +33,10 @@ router.post(
       const fileName = req.file.originalname || req.file.fieldname || "file";
       const contentType = req.file.mimetype || "application/octet-stream";
       const isPdf = contentType.toLowerCase().includes("pdf") || /\.pdf$/i.test(fileName);
-      const provider = isPdf ? "typhoon" : "paddle";
+      const configuredProviderRaw = (process.env.OCR_PROVIDER || "paddle").trim().toLowerCase();
+      const provider = ["typhoon", "paddle", "paddle_vl", "text"].includes(configuredProviderRaw)
+        ? configuredProviderRaw
+        : "paddle";
 
       const body = await runOcrExtract({
         buffer: req.file.buffer,

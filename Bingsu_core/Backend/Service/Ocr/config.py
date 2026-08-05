@@ -10,6 +10,7 @@ OCR_MAX_PAGES = int(os.getenv("OCR_MAX_PAGES", "30"))
 OCR_DPI = int(os.getenv("OCR_DPI", "150"))
 OCR_USE_ANGLE_CLS = os.getenv("OCR_USE_ANGLE_CLS", "true").lower() == "true"
 OCR_PROVIDER = (os.getenv("OCR_PROVIDER", "paddle") or "paddle").strip().lower()
+OCR_PADDLE_VL_PIPELINE_VERSION = (os.getenv("OCR_PADDLE_VL_PIPELINE_VERSION", "v1.5") or "v1.5").strip()
 # Maximum file size limit (MB) - files larger than this will be rejected
 MAX_FILE_SIZE_MB = float(os.getenv("MAX_FILE_SIZE_MB", "5.0"))
 # Sync endpoint file size limit (MB) - files larger than this will auto-reduce DPI or split PDF

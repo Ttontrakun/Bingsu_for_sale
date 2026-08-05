@@ -10,8 +10,7 @@ import {
   HiViewGrid,
   HiClipboardList,
   HiThumbUp,
-  HiTranslate,
-  HiCurrencyDollar
+  HiCog
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
@@ -63,8 +62,6 @@ function Navbar({ onCollapseChange, userRole }) {
   const canSeeBots = userRole === 'admin' || userRole === 'support';
   const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
   const canSeeFeedback = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
-  const canSeeSynonyms = userRole === 'admin';
-  const canSeeRates = userRole === 'admin';
 
   return (
     <>
@@ -161,24 +158,13 @@ function Navbar({ onCollapseChange, userRole }) {
               {!isCollapsed && <span>Feedback</span>}
             </div>
           )}
-          {canSeeSynonyms && (
-            <div
-              onClick={() => navigate('/synonyms')}
-              className={`nav-item ${isActive('/synonyms') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-            >
-              <HiTranslate className="text-xl flex-shrink-0" />
-              {!isCollapsed && <span>Synonyms</span>}
-            </div>
-          )}
-          {canSeeRates && (
-            <div
-              onClick={() => navigate('/service-rates')}
-              className={`nav-item ${isActive('/service-rates') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-            >
-              <HiCurrencyDollar className="text-xl flex-shrink-0" />
-              {!isCollapsed && <span>Service Rates</span>}
-            </div>
-          )}
+          <div
+            onClick={() => navigate('/system')}
+            className={`nav-item ${isActive('/system') || location.pathname.startsWith('/system') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+          >
+            <HiCog className='text-xl flex-shrink-0' />
+            {!isCollapsed && <span>System</span>}
+          </div>
           {canSeeLogs && (
             <div
               onClick={() => navigate('/logs')}

@@ -1,9 +1,10 @@
 """
 OCR Service - Extract text from PDF and images
-Supports PaddleOCR and Typhoon OCR providers
+Supports PaddleOCR, PaddleOCR-VL and Typhoon OCR providers
 """
 import io
 import os
+import tempfile
 from typing import Any
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
@@ -13,6 +14,7 @@ from config import (
     OCR_DPI,
     OCR_USE_ANGLE_CLS,
     OCR_PROVIDER,
+    OCR_PADDLE_VL_PIPELINE_VERSION,
     TYPHOON_OCR_API_KEY,
     TYPHOON_OCR_API_URL,
     TYPHOON_SYNC_SIZE_LIMIT_MB,
@@ -25,6 +27,9 @@ app = FastAPI(title="Enterprise AI Chatbot OCR Service", version="1.0.0")
 # Global OCR instance
 _ocr_instance: Any | None = None
 _ocr_lang: str | None = None
+_ocr_engine_type: str | None = None
+_classic_ocr_instance: Any | None = None
+_classic_ocr_lang: str | None = None
 
 DEFAULT_OCR_LANG = OCR_LANG
 DEFAULT_OCR_MAX_PAGES = OCR_MAX_PAGES
@@ -45,6 +50,19 @@ def _require_paddle_deps() -> tuple[Any, Any]:
     return PaddleOCR, np
 
 
+def _require_paddle_vl_dep() -> tuple[Any, Any]:
+    """Require PaddleOCR-VL dependencies"""
+    try:
+        from paddleocr import PaddleOCRVL  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception as e:
+        raise RuntimeError(
+            "PaddleOCR-VL dependencies are not installed. "
+            "Run: pip install -r requirements.txt"
+        ) from e
+    return PaddleOCRVL, np
+
+
 def _require_pdf_image_deps() -> tuple[Any, Any]:
     """Require PDF/Image dependencies"""
     try:
@@ -60,14 +78,32 @@ def _require_pdf_image_deps() -> tuple[Any, Any]:
 
 def get_ocr(lang: str) -> Any:
     """Get or create OCR instance"""
-    global _ocr_instance, _ocr_lang
+    global _ocr_instance, _ocr_lang, _ocr_engine_type
     normalized = (lang or DEFAULT_OCR_LANG or "th").strip() or "th"
-    if _ocr_instance is None or _ocr_lang != normalized:
-        # PaddleOCR will download models on first use (cached afterward).
-        PaddleOCR, _np = _require_paddle_deps()
-        _ocr_instance = PaddleOCR(lang=normalized, use_angle_cls=DEFAULT_OCR_USE_ANGLE_CLS)
+    target_engine = "paddle_vl" if OCR_PROVIDER == "paddle_vl" else "paddle"
+    if _ocr_instance is None or _ocr_lang != normalized or _ocr_engine_type != target_engine:
+        if target_engine == "paddle_vl":
+            # PaddleOCR-VL pipeline (v1.5 by default)
+            PaddleOCRVL, _np = _require_paddle_vl_dep()
+            _ocr_instance = PaddleOCRVL(pipeline_version=OCR_PADDLE_VL_PIPELINE_VERSION)
+        else:
+            # Classic PaddleOCR
+            PaddleOCR, _np = _require_paddle_deps()
+            _ocr_instance = PaddleOCR(lang=normalized, use_angle_cls=DEFAULT_OCR_USE_ANGLE_CLS)
         _ocr_lang = normalized
+        _ocr_engine_type = target_engine
     return _ocr_instance
+
+
+def get_classic_ocr(lang: str) -> Any:
+    """Get or create classic PaddleOCR instance (fallback engine)."""
+    global _classic_ocr_instance, _classic_ocr_lang
+    normalized = (lang or DEFAULT_OCR_LANG or "th").strip() or "th"
+    if _classic_ocr_instance is None or _classic_ocr_lang != normalized:
+        PaddleOCR, _np = _require_paddle_deps()
+        _classic_ocr_instance = PaddleOCR(lang=normalized, use_angle_cls=DEFAULT_OCR_USE_ANGLE_CLS)
+        _classic_ocr_lang = normalized
+    return _classic_ocr_instance
 
 
 def _is_pdf(upload: UploadFile) -> bool:
@@ -88,44 +124,121 @@ def _pil_from_pdf_page(page: Any, dpi: int) -> Any:
 
 def _run_ocr_on_image(ocr: Any, image: Any, use_angle_cls: bool) -> tuple[str, float | None, int]:
     """Run OCR on image using PaddleOCR"""
-    _PaddleOCR, np = _require_paddle_deps()
-    arr = np.array(image.convert("RGB"))
-    
-    # PaddleOCR 3.4.0+ doesn't support cls parameter in ocr() method
-    # The use_angle_cls is set during initialization, not in ocr() call
-    # Always call ocr.ocr() without cls parameter for PaddleOCR 3.4.0+
-    try:
-        results = ocr.ocr(arr) or []
-    except Exception as e:
-        error_msg = str(e)
-        # If error mentions cls parameter, it's likely an API mismatch
-        if "cls" in error_msg.lower() or "unexpected keyword" in error_msg.lower():
-            # Try without any optional parameters
-            try:
-                results = ocr.ocr(arr) or []
-            except Exception as e2:
-                raise RuntimeError(f"Failed to run OCR (API mismatch): {str(e2)}") from e2
-        else:
-            raise RuntimeError(f"Failed to run OCR: {error_msg}") from e
-    
-    lines: list[str] = []
-    confidences: list[float] = []
-    for item in results:
-        if not item or len(item) < 2:
-            continue
-        rec = item[1]
-        if not rec or len(rec) < 2:
-            continue
-        text = (rec[0] or "").strip()
-        conf = rec[1]
-        if text:
-            lines.append(text)
-            try:
-                confidences.append(float(conf))
-            except Exception:
-                pass
-    avg_conf = (sum(confidences) / len(confidences)) if confidences else None
-    return "\n".join(lines).strip(), avg_conf, len(lines)
+    def _run_classic(ocr_engine: Any, pil_image: Any) -> tuple[str, float | None, int]:
+        _PaddleOCR, np = _require_paddle_deps()
+        arr = np.array(pil_image.convert("RGB"))
+
+        # PaddleOCR 3.4.0+ doesn't support cls parameter in ocr() method
+        # The use_angle_cls is set during initialization, not in ocr() call
+        # Always call ocr.ocr() without cls parameter for PaddleOCR 3.4.0+
+        try:
+            results = ocr_engine.ocr(arr) or []
+        except Exception as e:
+            error_msg = str(e)
+            # If error mentions cls parameter, it's likely an API mismatch
+            if "cls" in error_msg.lower() or "unexpected keyword" in error_msg.lower():
+                # Try without any optional parameters
+                try:
+                    results = ocr_engine.ocr(arr) or []
+                except Exception as e2:
+                    raise RuntimeError(f"Failed to run OCR (API mismatch): {str(e2)}") from e2
+            else:
+                raise RuntimeError(f"Failed to run OCR: {error_msg}") from e
+
+        lines: list[str] = []
+        confidences: list[float] = []
+        for item in results:
+            if not item or len(item) < 2:
+                continue
+            rec = item[1]
+            if not rec or len(rec) < 2:
+                continue
+            text = (rec[0] or "").strip()
+            conf = rec[1]
+            if text:
+                lines.append(text)
+                try:
+                    confidences.append(float(conf))
+                except Exception:
+                    pass
+        avg_conf = (sum(confidences) / len(confidences)) if confidences else None
+        return "\n".join(lines).strip(), avg_conf, len(lines)
+
+    def _collect_strings(value: Any, out: list[str]) -> None:
+        if value is None:
+            return
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                out.append(text)
+            return
+        if isinstance(value, dict):
+            for v in value.values():
+                _collect_strings(v, out)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for v in value:
+                _collect_strings(v, out)
+
+    def _extract_vl_text(item: Any) -> str:
+        # 1) Prefer the markdown rendering of the page (clean content only).
+        md = getattr(item, "markdown", None)
+        if isinstance(md, dict):
+            md_text = md.get("markdown_texts") or md.get("markdown") or ""
+            if isinstance(md_text, str) and md_text.strip():
+                return md_text.strip()
+        elif isinstance(md, str) and md.strip():
+            return md.strip()
+
+        # 2) Fall back to parsed layout blocks (block_content holds the text).
+        data = getattr(item, "json", None)
+        if isinstance(data, dict):
+            res = data.get("res") if isinstance(data.get("res"), dict) else data
+            blocks = res.get("parsing_res_list") or []
+            pieces = []
+            for block in blocks:
+                if isinstance(block, dict):
+                    content = (block.get("block_content") or block.get("content") or "").strip()
+                    if content:
+                        pieces.append(content)
+            if pieces:
+                return "\n".join(pieces)
+
+        # 3) Last resort: generic string collection (may include metadata noise).
+        pieces = []
+        for attr in ("markdown", "json", "res"):
+            value = getattr(item, attr, None)
+            if value is not None:
+                _collect_strings(value, pieces)
+        if not pieces:
+            _collect_strings(item, pieces)
+        dedup: list[str] = []
+        seen: set[str] = set()
+        for p in pieces:
+            if p not in seen:
+                dedup.append(p)
+                seen.add(p)
+        return "\n".join(dedup).strip()
+
+    if hasattr(ocr, "predict"):
+        # PaddleOCR-VL path
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=True) as tmp:
+            image.convert("RGB").save(tmp.name, format="PNG")
+            output = ocr.predict(tmp.name)
+        texts: list[str] = []
+        for item in output or []:
+            text = _extract_vl_text(item)
+            if text:
+                texts.append(text)
+        merged = "\n".join(texts).strip()
+        # Fallback: if VL returns empty text on scanned pages, retry with classic PaddleOCR.
+        if not merged:
+            classic = get_classic_ocr(DEFAULT_OCR_LANG)
+            return _run_classic(classic, image)
+        line_count = len([line for line in merged.splitlines() if line.strip()])
+        return merged, None, line_count
+
+    return _run_classic(ocr, image)
 
 
 async def _run_typhoon_ocr_api(file_data: bytes, filename: str, dpi: int = 150) -> str:
@@ -458,11 +571,11 @@ async def ocr_extract(
             )
 
         provider = OCR_PROVIDER
-        if provider not in ("paddle", "typhoon"):
+        if provider not in ("paddle", "paddle_vl", "typhoon"):
             provider = "paddle"
         
         ocr = None
-        if provider == "paddle":
+        if provider in ("paddle", "paddle_vl"):
             try:
                 ocr = get_ocr(lang)
             except Exception as e:
