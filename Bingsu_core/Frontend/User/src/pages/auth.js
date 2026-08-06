@@ -1,12 +1,13 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
-import ntLogo from '../assets/images/NT_Logo.png';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
+import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, userAPI, getErrorMessage } from '../services/api';
 
 function Auth() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [isSignIn, setIsSignIn] = useState(true);
 
   // Form states for Sign In
@@ -22,6 +23,15 @@ function Auth() {
   const [signUpAcceptedTerms, setSignUpAcceptedTerms] = useState(false);
   const [signUpError, setSignUpError] = useState('');
   const [signUpLoading, setSignUpLoading] = useState(false);
+
+  // จากหน้า verifying กดกลับ → เปิดโหมดสมัคร + เติมอีเมลเดิม
+  useEffect(() => {
+    if (location.state?.mode === 'signup') {
+      setIsSignIn(false);
+      const prefill = String(location.state?.email || '').trim();
+      if (prefill) setSignUpEmail(prefill);
+    }
+  }, [location.state]);
 
   // Function to toggle between Sign in and Sign up
   const toggleAuthMode = (mode) => {
@@ -110,10 +120,10 @@ function Auth() {
       }
 
       // Registration/recovery successful - redirect to verifying page
+      // ส่งแค่ email — ไม่ส่ง token เพื่อไม่ให้ยืนยัน/ส่งอีเมลซ้ำอัตโนมัติ
       navigate('/verifying', {
         state: {
           email: signUpEmail,
-          token: response.verificationToken // Store token for development/testing
         }
       });
     } catch (error) {
@@ -126,15 +136,10 @@ function Auth() {
   };
 
   return (
-    <div className='relative flex items-center justify-center min-h-screen bg-[#D9D9D9]'>
-      {/* Logo at top-left corner */}
-      <div className="absolute top-5 left-5 z-10 hidden md:block">
-        <a href="https://ntplc.co.th/home" target="_blank" rel="noopener noreferrer">
-          <img src={ntLogo} alt="NT Logo" className="max-w-[150px] max-h-[150px] object-contain hover:opacity-80 transition-opacity cursor-pointer" />
-        </a>
-      </div>
-      
-      {/* Card - Centered */}
+    <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
+      <NtBrandBar />
+
+      <div className="relative flex flex-1 items-center justify-center px-4 py-8">
       <div className="relative w-full max-w-[500px] rounded-[1.75rem] bg-white p-8 md:p-9 shadow-[0_10px_30px_rgba(0,0,0,0.08)] m-4"
       style={{
         border: '4px solid rgba(252,186,3,0.95)',
@@ -354,6 +359,7 @@ function Auth() {
         </div>
         </div>
         </div>
+      </div>
       </div>
     </div>
   );

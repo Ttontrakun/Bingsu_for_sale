@@ -1288,14 +1288,6 @@ function SupportAddKnowledgeData() {
         return;
       }
 
-      console.log('Updating document with files:', sourceFiles);
-      console.log('SourceFiles validation:', sourceFiles.map(f => ({
-        name: f.name,
-        hasText: !!(f.text && f.text.trim()),
-        hasBlocks: !!(f.blocks && f.blocks.length > 0),
-        blocksCount: f.blocks ? f.blocks.length : 0
-      })));
-
       // Update document with new sourceFiles
       await supportDocuments.updateDocument(id, {
         sourceFiles: sourceFiles

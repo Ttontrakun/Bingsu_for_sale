@@ -6,7 +6,7 @@ import fs from "fs";
 import path from "path";
 import helmet from "helmet";
 import { fileURLToPath } from "url";
-import { corsOptions, isCorsOriginAllowed, port } from "./config.js";
+import { corsOptions, isCorsOriginAllowed, isProduction, port } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -54,6 +54,7 @@ const sanitizeUrlForLogs = (rawUrl) => {
   }
 };
 
+app.set("trust proxy", 1);
 app.use(cors(corsOptions));
 app.use(helmet({
   contentSecurityPolicy: false,
@@ -195,24 +196,26 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal Server Error" });
 });
 
-// หน้าเทส OCR — หลายทางเข้า
-app.get("/ocr-test", (req, res) => {
-  try {
-    const html = fs.readFileSync(ocrTestHtmlPath, "utf8");
-    res.type("html").send(html);
-  } catch (e) {
-    res.status(500).send("ไม่พบไฟล์ ocr-test.html: " + e.message);
-  }
-});
-app.get("/api/ocr-test-link", (_req, res) => {
-  res.json({
-    ok: true,
-    link: `http://localhost:${port}/ocr-test`,
-    linkStatic: `http://localhost:${port}/test-ocr/ocr-test.html`,
-    port,
+// หน้าเทส OCR — ปิดใน production
+if (!isProduction) {
+  app.get("/ocr-test", (req, res) => {
+    try {
+      const html = fs.readFileSync(ocrTestHtmlPath, "utf8");
+      res.type("html").send(html);
+    } catch (e) {
+      res.status(500).send("ไม่พบไฟล์ ocr-test.html: " + e.message);
+    }
   });
-});
-app.use("/test-ocr", express.static(path.join(__dirname, "static")));
+  app.get("/api/ocr-test-link", (_req, res) => {
+    res.json({
+      ok: true,
+      link: `http://localhost:${port}/ocr-test`,
+      linkStatic: `http://localhost:${port}/test-ocr/ocr-test.html`,
+      port,
+    });
+  });
+  app.use("/test-ocr", express.static(path.join(__dirname, "static")));
+}
 
 // เสิร์ฟ Frontend build (React) เพื่อให้เปิด http://localhost/create-knowledge ได้ — ต้อง build ก่อน: cd ../Frontend && npm run build
 const frontendBuildPath = path.resolve(projectRoot, "..", "Frontend", "build");

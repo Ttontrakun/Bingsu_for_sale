@@ -685,8 +685,12 @@ function Sidebar({
         onManageAccount={() => {
           setIsAccountModalOpen(true);
         }}
-        onSignOut={() => {
-          authAPI.logout();
+        onSignOut={async () => {
+          try {
+            await authAPI.logout();
+          } catch (_) {
+            /* ignore */
+          }
           navigate('/auth');
         }}
       />

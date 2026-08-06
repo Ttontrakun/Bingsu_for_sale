@@ -30,8 +30,11 @@ const normalizeExtension = (name = "") => {
 };
 const isAllowedUpload = (name, type) => {
   const ext = normalizeExtension(name);
+  const mime = String(type || "").toLowerCase().trim();
   const hasAllowedExt = ext ? allowedUploadExtensions.includes(ext) : false;
-  const hasAllowedType = type ? allowedUploadMimeTypes.includes(String(type)) : false;
+  const hasAllowedType = mime ? allowedUploadMimeTypes.includes(mime) : false;
+  // Require both extension and MIME when both are present; never allow OR bypass
+  if (ext && mime) return hasAllowedExt && hasAllowedType;
   return hasAllowedExt || hasAllowedType;
 };
 

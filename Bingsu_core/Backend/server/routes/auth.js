@@ -10,6 +10,7 @@ import crypto from "crypto";
 import { prisma } from "../db.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { authenticate, sanitizeUser } from "../lib/auth.js";
+import { parseSafeAvatarDataUrl, sanitizeAvatarUrlString } from "../lib/avatarSafe.js";
 import { getRequestContext } from "../lib/requestContext.js";
 import { logEvent } from "../lib/logging.js";
 import { clearLoginLock, isLoginLocked, recordFailedLogin } from "../lib/loginGuard.js";
@@ -792,22 +793,23 @@ authRouter.patch("/me", authenticate, async (req, res) => {
 
     let avatarUrl = avatarUrlInput;
     if (typeof avatarBase64 === "string" && avatarBase64.startsWith("data:image/")) {
-      const match = avatarBase64.match(/^data:image\/(\w+);base64,([\s\S]+)$/);
-      if (match) {
-        const rawExt = match[1] === "jpeg" ? "jpg" : match[1];
-        const safeExt = /^[a-z0-9]+$/i.test(rawExt) ? rawExt.toLowerCase() : "png";
-        const base64Data = match[2].replace(/\s/g, "");
-        const buffer = Buffer.from(base64Data, "base64");
-        const dir = path.join(projectRoot, "uploads", "avatars");
-        fs.mkdirSync(dir, { recursive: true });
-        const fileName = `${req.user.id}.${safeExt}`;
-        const filePath = path.join(dir, fileName);
-        fs.writeFileSync(filePath, buffer);
-        avatarUrl = `/uploads/avatars/${fileName}`;
+      const parsed = parseSafeAvatarDataUrl(avatarBase64);
+      if (!parsed) {
+        return res.status(400).json({ error: "รูปโปรไฟล์ไม่รองรับ (อนุญาต png/jpg/webp/gif ขนาดไม่เกิน 2MB)" });
       }
+      const dir = path.join(projectRoot, "uploads", "avatars");
+      fs.mkdirSync(dir, { recursive: true });
+      const fileName = `${req.user.id}.${parsed.ext}`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, parsed.buffer);
+      avatarUrl = `/uploads/avatars/${fileName}`;
     }
-    if (typeof avatarUrl === "string") {
-      updates.avatarUrl = avatarUrl.trim() || null;
+    if (avatarUrl !== undefined) {
+      const safe = sanitizeAvatarUrlString(avatarUrl);
+      if (safe === undefined) {
+        return res.status(400).json({ error: "avatarUrl ไม่ถูกต้อง" });
+      }
+      updates.avatarUrl = safe;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -876,6 +878,49 @@ authRouter.post("/logout", authenticate, async (req, res) => {
     ...(sessionCookieDomain ? { domain: sessionCookieDomain } : {}),
   });
   res.json({ ok: true });
+});
+
+/** ลบบัญชีตัวเอง — ต้องยืนยันด้วยรหัสผ่าน */
+authRouter.post("/delete-account", authenticate, async (req, res) => {
+  try {
+    const password = String(req.body?.password || "");
+    if (!password) {
+      res.status(400).json({ error: "กรุณากรอกรหัสผ่านเพื่อยืนยันการลบบัญชี" });
+      return;
+    }
+    const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+    if (!user) {
+      res.status(404).json({ error: "ไม่พบบัญชีผู้ใช้" });
+      return;
+    }
+    const valid = await bcrypt.compare(password, user.passwordHash || "");
+    if (!valid) {
+      res.status(401).json({ error: "รหัสผ่านไม่ถูกต้อง" });
+      return;
+    }
+    await logEvent({
+      event: "user.account.deleted",
+      actorId: user.id,
+      targetType: "user",
+      targetId: user.id,
+      meta: {
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        ...getRequestContext(req),
+      },
+    }).catch(() => {});
+    await prisma.session.deleteMany({ where: { userId: user.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+    res.clearCookie(sessionCookieName, {
+      path: "/",
+      ...(sessionCookieDomain ? { domain: sessionCookieDomain } : {}),
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("POST /delete-account error:", err);
+    res.status(500).json({ error: err?.message || "ลบบัญชีไม่สำเร็จ" });
+  }
 });
 
 /**

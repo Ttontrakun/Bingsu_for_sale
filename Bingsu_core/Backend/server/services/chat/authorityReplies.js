@@ -5,19 +5,224 @@
 import {
   normalizeText,
   formatAuthorityRole,
+  AUTHORITY_ROLE_MAP,
   isAuthorityDecisionQuery,
+  isAuthorityRoleConfirmQuery,
   isAuthorityDetailFollowUpQuery,
   isTrial45DaysApprovalQuery,
+  isRememberOverrideRequest,
   hasMultipleQuestions,
   isConsumerInternetPriceQuery,
   isUndergroundDarkFiberPriceQuery,
+  isDocumentListQuery,
+  isSystemFeatureQuery,
 } from "./queryClassifiers.js";
 
 export const NO_GROUNDING_REPLY = "ขออภัยครับ ยังไม่พบข้อมูลที่ตรงจากเอกสารที่เลือก จึงไม่สามารถยืนยันคำตอบได้";
 
+export const OUT_OF_SCOPE_REPLY =
+  "คำถามนี้อยู่นอกขอบเขตเอกสารที่เลือกครับ ผมตอบได้เฉพาะข้อมูลในเอกสาร/ชุดความรู้เท่านั้น เช่น ราคา ค่าบริการ ส่วนลด อำนาจอนุมัติ หรือขั้นตอนตามเอกสาร";
+
+/** คำตอบปฏิเสธ/นอกขอบเขต — ห้ามแปะการ์ดอ้างอิงเอกสาร (กัน top-k ติดมาทั้งที่ไม่ได้ใช้ตอบ) */
+export const shouldOmitReferencesForReply = (reply) => {
+  const t = String(reply || "").trim();
+  if (!t) return true;
+  if (/นอกขอบเขต/.test(t)) return true;
+  if (/ยังไม่พบข้อมูลที่ตรงจากเอกสาร/.test(t)) return true;
+  if (/ไม่สามารถยืนยันคำตอบได้/.test(t)) return true;
+  if (/ตอบได้เฉพาะ.*(เอกสาร|ชุดความรู้)/.test(t) && t.length < 450) return true;
+  if (/^ขออภัย[\s\S]{0,80}ไม่(มี|พบ)ข้อมูล/.test(t) && t.length < 280) return true;
+  if (/^ไม่มีข้อมูลในเอกสาร/.test(t) && t.length < 280) return true;
+  if (/outside (the )?scope|not (found )?in (the )?document|information is unavailable/i.test(t) && t.length < 450) {
+    return true;
+  }
+  return false;
+};
+
+/** ตัดข้อความที่ขอบคำ/ประโยค — ไม่ใส่ ... และไม่ตัดกลางคำ */
+const clipAtSentence = (text, maxLen = 520) => {
+  const clean = String(text || "").replace(/\s+/g, " ").trim();
+  if (!clean) return "";
+  if (clean.length <= maxLen) return clean;
+  const slice = clean.slice(0, maxLen);
+  const markers = ["ครับ", "ค่ะ", "คะ", "。", ".", ")", "]", " "];
+  let boundary = -1;
+  for (const marker of markers) {
+    const idx = slice.lastIndexOf(marker);
+    if (idx > boundary) boundary = idx + (marker === " " ? 0 : marker.length);
+  }
+  if (boundary >= Math.floor(maxLen * 0.4)) {
+    return slice.slice(0, boundary).trim();
+  }
+  // fallback: ถอยไปช่องว่างล่าสุด แล้วจบโดยไม่ใส่ ...
+  const space = slice.lastIndexOf(" ");
+  return (space > 40 ? slice.slice(0, space) : slice).trim();
+};
+
+/** แยกแหล่ง (Sheet/Row) ออกจากเนื้อหา เพื่อให้อ่านง่าย */
+const parseChunkForDisplay = (rawText) => {
+  const text = String(rawText || "").replace(/\s+/g, " ").trim();
+  if (!text) return null;
+  // รูปแบบที่พบบ่อย: Sheet ... | Row N | เรื่อง: ... เนื้อหา
+  const metaMatch = text.match(
+    /^(?:Sheet\s*)?([^|]+?)\s*\|\s*Row\s*(\d+)\s*\|\s*(?:เรื่อง\s*[:：]\s*)?(.+)$/i,
+  );
+  if (metaMatch) {
+    const sheet = metaMatch[1].replace(/^Sheet\s*/i, "").trim();
+    const row = metaMatch[2];
+    let body = String(metaMatch[3] || "").trim();
+    // ถ้า body ยังขึ้นต้นด้วย "เรื่อง: x.x" ให้ตัดหัวข้อสั้นๆ ออกเป็น title
+    let topic = "";
+    const topicMatch = body.match(/^(?:เรื่อง\s*[:：]\s*)?(\d+(?:\.\d+)*)\s+(.+)$/);
+    if (topicMatch) {
+      topic = topicMatch[1];
+      body = topicMatch[2].trim();
+    }
+    return {
+      source: topic ? `${sheet} (แถว ${row}, เรื่อง ${topic})` : `${sheet} (แถว ${row})`,
+      body: clipAtSentence(body, 480),
+    };
+  }
+  return { source: "", body: clipAtSentence(text, 480) };
+};
+
+export const buildDocumentStanceFromChunks = (groundingChunks = []) => {
+  const points = [];
+  const seen = new Set();
+  for (const chunk of (Array.isArray(groundingChunks) ? groundingChunks : []).slice(0, 4)) {
+    const raw = String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? "").trim();
+    const parsed = parseChunkForDisplay(raw);
+    if (!parsed?.body) continue;
+    const key = parsed.body.slice(0, 80);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    points.push(parsed);
+  }
+  if (points.length === 0) return "";
+  return points
+    .map((p, i) => {
+      const head = p.source ? `${i + 1}) ${p.source}` : `${i + 1})`;
+      return `${head}\n   ${p.body}`;
+    })
+    .join("\n\n");
+};
+
+/** สรุปสั้นเทียบสิ่งที่ผู้ใช้ขอจำ กับเอกสาร */
+export const buildRememberOverrideSummary = (userMessage, whoOverride = null, hasDocFacts = false) => {
+  const m = normalizeText(userMessage);
+  if (!hasDocFacts && !whoOverride) {
+    return "สรุป: ยังไม่พบข้อมูลในเอกสารที่เลือกมาเทียบกับสิ่งที่คุณต้องการให้จำ — หากต้องการอัปเดตเอกสารจริง ให้ติดต่อผู้ดูแล (Supportadmin)";
+  }
+  if (whoOverride?.approver || /(กจญ|รจญ|ชจญ|ผจก|อำนาจอนุมัติ|ส่วนลด)/.test(m)) {
+    if (whoOverride?.approver) {
+      return `สรุป: ตามเอกสาร อำนาจอนุมัติส่วนลดไม่ได้จำกัดที่ตำแหน่งเดียวเสมอไป — แบ่งตามเงื่อนไข/ระดับส่วนลด (เช่น กรณีที่เกี่ยวข้อง ผู้อนุมัติคือ ${formatAuthorityRole(whoOverride.approver)}) จึงยังไม่ตรงกับข้อความที่ต้องการให้จำในโหมดปกติ`;
+    }
+    return "สรุป: ตามเอกสาร อำนาจอนุมัติส่วนลดถูกแบ่งตามระดับส่วนลดและประเภทบริการ ไม่ได้กำหนดให้ตำแหน่งเดียวอนุมัติทุกโปรดักต์";
+  }
+  if (/(ไม่ขาย|ยกเลิก|หยุดจำหน่าย)/.test(m) && /(dark\s*fiber|เส้นใย)/.test(m)) {
+    return "สรุป: ตามเอกสารยังมีการกำหนดบริการและอัตรา NT Dark Fiber อยู่ จึงยังไม่สอดคล้องกับข้อความว่าไม่ขายแล้ว — หากต้องการให้ระบบใช้ข้อมูลใหม่ ต้องอัปเดตเอกสารโดยผู้ดูแล หรือบันทึกในโหมดส่วนตัว";
+  }
+  if (/(ไม่ขาย|ยกเลิก|หยุดจำหน่าย)/.test(m)) {
+    return "สรุป: ตามเอกสารยังมีข้อมูลบริการที่เกี่ยวข้องอยู่ จึงยังไม่ตรงกับข้อความว่ายกเลิก/ไม่ขายแล้ว — หากต้องการใช้ข้อมูลใหม่ ให้เปิดโหมดส่วนตัวหรืออัปเดตเอกสารโดยผู้ดูแล";
+  }
+  return "สรุป: สิ่งที่คุณต้องการให้จำยังไม่ถูกบันทึกในโหมดปกติ — ระบบยังยึดข้อมูลจากเอกสารด้านบนเป็นหลัก";
+};
+
+/**
+ * คำตอบเต็มสำหรับ "จำไว้ว่า..." ในโหมดปกติ
+ * — เน้นว่าโหมดปกติ ≠ โหมดส่วนตัว + วิธีใช้โหมดส่วนตัว + เอกสาร
+ */
+export const buildNormalModeRememberGuidance = (documentSection = "", summary = "") => {
+  const facts = String(documentSection || "").trim()
+    || "ยังไม่พบข้อมูลที่เกี่ยวข้องชัดเจนในเอกสารที่เลือก";
+  const summaryLine = String(summary || "").trim()
+    || "สรุป: ในโหมดปกติระบบยังยึดเอกสารเป็นหลัก และยังไม่ได้จดจำข้อความที่คุณต้องการให้จำ";
+  return [
+    "เข้าใจครับ — แต่โหมดปกติกับโหมดส่วนตัวแยกกันครับ",
+    "",
+    "• โหมดปกติ: ยึดเอกสาร/ตารางในระบบเท่านั้น แก้หรือทับข้อมูลจากแชทไม่ได้",
+    "• โหมดส่วนตัว: คุณแก้/ทับข้อมูลสำหรับตัวคุณเองได้ (เช่น กำหนดผู้อนุมัติคนละแบบจากเอกสาร) โดยไม่กระทบผู้ใช้อื่น",
+    "",
+    "ถ้าต้องการให้บอทจำตามที่คุณป้อน:",
+    "1) เปิดโหมดส่วนตัว จากแถบด้านข้าง",
+    "2) พิมพ์ /จำ ตามด้วยข้อมูล หรือพิมพ์ว่า จำว่า ...",
+    "3) ถามใหม่ในโหมดส่วนตัว (สวิตช์หน่วยความจำส่วนตัวต้องเปิด)",
+    "",
+    "ตามเอกสารในระบบตอนนี้:",
+    facts,
+    "",
+    summaryLine,
+  ].join("\n");
+};
+
+/** ยืนยันหลังบันทึกความจำในโหมดส่วนตัว — ห่อข้อมูลที่จำด้วย == เพื่อให้ UI ไฮไลต์ */
+export const buildPrivateRememberConfirmReply = (payload) => {
+  const fact = String(payload || "").trim();
+  return [
+    "บันทึกในโหมดส่วนตัวแล้วครับ",
+    fact ? `==ข้อมูลที่จำ: ${fact}==[1]` : null,
+    "",
+    "หมายเหตุ: ใช้เฉพาะในโหมดส่วนตัวของคุณเท่านั้น — ไม่เปลี่ยนเอกสาร/ตารางอำนาจของโหมดปกติ และไม่กระทบผู้ใช้อื่น",
+    "ถามต่อในโหมดส่วนตัวได้เลย ระบบจะยึดข้อมูลส่วนตัวของคุณก่อนเอกสารระบบ",
+  ].filter((line) => line != null).join("\n");
+};
+
+/** สร้างคำตอบ remember-override ทั้งก้อนจากข้อความผู้ใช้ + chunks */
+export const buildRememberOverrideReply = (userMessage, groundingChunks = [], whoOverride = null) => {
+  let stance = "";
+  if (whoOverride?.approver) {
+    stance = [
+      `1) อำนาจอนุมัติตามเอกสาร`,
+      `   ผู้อนุมัติที่เกี่ยวข้อง: ${formatAuthorityRole(whoOverride.approver)}`,
+      whoOverride.note ? `   เงื่อนไข: ${whoOverride.note}` : null,
+      "",
+      buildDocumentStanceFromChunks(groundingChunks),
+    ].filter(Boolean).join("\n").trim();
+  } else {
+    stance = buildDocumentStanceFromChunks(groundingChunks);
+  }
+  const summary = buildRememberOverrideSummary(userMessage, whoOverride, Boolean(stance));
+  return buildNormalModeRememberGuidance(stance, summary);
+};
+
+/** ตอบคำถามยืนยันบทบาท: ได้/ไม่ได้ ตามกติกา deterministic + ชื่อผู้อนุมัติที่ถูก */
+export const getAuthorityRoleConfirmReply = (question) => {
+  if (!isAuthorityRoleConfirmQuery(question)) return null;
+  const override = getAuthorityOverrideFromQuestion(question);
+  if (!override?.approver) return null;
+  const asked = AUTHORITY_ROLE_MAP.find((entry) => entry.re.test(String(question || "")));
+  if (!asked) return null;
+  const approverNorm = normalizeText(override.approver);
+  const isMatch = asked.re.test(override.approver) || approverNorm.includes(normalizeText(asked.abbr.replace(".", "")));
+  const approverLabel = formatAuthorityRole(override.approver);
+  if (isMatch) {
+    return [
+      `ได้ครับ — ผู้อนุมัติในกรณีนี้คือ ${approverLabel}`,
+      override.note ? `หมายเหตุ: ${override.note}` : null,
+    ].filter(Boolean).join("\n");
+  }
+  return [
+    `ตามเอกสาร ${formatAuthorityRole(asked.abbr)} ไม่ใช่ผู้อนุมัติในกรณีนี้`,
+    `ผู้อนุมัติ: ${approverLabel}`,
+    override.note ? `หมายเหตุ: ${override.note}` : null,
+  ].filter(Boolean).join("\n");
+};
+
 export const getDeterministicRuleReply = (question) => {
   const m = normalizeText(question);
   if (!m) return null;
+  const roleConfirmReply = getAuthorityRoleConfirmReply(question);
+  if (roleConfirmReply) return roleConfirmReply;
+  // คำถาม "ใครอนุมัติ..." ที่มีกติกา deterministic ชัดเจน
+  if (/(ใครอนุมัติ|ใครมีอำนาจ|ผู้อนุมัติคือใคร)/.test(m)) {
+    const who = getAuthorityOverrideFromQuestion(question);
+    if (who?.approver) {
+      return [
+        `ผู้อนุมัติ: ${formatAuthorityRole(who.approver)}`,
+        who.note ? `หมายเหตุ: ${who.note}` : null,
+      ].filter(Boolean).join("\n");
+    }
+  }
   if (isTrial45DaysApprovalQuery(m)) {
     return "ผู้อนุมัติ: ผจก. (ผู้จัดการ)\nหมายเหตุ: กรณีขออนุมัติทดลองใช้บริการ 45 วัน อยู่ในช่วงไม่เกิน 60 วัน จึงใช้อำนาจระดับฝ่าย (ผจก.)";
   }
@@ -89,10 +294,24 @@ export const getAuthorityOverrideFromQuestion = (question) => {
       note: "ต้องผ่านการพิจารณาจากฝ่ายบริหารจัดการผลิตภัณฑ์ (PM) ก่อนเสนออนุมัติ",
     };
   }
-  if (/(เส้นใยแก้วนำแสง|nt dark fiber)/.test(m) && /(ไม่เกินร้อยละ\s*50|ไม่เกิน\s*50|price list)/.test(m)) {
+  if (/(เส้นใยแก้วนำแสง|nt dark fiber|dark fiber)/.test(m) && /(ไม่เกินร้อยละ\s*50|ไม่เกิน\s*50|price list)/.test(m)
+    && !/(มากกว่า|เกิน|60|ร้อยละ\s*60)/.test(m)) {
     return {
       approver: "ชจญ.",
       note: "ชจญ.ที่รับผิดชอบงานขาย/บริการลูกค้า (ต้องผ่านความเห็น PM ก่อน)",
+    };
+  }
+  // ส่วนลด Dark Fiber เกิน 50% แต่ไม่เกิน Floor Price (เช่น 60%) → รจญ.
+  if (
+    /(เส้นใยแก้วนำแสง|nt dark fiber|dark fiber)/.test(m)
+    && (
+      /(60|ร้อยละ\s*60)/.test(m)
+      || (/(มากกว่า|เกิน|มากกว่าร้อยละ)/.test(m) && /(50|ร้อยละ\s*50)/.test(m))
+    )
+  ) {
+    return {
+      approver: "รจญ.",
+      note: "กรณีส่วนลดเกิน 50% แต่ไม่เกิน Floor Price ต้องผ่านความเห็น Product Manager และฝ่ายกรอบอัตราก่อน",
     };
   }
   if (
@@ -232,15 +451,73 @@ export const shouldForceNoDataReply = (message) => isUndergroundDarkFiberPriceQu
 
 export const getUnintelligibleReply = () => "ขออภัยครับ ข้อความที่ส่งมายังอ่านไม่ชัดเจน รบกวนพิมพ์ใหม่อีกครั้งให้ชัดเจนขึ้นครับ";
 
-export const getSystemCapabilityReply = (contextDocuments = []) => {
-  const docs = (contextDocuments || [])
-    .map((doc) => String(doc?.displayName || doc?.fileName || "").trim())
-    .filter(Boolean);
-  const uniqueDocs = Array.from(new Set(docs)).slice(0, 8);
-  if (uniqueDocs.length === 0) {
-    return "ตอนนี้ระบบตอบได้ตามเอกสารที่เลือกไว้ เช่น ค่าบริการ เงื่อนไขส่วนลด ผู้อนุมัติ และขั้นตอนที่ระบุในเอกสารครับ";
+/** รายการไฟล์เอกสารทั้งหมดแบบแบน (ไม่แยกชุดหลัก/ย่อย กันชื่อซ้ำ) */
+const getDocumentListReply = (contextDocuments = []) => {
+  const docs = (contextDocuments || []).filter(Boolean);
+  const names = [];
+  for (const doc of docs) {
+    const files = Array.isArray(doc?.sourceFiles) ? doc.sourceFiles : [];
+    let added = 0;
+    for (const file of files) {
+      const name = String(file?.fileName || file?.name || file?.displayName || "").trim();
+      if (!name) continue;
+      names.push(name);
+      added += 1;
+    }
+    // ไม่มีไฟล์ใน sourceFiles — ใช้ชื่อชุดความรู้แทน
+    if (added === 0) {
+      const fallback = String(doc?.displayName || doc?.fileName || "").trim();
+      if (fallback) names.push(fallback);
+    }
   }
-  return `ระบบตอบได้ตามข้อมูลในเอกสารที่เลือกตอนนี้ เช่น:\n- ${uniqueDocs.join("\n- ")}\n\nถ้าต้องการ ผมสรุปหัวข้อสำคัญของแต่ละเอกสารให้ต่อได้ครับ`;
+  const uniqueDocs = Array.from(new Set(names));
+  if (uniqueDocs.length === 0) {
+    return "ตอนนี้ยังไม่พบเอกสารในชุดความรู้ที่เลือกครับ ลองเลือกชุดความรู้ หรืออัปโหลดไฟล์ก่อนแล้วถามใหม่ได้ครับ";
+  }
+  return [
+    `เอกสารที่ใช้งานได้ตอนนี้มี ${uniqueDocs.length} รายการ:`,
+    ...uniqueDocs.map((name, index) => `${index + 1}. ${name}`),
+    "",
+    "ถามต่อได้เลยครับ เช่น สรุปเอกสาร ราคา ส่วนลด หรืออำนาจอนุมัติ",
+    "ถ้าต้องการเนื้อหาเฉพาะ เช่น เอกสารแนบตอนขอใช้บริการ ให้ระบุบริการ/หัวข้อให้ชัดเจนครับ",
+  ].join("\n");
+};
+
+const getSystemFeatureReply = () => {
+  // เฉพาะของฝั่ง User (แถบด้านข้าง + หน้าแชท/หน้าแรก) — ไม่รวม Supportadmin
+  const features = [
+    "หน้าแรก: เลือกชุดความรู้ (Knowledge) / เลือกบอท แล้วเริ่มถามได้ทันที",
+    "แชทถาม-ตอบจากเอกสาร พร้อมการ์ดอ้างอิงแหล่งที่มาใต้คำตอบ",
+    "ถามได้หลายประเด็นในข้อความเดียว เช่น ราคา ส่วนลด อำนาจอนุมัติ ตามเอกสาร",
+    "แถบด้านข้าง: แชทใหม่, ค้นหาแชท, ดูประวัติแชท",
+    "จัดการแชท: ปักหมุด / เปลี่ยนชื่อ / ลบ / จัดกลุ่มประวัติ (Pinned, Date, Latest)",
+    "โหมดส่วนตัว: เปิดจากแถบด้านข้าง ใช้ /จำ และ /สั่ง รวมถึงจัดการ Memory",
+    "โปรไฟล์ / ตั้งค่าบัญชี จากแถบด้านข้าง",
+    "ในหน้าแชท: ให้ feedback 👍👎, ดูประกาศ, และคำถามแนะนำถัดไปใต้คำตอบ",
+  ];
+  return [
+    "ฟีเจอร์ที่ใช้งานได้ในระบบผู้ใช้ (แถบด้านข้างและหน้าแชท) เช่น:",
+    ...features.map((item) => `- ${item}`),
+    "",
+    "ถ้าต้องการดูเอกสารในชุดความรู้ที่เลือก ถามว่า \"มีเอกสารอะไรบ้าง\" ได้ครับ",
+  ].join("\n");
+};
+
+export const getSystemCapabilityReply = (contextDocuments = [], message = "") => {
+  // ถามเอกสารอย่างเดียว → รายชื่อไฟล์ครบ ไม่ปนฟีเจอร์
+  if (isDocumentListQuery(message)) {
+    return getDocumentListReply(contextDocuments);
+  }
+  // ถามฟีเจอร์อย่างเดียว → ไม่ปนรายการเอกสาร
+  if (isSystemFeatureQuery(message)) {
+    return getSystemFeatureReply();
+  }
+  // ถามกว้างๆ เช่น ถามอะไรได้บ้าง → ชี้ฟีเจอร์ฝั่ง User + รายการชุดความรู้
+  return [
+    getSystemFeatureReply(),
+    "",
+    getDocumentListReply(contextDocuments),
+  ].join("\n");
 };
 
 export const collectApproverAbbreviations = (...texts) => {

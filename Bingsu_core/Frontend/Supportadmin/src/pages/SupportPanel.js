@@ -74,6 +74,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const [selectedMemberIds, setSelectedMemberIds] = useState([]);
   const [confirmDeleteUserId, setConfirmDeleteUserId] = useState(null);
   const [deleteUserSubmitting, setDeleteUserSubmitting] = useState(false);
+  const [confirmToggleUserId, setConfirmToggleUserId] = useState(null);
+  const [toggleStatusSubmitting, setToggleStatusSubmitting] = useState(false);
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState(null);
   const [targetUserId, setTargetUserId] = useState(null);
   const [newPassword, setNewPassword] = useState('');
@@ -93,7 +95,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const navigate = useNavigate();
   const itemsPerPage = 10;
 
-  const handleToggleStatus = async (userId) => {
+  const requestToggleStatus = (userId) => {
     const sessionRole = getSessionRole();
     const canToggleStatus = ['support', 'admin', 'admin_metrics'].includes(sessionRole);
     if (!canToggleStatus) {
@@ -102,20 +104,46 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
     }
     const target = users.find((user) => String(user.id) === String(userId));
     if (!target) return;
+    setConfirmToggleUserId(userId);
+  };
+
+  const handleCancelToggleStatus = () => {
+    if (toggleStatusSubmitting) return;
+    setConfirmToggleUserId(null);
+  };
+
+  const handleConfirmToggleStatus = async () => {
+    if (confirmToggleUserId == null) return;
+    const sessionRole = getSessionRole();
+    const canToggleStatus = ['support', 'admin', 'admin_metrics'].includes(sessionRole);
+    if (!canToggleStatus) {
+      alert('คุณไม่มีสิทธิ์เปลี่ยนสถานะผู้ใช้');
+      setConfirmToggleUserId(null);
+      return;
+    }
+    const target = users.find((user) => String(user.id) === String(confirmToggleUserId));
+    if (!target) {
+      setConfirmToggleUserId(null);
+      return;
+    }
     const nextIsActive = !isEnabledFlag(target.isEnabled);
+    setToggleStatusSubmitting(true);
     try {
-      const updated = await api.patchAdminUser(userId, { isActive: nextIsActive });
+      const updated = await api.patchAdminUser(confirmToggleUserId, { isActive: nextIsActive });
       const mapped = mapAdminUserToDisplay(updated);
       setUsers((prev) =>
         prev.map((user) =>
-          String(user.id) === String(userId)
+          String(user.id) === String(confirmToggleUserId)
             ? { ...user, ...mapped, lastActive: user.lastActive }
             : user
         )
       );
+      setConfirmToggleUserId(null);
       if (typeof onRefreshPending === 'function') onRefreshPending();
     } catch (err) {
       alert(err?.message || 'อัปเดตสถานะผู้ใช้ไม่สำเร็จ');
+    } finally {
+      setToggleStatusSubmitting(false);
     }
   };
 
@@ -410,6 +438,11 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const deleteTargetUser = useMemo(
     () => users.find((user) => String(user.id) === String(confirmDeleteUserId)) || null,
     [users, confirmDeleteUserId]
+  );
+
+  const toggleTargetUser = useMemo(
+    () => users.find((user) => String(user.id) === String(confirmToggleUserId)) || null,
+    [users, confirmToggleUserId]
   );
 
   const deleteTargetGroup = useMemo(
@@ -1089,7 +1122,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                 <td className="px-4 py-4">
                   {(user.roleType === 'user' || user.roleType === 'pending') && (
                     <button
-                      onClick={() => user.roleType === 'user' && handleToggleStatus(user.id)}
+                      type="button"
+                      onClick={() => user.roleType === 'user' && requestToggleStatus(user.id)}
                       disabled={user.roleType === 'pending' || !['support', 'admin', 'admin_metrics'].includes(getSessionRole())}
                       className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${
                         user.roleType === 'pending'
@@ -1675,6 +1709,47 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                 className="px-10 py-2.5 rounded-full bg-yellow-400 hover:bg-yellow-500 text-gray-900 text-base font-semibold transition-colors"
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmToggleUserId !== null && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center bg-black/40 p-6"
+          onClick={handleCancelToggleStatus}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">ยืนยันการเปลี่ยนสถานะ</h3>
+            <p className="text-sm text-gray-600 mb-5">
+              {isEnabledFlag(toggleTargetUser?.isEnabled)
+                ? 'ต้องการปิดการใช้งานบัญชี'
+                : 'ต้องการเปิดการใช้งานบัญชี'}{' '}
+              <span className="font-medium text-gray-800">
+                {toggleTargetUser?.username || toggleTargetUser?.email || ''}
+              </span>{' '}
+              ใช่หรือไม่?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCancelToggleStatus}
+                disabled={toggleStatusSubmitting}
+                className="px-4 py-2 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmToggleStatus}
+                disabled={toggleStatusSubmitting}
+                className="px-4 py-2 rounded-lg bg-yellow-400 text-gray-900 hover:bg-yellow-500 disabled:opacity-50"
+              >
+                {toggleStatusSubmitting ? 'กำลังอัปเดต…' : 'ยืนยัน'}
               </button>
             </div>
           </div>

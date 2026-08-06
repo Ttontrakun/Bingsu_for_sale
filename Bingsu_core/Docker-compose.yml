@@ -65,6 +65,8 @@ services:
       - ./Backend/.env
     environment:
       PORT: "5052"
+      NODE_ENV: production
+      SESSION_COOKIE_SECURE: "true"
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
       REDIS_URL: redis://redis:6379
       QDRANT_URL: http://qdrant:6333

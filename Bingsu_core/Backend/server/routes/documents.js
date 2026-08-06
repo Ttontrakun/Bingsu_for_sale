@@ -44,7 +44,9 @@ const isStaffDocumentWriter = (user) => user && STAFF_DOC_WRITE_ROLES.has(String
 /** ค้นหาเอกสารตาม id — staff เห็นทุกฉบับ, user เห็นเฉพาะของตัวเองหรือที่ถูกแชร์ */
 const documentWhereById = (documentId, user, { editorOnly = false } = {}) => {
   const id = documentId;
-  if (isStaffDocumentReader(user)) {
+  if (editorOnly) {
+    if (isStaffDocumentWriter(user)) return { id };
+  } else if (isStaffDocumentReader(user)) {
     return { id };
   }
   const or = editorOnly
@@ -591,10 +593,10 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
   try {
     await runSingleUpload(req, res);
     const document = await prisma.document.findFirst({
-      where: documentWhereById(req.params.id, req.user, { editorOnly: false }),
+      where: documentWhereById(req.params.id, req.user, { editorOnly: true }),
     });
     if (!document) {
-      res.status(404).json({ ok: false, error: "Document not found" });
+      res.status(404).json({ ok: false, error: "Document not found or no edit permission" });
       return;
     }
     if (!isStaffDocumentWriter(req.user) && document.displayName === HELP_DOC_DISPLAY_NAME) {
@@ -697,10 +699,10 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
 documentsRouter.post("/:id/files/ocr/structure-text", authenticate, async (req, res) => {
   try {
     const document = await prisma.document.findFirst({
-      where: documentWhereById(req.params.id, req.user, { editorOnly: false }),
+      where: documentWhereById(req.params.id, req.user, { editorOnly: true }),
     });
     if (!document) {
-      res.status(404).json({ ok: false, error: "Document not found" });
+      res.status(404).json({ ok: false, error: "Document not found or no edit permission" });
       return;
     }
     if (!isStaffDocumentWriter(req.user) && document.displayName === HELP_DOC_DISPLAY_NAME) {
@@ -809,7 +811,11 @@ documentsRouter.get("/:id/files/:index/download", authenticate, async (req, res)
     return;
   }
 
-  if (!isPathInsideRoot(localFilesRoot, filePath)) {
+  // Scope downloads to this document's owner tree under .files/ (block cross-user path IDOR)
+  const ownerScopedRoot = path.join(localFilesRoot, String(document.ownerId || ""));
+  const docScopedRoot = path.join(ownerScopedRoot, String(document.id || ""));
+  const allowedRoot = fs.existsSync(docScopedRoot) ? docScopedRoot : ownerScopedRoot;
+  if (!isPathInsideRoot(localFilesRoot, filePath) || !isPathInsideRoot(allowedRoot, filePath)) {
     res.status(400).json({ error: "Invalid file path" });
     return;
   }

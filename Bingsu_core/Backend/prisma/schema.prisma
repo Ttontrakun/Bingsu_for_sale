@@ -416,3 +416,32 @@ model ServiceRate {
   @@unique([service, kind, speed])
   @@index([service, kind])
 }
+
+/**
+ * ตารางอำนาจอนุมัติแบบ structured — chat lookup ก่อน RAG/prompt
+ * conditionKey:
+ *   - pct_le_50      ส่วนลดไม่เกิน 50% ของ Price List
+ *   - pct_gt_50_floor ส่วนลดเกิน 50% แต่ไม่เกิน Floor Price
+ *   - over_floor      ส่วนลดเกิน Floor Price
+ *   - pct_range       ช่วง % ทั่วไป (ใช้ minPct/maxPct)
+ *   - other           อื่นๆ (จับด้วย label/note)
+ */
+model ApprovalAuthorityRule {
+  id             String   @id @default(cuid())
+  serviceKey     String
+  serviceName    String
+  conditionKey   String
+  conditionLabel String?
+  minPct         Float?
+  maxPct         Float?
+  approverAbbr   String
+  approverFull   String?
+  note           String?
+  sortOrder      Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([serviceKey, active])
+  @@index([serviceKey, conditionKey])
+}

@@ -16,6 +16,7 @@ import {
   HiThumbDown,
   HiChevronDown,
   HiRefresh,
+  HiPlus,
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import avatarMale from '../assets/avatars/user_male.png';
@@ -171,13 +172,19 @@ const isGeneratedFollowUpPrompt = (text) => {
 
 const parsePrivateCommand = (text) => {
   const raw = String(text || '').trim();
-  if (!raw.startsWith('/')) return null;
-  const match = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
-  if (!match) return null;
-  return {
-    kind: match[1] === 'จำ' ? 'remember' : 'instruction',
-    payload: String(match[2] || '').trim(),
-  };
+  const slash = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
+  if (slash) {
+    return {
+      kind: slash[1] === 'จำ' ? 'remember' : 'instruction',
+      payload: String(slash[2] || '').trim(),
+    };
+  }
+  // ภาษาธรรมชาติในโหมดส่วนตัว: "จำว่า..." / "จำไว้ว่า..."
+  const soft = raw.match(/^(?:จำไว้ว่า|จำว่า|ขอให้จำ(?:ว่า)?|ให้จำว่า)\s+([\s\S]+)$/i);
+  if (soft && String(soft[1] || '').trim().length >= 4) {
+    return { kind: 'remember', payload: String(soft[1] || '').trim() };
+  }
+  return null;
 };
 
 const parseRememberedItems = (content) =>
@@ -185,6 +192,22 @@ const parseRememberedItems = (content) =>
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
+
+/** เสนอ /สั่ง เบื้องต้นในโหมดส่วนตัว เมื่อยังไม่มีคำสั่ง AI */
+const PRIVATE_ORDER_STARTERS = [
+  '/สั่ง ตอบสั้น ตรงประเด็น เป็นข้อๆ',
+  '/สั่ง ตอบละเอียด อธิบายเงื่อนไขให้ครบ',
+  '/สั่ง ใช้ภาษาทางการ สุภาพ',
+];
+
+const isPrivateCommandSuggestion = (text) => /^\/(จำ|สั่ง)\b/.test(String(text || '').trim());
+
+const mergePrivateOrderStarters = (suggestions, { privateMode, hasInstructions }) => {
+  const base = Array.isArray(suggestions) ? suggestions.filter(Boolean) : [];
+  if (!privateMode || hasInstructions) return base.slice(0, 5);
+  const starters = PRIVATE_ORDER_STARTERS.filter((s) => !base.includes(s));
+  return [...starters.slice(0, 2), ...base].slice(0, 5);
+};
 
 
 // สวิตช์: คำตอบบอท "บับเบิลขาวแบบเต็มความกว้าง" (มีบับเบิล แต่กว้างเต็ม ไม่ใช่ 80%)
@@ -252,7 +275,9 @@ function Chat() {
   };
   const [usePrivateContent, setUsePrivateContent] = useState(true);
   const [, setPrivateHasData] = useState(false);
+  const [hasPrivateInstructions, setHasPrivateInstructions] = useState(false);
   const [composerPrivateCommand, setComposerPrivateCommand] = useState(null); // 'remember' | 'instruction' | null
+  const [privateCmdMenuOpen, setPrivateCmdMenuOpen] = useState(false);
   const privateModeRef = useRef(false);
   const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
@@ -361,6 +386,7 @@ function Chat() {
       const hasInstructions = String(data?.instructions || '').trim().length > 0;
       const hasRemembered = parseRememberedItems(String(data?.content || '')).length > 0;
       setPrivateHasData(Boolean(hasInstructions || hasRemembered));
+      setHasPrivateInstructions(hasInstructions);
     } catch (_) {
       // ignore
     }
@@ -1149,8 +1175,8 @@ function Chat() {
         {
           id: botTempId,
           text: privateCmd.kind === 'remember'
-            ? 'บันทึกข้อมูลส่วนตัวแล้ว ใช้ต่อในแชทใหม่ได้ทันที'
-            : 'บันทึกคำสั่ง AI แล้ว ระบบจะใช้รูปแบบนี้ในการตอบถัดไป',
+            ? 'บันทึกในโหมดส่วนตัวแล้ว — ใช้เฉพาะโหมดส่วนตัวของคุณ (ไม่กระทบคำตอบโหมดปกติจากเอกสารระบบ) ถามต่อได้เลย'
+            : 'บันทึกคำสั่ง AI แล้ว ระบบจะใช้รูปแบบนี้ในการตอบถัดไป (เฉพาะโหมดส่วนตัว)',
           sender: 'bot',
           timestamp: new Date(),
         },
@@ -1621,7 +1647,7 @@ function Chat() {
     handleSendMessage({ preventDefault: () => {} }, question);
   };
 
-  const openSourceReference = (message, ref) => {
+  const openSourceReference = async (message, ref) => {
     if (!ENABLE_SOURCE_REFERENCES) return;
     if (!message || !ref?.docId) return;
     if (String(ref.docId) === '__private__') {
@@ -1631,8 +1657,32 @@ function Chat() {
         positions: [],
         chunks: [],
         isPrivate: true,
+        privateLoading: true,
+        privateItems: [],
+        privateInstructions: '',
       });
       setIsSourceModalOpen(true);
+      try {
+        const data = await privateContextAPI.get();
+        const items = parseRememberedItems(String(data?.content || ''));
+        const instructions = String(data?.instructions || '').trim();
+        setSourceModalData((prev) => (
+          prev && prev.docId === '__private__'
+            ? {
+                ...prev,
+                privateLoading: false,
+                privateItems: items,
+                privateInstructions: instructions,
+              }
+            : prev
+        ));
+      } catch (_) {
+        setSourceModalData((prev) => (
+          prev && prev.docId === '__private__'
+            ? { ...prev, privateLoading: false, privateLoadError: true }
+            : prev
+        ));
+      }
       return;
     }
     const relatedChunks = parseStoredJsonArray(message.groundingChunks)
@@ -1667,16 +1717,39 @@ function Chat() {
     setIsSourceModalOpen(true);
   };
 
+  const DOCUMENT_SCOPE_FOLLOWUPS = [
+    'มีเอกสารอะไรบ้าง',
+    'สรุปภาพรวมเอกสารที่เลือก',
+    'ถามเรื่องราคา ส่วนลด หรืออำนาจอนุมัติได้ไหม',
+  ];
+
+  const isOutOfDocumentScopeReply = (text) =>
+    /นอกขอบเขต|ยังไม่พบข้อมูลที่ตรงจากเอกสาร|ไม่สามารถยืนยันคำตอบได้|ตอบได้เฉพาะ.*(เอกสาร|ชุดความรู้)/.test(
+      String(text || ''),
+    );
+
   /** ขอคำถามต่อเนื่องจาก AI หลังบอทตอบเสร็จ — ถ้าคำขอเก่ากว่าล่าสุดจะทิ้งผลไป (กัน race) */
   const fetchFollowUpSuggestions = async (question, answer) => {
     const replyText = String(answer || '').trim();
     const questionText = String(question || '').trim();
     if (!replyText || questionText.startsWith('/')) return;
     const requestId = ++followUpRequestIdRef.current;
+    // นอกขอบเขต: ไม่ต่อยอดจากคำถามนอกกรอบ — เสนอให้ถามในเอกสารแทน
+    if (isOutOfDocumentScopeReply(replyText)) {
+      if (followUpRequestIdRef.current === requestId) {
+        setAiFollowUps(DOCUMENT_SCOPE_FOLLOWUPS);
+      }
+      return;
+    }
     try {
       const items = await chatMessageAPI.getFollowUpSuggestions(chatId, questionText, replyText);
       if (followUpRequestIdRef.current === requestId && Array.isArray(items) && items.length > 0) {
-        setAiFollowUps(items);
+        setAiFollowUps(mergePrivateOrderStarters(items, {
+          privateMode: privateModeRef.current,
+          hasInstructions: hasPrivateInstructions,
+        }));
+      } else if (followUpRequestIdRef.current === requestId && privateModeRef.current && !hasPrivateInstructions) {
+        setAiFollowUps(PRIVATE_ORDER_STARTERS.slice(0, 2));
       }
     } catch {
       // เงียบไว้ — ปุ่ม rule-based เดิมยังแสดงเป็น fallback
@@ -1700,6 +1773,9 @@ function Chat() {
 
     if (/^ผู้อนุมัติ\s*:/i.test(text) || /ผู้อนุมัติ|อำนาจอนุมัติ|ใครอนุมัติ/.test(question)) {
       return ['ดูรายละเอียดเพิ่มเติม', 'ขออ้างอิงข้อที่เกี่ยวข้อง'];
+    }
+    if (isOutOfDocumentScopeReply(text) || /นอกขอบเขต/.test(text)) {
+      return DOCUMENT_SCOPE_FOLLOWUPS;
     }
     if (/ยังไม่พบข้อมูลที่ตรง|ไม่พบข้อมูลที่ชัดเจน|ข้อมูลไม่เพียงพอ/.test(text)) {
       return ['มีเอกสารอะไรบ้าง', 'ลองระบุชื่อข้อ/หัวข้อที่ต้องการ'];
@@ -2018,6 +2094,7 @@ function Chat() {
                                           <BotMarkdown
                                             text={textNormalized}
                                             citationCount={Array.isArray(message.references) ? message.references.length : 0}
+                                            references={Array.isArray(message.references) ? message.references : null}
                                           />
                                         );
                                       }
@@ -2162,9 +2239,12 @@ function Chat() {
                                 if (!isLastBot) return null;
                                 const previousQuestion = getPreviousUserQuestion(index);
                                 const usingAiFollowUps = aiFollowUps.length > 0;
-                                const suggestions = usingAiFollowUps
-                                  ? aiFollowUps
-                                  : getSuggestedFollowUps(message.text, previousQuestion);
+                                const suggestions = mergePrivateOrderStarters(
+                                  usingAiFollowUps
+                                    ? aiFollowUps
+                                    : getSuggestedFollowUps(message.text, previousQuestion),
+                                  { privateMode, hasInstructions: hasPrivateInstructions },
+                                );
                                 const suggestDisabled = isTyping || (selectedBot && selectedBot.enabled === false);
                                 return (
                                   <div className='flex flex-col items-start gap-1.5 mt-2'>
@@ -2173,18 +2253,22 @@ function Chat() {
                                         <button
                                           type='button'
                                           onClick={() => {
-                                            if (usingAiFollowUps) {
+                                            if (isPrivateCommandSuggestion(q) || usingAiFollowUps) {
                                               handleSendMessage({ preventDefault: () => {} }, q);
                                             } else {
                                               handleSuggestedFollowUpClick(q, message, index);
                                             }
                                           }}
                                           disabled={suggestDisabled}
-                                          title='ส่งคำถามนี้'
-                                          className='inline-flex items-center gap-2 max-w-full rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-700 shadow-sm hover:border-amber-300 hover:bg-amber-50/70 transition-colors disabled:opacity-50 text-left'
+                                          title={isPrivateCommandSuggestion(q) ? 'บันทึกคำสั่งนี้' : 'ส่งคำถามนี้'}
+                                          className={`inline-flex items-center gap-2 max-w-full rounded-full border px-3 py-1.5 text-xs shadow-sm transition-colors disabled:opacity-50 text-left ${
+                                            isPrivateCommandSuggestion(q)
+                                              ? 'border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100 font-medium'
+                                              : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300 hover:bg-amber-50/70'
+                                          }`}
                                         >
                                           <span className='truncate'>{q}</span>
-                                          <HiOutlinePaperAirplane className='rotate-90 text-sm text-gray-400 flex-shrink-0' />
+                                          <HiOutlinePaperAirplane className={`rotate-90 text-sm flex-shrink-0 ${isPrivateCommandSuggestion(q) ? 'text-blue-400' : 'text-gray-400'}`} />
                                         </button>
                                         {usingAiFollowUps && (
                                           <button
@@ -2291,11 +2375,65 @@ function Chat() {
                   ? 'border-red-300 bg-red-50'
                   : 'border-gray-300 hover:border-yellow-400 focus-within:border-yellow-400'
               }`}>
+                {privateMode && (
+                  <div className='relative self-center ml-2 mb-1 flex-shrink-0'>
+                    <button
+                      type='button'
+                      onClick={() => setPrivateCmdMenuOpen((v) => !v)}
+                      className={`inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${
+                        privateCmdMenuOpen || composerPrivateCommand
+                          ? 'border-blue-300 bg-blue-50 text-blue-700'
+                          : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                      }`}
+                      title='เลือกคำสั่ง /จำ หรือ /สั่ง'
+                      aria-label='เลือกคำสั่งส่วนตัว'
+                      aria-expanded={privateCmdMenuOpen}
+                    >
+                      <HiPlus className={`text-lg transition-transform ${privateCmdMenuOpen ? 'rotate-45' : ''}`} />
+                    </button>
+                    {privateCmdMenuOpen && (
+                      <>
+                        <button
+                          type='button'
+                          className='fixed inset-0 z-40 cursor-default'
+                          aria-label='ปิดเมนู'
+                          onClick={() => setPrivateCmdMenuOpen(false)}
+                        />
+                        <div className='absolute left-0 bottom-full mb-2 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              setComposerPrivateCommand('remember');
+                              setPrivateCmdMenuOpen(false);
+                              requestAnimationFrame(() => textareaRef.current?.focus());
+                            }}
+                            className='w-full px-3 py-2.5 text-left hover:bg-blue-50 transition-colors'
+                          >
+                            <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/จำ</span>
+                            <span className='block text-[11px] text-gray-500 mt-1'>บอกข้อมูลให้ระบบจำไว้ใช้ตอบ</span>
+                          </button>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              setComposerPrivateCommand('instruction');
+                              setPrivateCmdMenuOpen(false);
+                              requestAnimationFrame(() => textareaRef.current?.focus());
+                            }}
+                            className='w-full px-3 py-2.5 text-left border-t border-gray-100 hover:bg-blue-50 transition-colors'
+                          >
+                            <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/สั่ง</span>
+                            <span className='block text-[11px] text-gray-500 mt-1'>บอกว่าระบบควรตอบแบบไหน เช่น ตอบสั้น เป็นข้อๆ</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 {privateMode && composerPrivateCommand && (
                   <button
                     type='button'
                     onClick={() => setComposerPrivateCommand(null)}
-                    className='self-center mb-1 ml-1 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-700'
+                    className='self-center mb-1 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-700'
                     title='ปิดโหมดคำสั่ง'
                   >
                     <span className='font-semibold'>{composerPrivateCommand === 'remember' ? '/จำ' : '/สั่ง'}</span>
@@ -2474,11 +2612,51 @@ function Chat() {
                 </div>
               )}
               {sourceModalData.isPrivate ? (
-                <div className='rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-gray-700 space-y-1'>
-                  <p className='text-sm font-medium text-gray-800'>อ้างอิงจากเนื้อหาส่วนตัวของคุณ</p>
-                  <p className='text-xs text-gray-600 leading-relaxed'>
-                    คำตอบส่วนนี้อ้างอิงจากเนื้อหาที่คุณตั้งไว้ในโหมดส่วนตัว (ไม่ได้มาจากเอกสารในระบบ) — แก้ไขได้โดยพิมพ์ /จำ หรือ /สั่ง ในแชท หรือที่หน้าโหมดส่วนตัว
-                  </p>
+                <div className='space-y-3'>
+                  <div className='rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-gray-700 space-y-1'>
+                    <p className='text-sm font-medium text-violet-900'>อ้างอิงจากเนื้อหาส่วนตัวของคุณ</p>
+                    <p className='text-xs text-violet-800/80 leading-relaxed'>
+                      คำตอบส่วนนี้อ้างอิงจากข้อมูลที่คุณตั้งในโหมดส่วนตัว (ไม่ใช่เอกสารระบบ) — แก้ไขด้วย /จำ หรือ /สั่ง
+                    </p>
+                  </div>
+                  {sourceModalData.privateLoading ? (
+                    <p className='text-sm text-gray-500 px-1'>กำลังโหลดเนื้อหาส่วนตัว...</p>
+                  ) : sourceModalData.privateLoadError ? (
+                    <p className='text-sm text-red-600 px-1'>โหลดเนื้อหาส่วนตัวไม่สำเร็จ ลองเปิดใหม่อีกครั้ง</p>
+                  ) : (
+                    <>
+                      {sourceModalData.privateInstructions ? (
+                        <div className='rounded-lg border border-violet-200 bg-white px-3 py-2.5'>
+                          <p className='text-xs font-semibold text-violet-800 mb-1'>คำสั่ง AI (/สั่ง)</p>
+                          <p className='text-sm text-gray-800 whitespace-pre-wrap leading-relaxed'>
+                            {sourceModalData.privateInstructions}
+                          </p>
+                        </div>
+                      ) : null}
+                      {Array.isArray(sourceModalData.privateItems) && sourceModalData.privateItems.length > 0 ? (
+                        <div className='space-y-2'>
+                          <p className='text-xs font-semibold text-gray-600 px-1'>
+                            ความจำที่บันทึกไว้ ({sourceModalData.privateItems.length})
+                          </p>
+                          {sourceModalData.privateItems.map((item, idx) => (
+                            <div
+                              key={`priv-${idx}`}
+                              className='rounded-lg border border-violet-200 bg-violet-50/60 px-3 py-2.5'
+                            >
+                              <p className='text-xs font-semibold text-violet-800 mb-1'>รายการที่ {idx + 1}</p>
+                              <p className='text-sm text-gray-900 font-medium whitespace-pre-wrap leading-relaxed'>
+                                {item}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className='rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-gray-600 text-sm'>
+                          ยังไม่พบข้อความในคลังส่วนตัว — ลองพิมพ์ <code className='text-xs'>/จำ ...</code> ในโหมดส่วนตัว
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               ) : Array.isArray(sourceModalData.chunks) && sourceModalData.chunks.length > 0 ? (
                 sourceModalData.chunks.map((chunk, idx) => {

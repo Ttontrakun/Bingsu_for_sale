@@ -1,14 +1,23 @@
 /**
  * หน้าเทส OCR เท่านั้น — ไม่ยุ่งกับระบบหลัก
- * - POST /api/test/ocr-extract: ไฟล์ PDF/รูป → proxy ไป OCR API
- * - POST /api/test/ocr-clean: ข้อความ → LLM จัดรูปแบบ
- * - POST /api/test/ocr-structure: ข้อความ → LLM จัดโครงสร้าง (หัวข้อ ย่อหน้า รายการ)
+ * Production: ปิดทั้งหมด (404). Non-production: ต้องเป็น admin
  */
 import { Router } from "express";
+import { authenticate, requireAdmin } from "../lib/auth.js";
+import { isProduction } from "../config.js";
 import { runOcrExtract } from "../services/uploadQueue.js";
 import { cleanOcrTextWithLlm, structureOcrTextWithLlm } from "../services/chat.js";
 
 const router = Router();
+
+router.use((req, res, next) => {
+  if (isProduction) {
+    res.status(404).json({ ok: false, error: "Not found" });
+    return;
+  }
+  next();
+});
+router.use(authenticate, requireAdmin);
 
 /** เทสเท่านั้น — เรียก LLM จัดโครงสร้าง (ใช้ฟังก์ชันเดียวกับ upload flow) */
 async function structureTextForTest(text) {

@@ -14,6 +14,7 @@ import {
   hasMultipleQuestions,
   extractEvidenceTokens,
   hasSufficientGroundingEvidence,
+  buildAuthorityRetrievalQuery,
 } from "./queryClassifiers.js";
 
 export const isAuthoritySourceDocument = (doc) => {
@@ -150,14 +151,20 @@ export const resolveGroundingChunks = async ({
   secondaryDocumentIds,
   fast = false,
 }) => {
+  // คำถามยืนยันบทบาท → ค้นด้วยรูป "ใครอนุมัติ..." ให้เจอตารางอำนาจเหมือนถามว่าใคร
+  const authorityQuery = buildAuthorityRetrievalQuery(message);
+  const effectiveQuery = authorityQuery && authorityQuery !== message
+    ? `${authorityQuery}\n${retrievalQuery}`
+    : retrievalQuery;
+
   let retrievalDocumentIds = primaryDocumentIds;
-  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, retrievalQuery, { fast });
+  let groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, effectiveQuery, { fast });
   if (
     secondaryDocumentIds
     && (groundingChunks.length === 0 || !hasSufficientGroundingEvidence(message, groundingChunks))
   ) {
     retrievalDocumentIds = secondaryDocumentIds;
-    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, retrievalQuery, { fast });
+    groundingChunks = await retrieveGroundingChunks(retrievalDocumentIds, effectiveQuery, { fast });
   }
 
   const insufficient =
@@ -172,7 +179,7 @@ export const resolveGroundingChunks = async ({
   }
 
   // รวมคำถามก่อนหน้าเข้ากับคำถามปัจจุบัน เพื่อให้ embedding มี keyword พอจะค้นเจอ
-  const mergedQuery = `${prevQuestion}\n${retrievalQuery}`.trim();
+  const mergedQuery = `${prevQuestion}\n${effectiveQuery}`.trim();
   if (process.env.DEBUG_RAG === "1") {
     console.log(
       `[rag] history-merge: msg="${message}" | retrievalQuery="${retrievalQuery}" | prevQuestion="${prevQuestion}" | merged="${mergedQuery.replace(/\n/g, " | ")}"`,

@@ -73,12 +73,16 @@ function Navbar({ onCollapseChange, userRole }) {
     setIsAccountModalOpen(true);
   };
 
-  const handleSignOut = () => {
-    api.logout();
+  const handleSignOut = async () => {
+    try {
+      await api.logout();
+    } catch (_) {
+      /* ignore */
+    }
     navigate('/login');
   };
 
-  const canSeeDashboard = userRole === 'admin' || userRole === 'admin_metrics';
+  const canSeeDashboard = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
   const canSeeBots = userRole === 'admin' || userRole === 'support';
   const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
   const canSeeFeedback = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';

@@ -2,7 +2,13 @@ import { prisma } from "../db.js";
 import crypto from "crypto";
 import { sessionCookieName } from "../config.js";
 
-const SENSITIVE_KEYS = ["passwordHash", "emailVerificationToken", "passwordResetToken"];
+const SENSITIVE_KEYS = [
+  "passwordHash",
+  "emailVerificationToken",
+  "emailVerificationExpiresAt",
+  "passwordResetToken",
+  "passwordResetExpiresAt",
+];
 const hashSessionToken = (token) =>
   crypto.createHash("sha256").update(String(token || "")).digest("hex");
 

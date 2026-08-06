@@ -1,7 +1,9 @@
 /**
  * Internal endpoints — ใช้เมื่อ Bing Website โฟร์วาร์ดคำขอ OCR มา (ไม่ต้อง auth แบบ session)
  * POST /api/internal/ocr-extract = รับไฟล์ ทำ OCR ด้วย runOcrExtract ส่งกลับ format Bing
+ * ต้องตั้ง ASKAA_INTERNAL_KEY และส่ง header x-internal-key เสมอ (fail-closed)
  */
+import crypto from "crypto";
 import express from "express";
 import multer from "multer";
 import { runOcrExtract } from "../services/uploadQueue.js";
@@ -9,11 +11,21 @@ import { runOcrExtract } from "../services/uploadQueue.js";
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 
+function safeEqualString(a, b) {
+  const left = Buffer.from(String(a || ""), "utf8");
+  const right = Buffer.from(String(b || ""), "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
 function checkInternalKey(req, res, next) {
-  const key = process.env.ASKAA_INTERNAL_KEY;
-  if (!key) return next();
+  const key = String(process.env.ASKAA_INTERNAL_KEY || "").trim();
+  if (!key) {
+    res.status(503).json({ ok: false, error: "Internal API key is not configured" });
+    return;
+  }
   const sent = req.headers["x-internal-key"];
-  if (sent !== key) {
+  if (!safeEqualString(sent, key)) {
     res.status(403).json({ ok: false, error: "Forbidden" });
     return;
   }

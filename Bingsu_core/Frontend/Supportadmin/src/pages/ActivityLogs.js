@@ -63,7 +63,7 @@ const EVENT_LABEL_TH = {
   'admin.upload.batch.retry': 'Retry อัปโหลดไฟล์ (แอดมิน)',
   'admin.user.deleted': 'ลบผู้ใช้ (แอดมิน)',
   'admin.user.password.reset': 'รีเซ็ตรหัสผ่านผู้ใช้ (แอดมิน)',
-  'support.user.deleted': 'ลบผู้ใช้ (ซัพพอร์ต)',
+  'support.user.deleted': 'ลบผู้ใช้',
   'support.pending_approval.email.failed': 'แจ้งอีเมลรออนุมัติล้มเหลว',
   'bot.created': 'สร้างบอท',
   'bot.updated': 'แก้ไขบอท',
@@ -354,7 +354,7 @@ function formatAdminSummary(eventMessage, meta) {
     }
     case 'support.user.deleted': {
       const who = [m.name, m.email].filter(Boolean).join(' · ');
-      return who ? `ซัพพอร์ตลบบัญชีผู้ใช้ ${who}` : 'ซัพพอร์ตลบบัญชีผู้ใช้';
+      return who ? `ลบบัญชีผู้ใช้ ${who}` : 'ลบบัญชีผู้ใช้';
     }
     case 'support.pending_approval.email.failed':
       return m.error

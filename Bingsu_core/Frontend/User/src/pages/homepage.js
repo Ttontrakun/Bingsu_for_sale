@@ -4,6 +4,7 @@ import {
   HiOutlinePaperAirplane,
   HiLockClosed,
   HiX,
+  HiPlus,
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import Sidebar from '../components/Sidebar';
@@ -22,10 +23,15 @@ const isCorruptedText = (value) => {
 
 const parsePrivateCommand = (text) => {
   const raw = String(text || '').trim();
-  if (!raw.startsWith('/')) return null;
-  const m = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
-  if (!m) return null;
-  return { kind: m[1] === 'จำ' ? 'remember' : 'instruction', payload: String(m[2] || '').trim() };
+  const slash = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
+  if (slash) {
+    return { kind: slash[1] === 'จำ' ? 'remember' : 'instruction', payload: String(slash[2] || '').trim() };
+  }
+  const soft = raw.match(/^(?:จำไว้ว่า|จำว่า|ขอให้จำ(?:ว่า)?|ให้จำว่า)\s+([\s\S]+)$/i);
+  if (soft && String(soft[1] || '').trim().length >= 4) {
+    return { kind: 'remember', payload: String(soft[1] || '').trim() };
+  }
+  return null;
 };
 
 // รูปแบบจัดเก็บ 1 บรรทัด = 1 ความจำ โดยหัวข้อ (ถ้ามี) คั่นด้วย [[...]] ที่ต้นบรรทัด
@@ -82,6 +88,7 @@ function Homepage({ privateMode = false }) {
   const [newMemoryDraft, setNewMemoryDraft] = useState('');
   const [newMemoryTitleDraft, setNewMemoryTitleDraft] = useState('');
   const [composerPrivateCommand, setComposerPrivateCommand] = useState(null); // 'remember' | 'instruction' | null
+  const [privateCmdMenuOpen, setPrivateCmdMenuOpen] = useState(false);
 
   const refreshPrivateMemory = useCallback(async () => {
     const data = await privateContextAPI.get();
@@ -466,15 +473,37 @@ function Homepage({ privateMode = false }) {
 
         {privateMode && (
           <div className='w-full max-w-4xl mb-4'>
-            <div className='p-4 rounded-2xl border border-yellow-300 bg-yellow-50'>
-              <p className='text-sm font-semibold text-gray-800 mb-1'>โหมดส่วนตัว (ใช้ง่ายขึ้น)</p>
-              <p className='text-xs text-gray-600 mb-1'>พิมพ์ในแชทได้เลย:</p>
-              <p className='text-xs text-gray-700'><code>/จำ ข้อมูลที่ต้องการให้ AI จำ</code></p>
-              <p className='text-xs text-gray-700'><code>/สั่ง รูปแบบการตอบที่ต้องการ</code></p>
-              <p className='text-xs text-gray-500 mt-2'>
-                {privateHasData
-                  ? 'มีข้อมูลส่วนตัวบันทึกไว้แล้ว และระบบจะจำข้ามแชทให้อัตโนมัติ'
-                  : 'ยังไม่มีข้อมูลส่วนตัว — ลองพิมพ์ /จำ หรือ /สั่ง ในแชทด้านล่าง'}
+            <div className='px-4 py-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-white'>
+              <p className='text-sm font-semibold text-gray-900'>โหมดส่วนตัว</p>
+              <p className='text-xs text-gray-600 mt-1 leading-relaxed'>
+                ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น
+              </p>
+              <div className='mt-2 space-y-1.5 text-xs text-gray-700'>
+                <p className='flex items-center gap-2'>
+                  <button
+                    type='button'
+                    onClick={() => setComposerPrivateCommand('remember')}
+                    className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors'
+                    title='ใช้คำสั่ง /จำ'
+                  >
+                    /จำ
+                  </button>
+                  <span>บอกข้อมูลที่ต้องการให้ระบบจำไว้ใช้ตอบ</span>
+                </p>
+                <p className='flex items-center gap-2'>
+                  <button
+                    type='button'
+                    onClick={() => setComposerPrivateCommand('instruction')}
+                    className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100 transition-colors'
+                    title='ใช้คำสั่ง /สั่ง'
+                  >
+                    /สั่ง
+                  </button>
+                  <span>บอกว่าระบบควรตอบแบบไหน เช่น ตอบสั้น เป็นข้อๆ</span>
+                </p>
+              </div>
+              <p className='text-[11px] text-amber-800/80 mt-2'>
+                {privateHasData ? 'มีข้อมูลส่วนตัวบันทึกไว้แล้ว' : 'ยังไม่มีข้อมูลส่วนตัว — เริ่มด้วย /จำ หรือ /สั่ง'}
               </p>
             </div>
           </div>
@@ -497,7 +526,59 @@ function Homepage({ privateMode = false }) {
         {/* Chat Input */}
         <div className='w-full max-w-4xl flex justify-center'>
           <div className='w-full'>
-            <div className='flex items-center gap-2 border-4 border-yellow-400 rounded-3xl px-6 py-4 bg-white shadow-lg w-full'>
+            <div className='flex items-center gap-2 border-4 border-yellow-400 rounded-3xl px-4 sm:px-6 py-4 bg-white shadow-lg w-full'>
+            {privateMode && (
+              <div className='relative flex-shrink-0'>
+                <button
+                  type='button'
+                  onClick={() => setPrivateCmdMenuOpen((v) => !v)}
+                  className={`inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${
+                    privateCmdMenuOpen || typedPrivateCommand
+                      ? 'border-blue-300 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                  title='เลือกคำสั่ง /จำ หรือ /สั่ง'
+                  aria-label='เลือกคำสั่งส่วนตัว'
+                  aria-expanded={privateCmdMenuOpen}
+                >
+                  <HiPlus className={`text-lg transition-transform ${privateCmdMenuOpen ? 'rotate-45' : ''}`} />
+                </button>
+                {privateCmdMenuOpen && (
+                  <>
+                    <button
+                      type='button'
+                      className='fixed inset-0 z-40 cursor-default'
+                      aria-label='ปิดเมนู'
+                      onClick={() => setPrivateCmdMenuOpen(false)}
+                    />
+                    <div className='absolute left-0 bottom-full mb-2 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden'>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setComposerPrivateCommand('remember');
+                          setPrivateCmdMenuOpen(false);
+                        }}
+                        className='w-full px-3 py-2.5 text-left hover:bg-blue-50 transition-colors'
+                      >
+                        <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/จำ</span>
+                        <span className='block text-[11px] text-gray-500 mt-1'>บอกข้อมูลให้ระบบจำไว้ใช้ตอบ</span>
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => {
+                          setComposerPrivateCommand('instruction');
+                          setPrivateCmdMenuOpen(false);
+                        }}
+                        className='w-full px-3 py-2.5 text-left border-t border-gray-100 hover:bg-blue-50 transition-colors'
+                      >
+                        <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/สั่ง</span>
+                        <span className='block text-[11px] text-gray-500 mt-1'>บอกว่าระบบควรตอบแบบไหน</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {privateMode && typedPrivateCommand && (
               <button
                 type='button'
@@ -506,6 +587,7 @@ function Homepage({ privateMode = false }) {
                 title='ปิดโหมดคำสั่ง'
               >
                 <span className='font-semibold'>{typedPrivateCommand === 'remember' ? '/จำ' : '/สั่ง'}</span>
+                <HiX className='text-xs' />
               </button>
             )}
             <textarea

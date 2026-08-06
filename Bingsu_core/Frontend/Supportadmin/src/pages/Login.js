@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
-import ntLogo from '../assets/images/NT_Logo.png';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
+import NtBrandBar from '../components/NtBrandBar';
 import { api } from '../services/api';
 
 function Login() {
@@ -89,14 +89,10 @@ function Login() {
   };
 
   return (
-    <div className='relative flex items-center justify-center min-h-screen bg-[#D9D9D9]'>
-      {/* Logo at top-left corner */}
-      <div className="absolute top-5 left-5 z-10 hidden md:block">
-        <a href="https://ntplc.co.th/home" target="_blank" rel="noopener noreferrer">
-          <img src={ntLogo} alt="NT Logo" className="max-w-[150px] max-h-[150px] object-contain hover:opacity-80 transition-opacity cursor-pointer" />
-        </a>
-      </div>
-      
+    <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
+      <NtBrandBar />
+
+      <div className="relative flex flex-1 items-center justify-center px-4 py-8">
       {/* Card - Centered */}
       <div className="relative w-full max-w-[520px] rounded-[2rem] bg-white p-10 shadow-[0_10px_30px_rgba(0,0,0,0.08)] m-4"
       style={{
@@ -318,6 +314,7 @@ function Login() {
         </div>
         </div>
         </div>
+      </div>
       </div>
     </div>
   );

@@ -118,7 +118,7 @@ integrationsRouter.patch("/integrations/:provider", authenticate, async (req, re
     res.json({
       provider: updated.provider,
       enabled: updated.enabled,
-      config: updated.config ?? null,
+      config: provider === "line" ? maskLineConfig(updated.config) : (updated.config ?? null),
       updatedAt: updated.updatedAt.toISOString(),
     });
   } catch (e) {

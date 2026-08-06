@@ -11,7 +11,20 @@ backups/
 
 _tmp_rb7/
 
-_tmp_rb7/
 *.docx
 Bingsu_core/Backend/knowledge_*.md
 Bingsu_core/docs/
+
+# Uploaded / ingested knowledge documents (do not commit)
+**/uploads/
+**/upload/
+**/knowledge_data/
+**/storage/
+**/*.pdf
+**/*.xlsx
+**/*.xls
+**/*.pptx
+
+# Unused leftover brand dumps (not used by UI)
+Bingsu_core/Frontend/User/src/assets/images/nt-logo-national-telecom.png
+Bingsu_core/Frontend/User/src/assets/images/nt-building.jpg

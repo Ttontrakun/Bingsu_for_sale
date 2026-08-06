@@ -11,7 +11,6 @@ function ForgotPassword() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [resetToken, setResetToken] = useState(null);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,21 +22,11 @@ function ForgotPassword() {
     setError('');
 
     try {
-      const response = await authAPI.forgotPassword(email);
+      await authAPI.forgotPassword(email);
       setIsSubmitted(true);
-      
-      // For development: store reset token if provided
-      if (response.resetToken) {
-        setResetToken(response.resetToken);
-        // Show reset link instead of navigating directly
-        // User can click the link to go to reset password page
-      } else {
-        // In production, user should check email
-        // For now, show success message
       setTimeout(() => {
-          navigate('/auth');
+        navigate('/auth');
       }, 3000);
-      }
     } catch (error) {
       console.error('Error requesting password reset:', error);
       const errorMessage = getErrorMessage(error);
@@ -143,22 +132,6 @@ function ForgotPassword() {
                 <p className="text-sm text-zinc-600 mb-4">
                   We've sent a password reset link to your email. Please check your inbox.
                 </p>
-                
-                {/* Show reset link for development */}
-                {resetToken && (
-                  <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200">
-                    <p className="text-xs text-green-700 mb-2 text-center">
-                      Development: ดำเนินการรีเซ็ตรหัสผ่านต่อ
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/reset-password', { state: { token: resetToken } })}
-                      className="text-xs text-green-600 hover:text-green-700 underline block text-center w-full"
-                    >
-                      ไปที่หน้าตั้งรหัสผ่านใหม่
-                    </button>
-                  </div>
-                )}
                 
                 <button
                   onClick={() => navigate('/auth')}

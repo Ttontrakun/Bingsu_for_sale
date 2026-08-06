@@ -9,6 +9,7 @@ import Approval from './pages/Approval';
 import Chat from './pages/Chat';
 import PrivacyPolicy from './pages/PrivacyPolicy';
 import ToastContainer from './components/ToastNotification';
+import RequireAuth from './components/RequireAuth';
 
 function App() {
   return (
@@ -20,15 +21,15 @@ function App() {
         <Route path="/" element={<Navigate to="/auth" replace />} />
         <Route path="/forgotpassword" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/homepage" element={<Homepage />} />
-        <Route path="/private" element={<Homepage privateMode />} />
         <Route path="/verifying" element={<Verifying />} />
         <Route path="/create-password" element={<CreatePassword />} />
         <Route path="/approval" element={<Approval />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-        <Route path="/chat/:chatId" element={<Chat />} />
-        {/* redirect เส้นทางเก่าที่ user ไม่ควรเข้าได้อีก */}
-        <Route path="*" element={<Navigate to="/homepage" replace />} />
+        <Route path="/homepage" element={<RequireAuth><Homepage /></RequireAuth>} />
+        <Route path="/private" element={<RequireAuth><Homepage privateMode /></RequireAuth>} />
+        <Route path="/chat/:chatId" element={<RequireAuth><Chat /></RequireAuth>} />
+        {/* ไม่รู้จัก path → กลับ auth ไม่ใช่ homepage */}
+        <Route path="*" element={<Navigate to="/auth" replace />} />
       </Routes>
     </Router>
   );

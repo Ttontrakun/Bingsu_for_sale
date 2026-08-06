@@ -138,8 +138,20 @@ export function buildCitationSystemMessage(flatRefs) {
     const pos = Array.isArray(ref.positions) ? ref.positions[0] : null;
     const where = pos?.lineHint || (Number.isFinite(pos?.page) ? `หน้า ${pos.page}` : "");
     const quote = pos?.quote ? ` — "${String(pos.quote).slice(0, 140)}"` : "";
-    return `[${i + 1}] ${ref.displayName}${where ? ` (${where})` : ""}${quote}`;
+    const privateTag = String(ref.docId) === "__private__" ? " [PRIVATE]" : "";
+    return `[${i + 1}] ${ref.displayName}${where ? ` (${where})` : ""}${quote}${privateTag}`;
   });
+  const privateIndexes = flatRefs
+    .map((ref, i) => (String(ref.docId) === "__private__" ? i + 1 : null))
+    .filter(Boolean);
+  const privateRule = privateIndexes.length > 0
+    ? (
+      `\nกติกาข้อมูลส่วนตัว (สำคัญ): แหล่งเลข [${privateIndexes.join("],[")}] เป็นเนื้อหาส่วนตัวของผู้ใช้ — ` +
+      "ทุกประโยค/ข้อสรุปที่ใช้ข้อมูลส่วนตัว ต้อง (1) ห่อด้วย ==...== เช่น ==ผู้อนุมัติคือ กจญ.== " +
+      `และ (2) ใส่เลขอ้างอิงส่วนตัวท้ายประโยค เช่น ==ผู้อนุมัติคือ กจญ.==[${privateIndexes[0]}] ` +
+      "ห้ามห่อข้อความที่มาจากเอกสารระบบด้วย ==...== — ใช้ == เฉพาะข้อมูลส่วนตัวเท่านั้น"
+    )
+    : "";
   return {
     role: "system",
     content:
@@ -147,7 +159,8 @@ export function buildCitationSystemMessage(flatRefs) {
       "กติกาการอ้างอิง (ต้องทำเสมอ): ทุกประโยค หัวข้อย่อย หรือบรรทัดสรุปที่ใช้ข้อมูลจาก Context/แหล่งข้างต้น " +
       "ต้องใส่เลขอ้างอิงต่อท้ายในรูปแบบ [n] เช่น [1] หรือ [1][3] " +
       "ใช้ได้เฉพาะเลขที่มีในรายการเท่านั้น ห้ามสร้างเลขใหม่ ห้ามใส่เลขในหัวข้อใหญ่ (heading) " +
-      "ถ้าไม่แน่ใจว่าข้อมูลมาจากแหล่งใด ไม่ต้องใส่เลข และห้ามพิมพ์รายการแหล่งอ้างอิงซ้ำท้ายคำตอบ",
+      "ถ้าไม่แน่ใจว่าข้อมูลมาจากแหล่งใด ไม่ต้องใส่เลข และห้ามพิมพ์รายการแหล่งอ้างอิงซ้ำท้ายคำตอบ" +
+      privateRule,
   };
 }
 

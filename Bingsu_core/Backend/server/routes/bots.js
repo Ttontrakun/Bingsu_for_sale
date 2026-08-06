@@ -6,6 +6,7 @@ import { prisma } from "../db.js";
 import { authenticate } from "../lib/auth.js";
 import { logEvent } from "../lib/logging.js";
 import { invalidateUserCaches } from "../lib/cache.js";
+import { parseSafeAvatarDataUrl, sanitizeAvatarUrlString } from "../lib/avatarSafe.js";
 import { deleteBotWithCleanup } from "../services/uploadQueue.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -296,21 +297,30 @@ botsRouter.patch("/:id", authenticate, async (req, res) => {
     if (model !== undefined) updateData.model = model;
     let avatarUrl = avatarUrlInput;
     if (typeof avatarBase64 === "string" && avatarBase64.startsWith("data:image/")) {
-      const match = avatarBase64.match(/^data:image\/(\w+);base64,([\s\S]+)$/);
-      if (match) {
-        const rawExt = match[1] === "jpeg" ? "jpg" : match[1];
-        const safeExt = /^[a-z0-9]+$/i.test(rawExt) ? rawExt.toLowerCase() : "png";
-        const base64Data = match[2].replace(/\s/g, "");
-        const buffer = Buffer.from(base64Data, "base64");
-        const dir = path.join(projectRoot, "uploads", "bot-avatars");
-        fs.mkdirSync(dir, { recursive: true });
-        const fileName = `${bot.id}.${safeExt}`;
-        const filePath = path.join(dir, fileName);
-        fs.writeFileSync(filePath, buffer);
-        avatarUrl = `/uploads/bot-avatars/${fileName}`;
+      const parsed = parseSafeAvatarDataUrl(avatarBase64);
+      if (!parsed) {
+        res.status(400).json({ error: "รูปโปรไฟล์ไม่รองรับ (อนุญาต png/jpg/webp/gif ขนาดไม่เกิน 2MB)" });
+        return;
+      }
+      const dir = path.join(projectRoot, "uploads", "bot-avatars");
+      fs.mkdirSync(dir, { recursive: true });
+      const fileName = `${bot.id}.${parsed.ext}`;
+      const filePath = path.join(dir, fileName);
+      fs.writeFileSync(filePath, parsed.buffer);
+      avatarUrl = `/uploads/bot-avatars/${fileName}`;
+    }
+    if (avatarUrl !== undefined) {
+      if (typeof avatarUrl !== "string") {
+        updateData.avatarUrl = avatarUrl;
+      } else {
+        const safe = sanitizeAvatarUrlString(avatarUrl);
+        if (safe === undefined) {
+          res.status(400).json({ error: "avatarUrl ไม่ถูกต้อง" });
+          return;
+        }
+        updateData.avatarUrl = safe;
       }
     }
-    if (avatarUrl !== undefined) updateData.avatarUrl = typeof avatarUrl === "string" ? avatarUrl.trim() || null : avatarUrl;
     if (enabled !== undefined) updateData.enabled = Boolean(enabled);
 
     const before = {

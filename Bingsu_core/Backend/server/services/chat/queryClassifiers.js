@@ -20,10 +20,79 @@ export const formatAuthorityRole = (value) => {
   return `${match.abbr} (${match.full})`;
 };
 
+/** คำถามยืนยันบทบาท เช่น "รจญ. อนุมัติส่วนลด 60% ได้ไหม" */
+export const isAuthorityRoleConfirmQuery = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  // กันข้อความแนว "จำไว้ว่า/จำว่า..." ถูกมองเป็นคำถามยืนยันบทบาท
+  if (/(^|\/)จำ(ไว้)?ว่า|ขอให้จำ|ให้จำว่า|remember\s+that/.test(m)) return false;
+  const hasRole = AUTHORITY_ROLE_MAP.some((entry) => entry.re.test(m));
+  if (!hasRole) return false;
+  const hasApprove = /(อนุมัติ|มีอำนาจ|อำนาจ)/.test(m);
+  if (!hasApprove) return false;
+  // ต้องมีคำถามยืนยัน (ได้ไหม/หรือไม่) — ไม่ใช้แค่มีคำว่าส่วนลดอย่างเดียว
+  return /(ได้ไหม|ได้มั้ย|หรือไม่|ใช่ไหม|ใช่มั้ย|ได้รึ|ไหม|มั้ย)/.test(m);
+};
+
 export const isAuthorityDecisionQuery = (message) => {
   const m = normalizeText(message);
   if (!m) return false;
-  return /(ใครอนุมัติ|ผู้อนุมัติ|ใครมีอำนาจ|มีอำนาจอนุมัติ|อำนาจอนุมัติ|อำนาจของท่าน|ผู้มีอำนาจ|ท่านใด|ใครรับผิดชอบ|อนุมัติ.*ใคร|ใคร.*อนุมัติ|อำนาจส่วนลด|อนุมัติอัตรา|ส่วนลดเฉพาะราย)/.test(m);
+  if (/(ใครอนุมัติ|ผู้อนุมัติ|ใครมีอำนาจ|มีอำนาจอนุมัติ|อำนาจอนุมัติ|อำนาจของท่าน|ผู้มีอำนาจ|ท่านใด|ใครรับผิดชอบ|อนุมัติ.*ใคร|ใคร.*อนุมัติ|อำนาจส่วนลด|อนุมัติอัตรา|ส่วนลดเฉพาะราย)/.test(m)) {
+    return true;
+  }
+  // "ตำแหน่งนี้ อนุมัติ ... ได้ไหม" ต้องเข้าเส้นทาง authority เหมือนถามว่าใครอนุมัติ
+  return isAuthorityRoleConfirmQuery(m);
+};
+
+/** ผู้ใช้ขอให้จำ/ทับข้อมูลเอกสารในแชท (ไม่ใช่คำถามหาข้อมูลอย่างเดียว) */
+export const isRememberOverrideRequest = (message) => {
+  const m = normalizeText(message);
+  if (!m || m.length < 6) return false;
+  // /จำ ... หรือ จำว่า / จำไว้ว่า / ขอให้จำ
+  if (/(^|\/)จำ(\s+|ไว้ว่า|ว่า\b)/.test(m)) return true;
+  return /(จำไว้ว่า|จำว่า|ขอให้จำ|ให้จำว่า|จำไว้เถอะ|remember\s+that|จาก(นี้|ตอน)ไป\s*(ให้|คือ|เป็น|ถือว่า)|ให้ถือว่า|อัปเดตว่า|แก้เป็นว่า)/.test(m)
+    || (/(ไม่ขายแล้ว|ยกเลิกการขาย|หยุดจำหน่าย)/.test(m) && /(จำ|ถือว่า|จากนี้|remember)/.test(m));
+};
+
+/** ดึงข้อความที่จะบันทึกเป็นความจำส่วนตัวจากประโยค "จำว่า..." / "/จำ ..." */
+export const extractRememberPayload = (message) => {
+  const raw = String(message || "").trim();
+  if (!raw) return "";
+  const slash = raw.match(/^\/จำ\s*([\s\S]+)$/);
+  if (slash) return String(slash[1] || "").trim();
+  const soft = raw.match(/^(?:จำไว้ว่า|จำว่า|ขอให้จำ(?:ว่า)?|ให้จำว่า)\s*([\s\S]+)$/i);
+  if (soft) return String(soft[1] || "").trim();
+  if (isRememberOverrideRequest(raw)) {
+    // ตัดคำนำหน้าจำออกถ้ามี เหลือเนื้อหา
+    return raw.replace(/^(?:\/จำ\s*|จำไว้ว่า\s*|จำว่า\s*|ขอให้จำ(?:ว่า)?\s*|ให้จำว่า\s*)/i, "").trim() || raw;
+  }
+  return "";
+};
+
+/**
+ * แปลงคำถามยืนยันบทบาทให้เป็นคำถาม "ใครอนุมัติ..." สำหรับ retrieval
+ * เพื่อให้ embedding เจอตารางอำนาจเหมือนตอนถามว่าใคร
+ */
+export const buildAuthorityRetrievalQuery = (message) => {
+  const raw = String(message || "").trim();
+  if (!raw) return raw;
+  if (!isAuthorityRoleConfirmQuery(raw) && !isAuthorityDecisionQuery(raw)) return raw;
+  if (/ใครอนุมัติ|ผู้อนุมัติคือใคร|ใครมีอำนาจ/.test(normalizeText(raw))) return raw;
+
+  const m = normalizeText(raw);
+  const pct = (raw.match(/(\d+(?:[.,]\d+)?)\s*%/) || [])[1];
+  const productBits = [];
+  if (/(nt\s*dark\s*fiber|dark\s*fiber|เส้นใยแก้วนำแสง)/i.test(m)) productBits.push("NT Dark Fiber");
+  if (/(nt\s*corporate|corporate\s*internet|ลูกค้าองค์กร)/i.test(m)) productBits.push("NT Corporate Internet");
+  if (/(floor\s*price|floorprice|ฟลอร์)/i.test(m)) productBits.push("Floor Price");
+  const product = productBits.join(" ");
+  const discountPart = pct ? `ส่วนลด ${pct}%` : (/(ส่วนลด|discount)/i.test(m) ? "ส่วนลด" : "");
+  const rewritten = ["ใครอนุมัติ", discountPart, product, "อำนาจอนุมัติ ผู้อนุมัติ"]
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return rewritten.length >= 12 ? rewritten : raw;
 };
 
 export const isAuthorityDetailFollowUpQuery = (message) => {
@@ -170,10 +239,121 @@ export const isUndergroundDarkFiberPriceQuery = (message) => {
     && /(ราคา|ค่าบริการ|เท่าไหร่|ต่อเดือน|\/เดือน)/.test(normalized);
 };
 
+/**
+ * ถาม "ลิสต์เอกสารในระบบ/บอท" (เมตา) — ไม่ใช่ถามเนื้อหาในเอกสาร
+ * เช่น "มีเอกสารอะไรบ้าง" → รายการชุดความรู้+ไฟล์
+ * ส่วน "เอกสารที่ต้องแนบเมื่อขอใช้บริการ" → ปล่อยให้ RAG ตอบจากเนื้อหา
+ */
+export const isDocumentListQuery = (message) => {
+  const m = normalizeText(message)
+    .replace(/[!?？.。]+$/g, "")
+    .replace(/(ครับ|ค่ะ|คะ|นะ|ไหม|มั้ย)+$/g, "")
+    .trim();
+  if (!m) return false;
+
+  // คำถามเนื้อหาในเอกสาร / เอกสารแนบประกอบคำขอ → ไม่ใช่ลิสต์ระบบ
+  if (
+    /(ต้องแนบ|แนบเอกสาร|เอกสารแนบ|เอกสารประกอบ|ยื่นเอกสาร|ส่งเอกสาร|เอกสารที่ต้องใช้|เอกสารที่ใช้|เมื่อขอใช้|ขอใช้บริการ|สมัครใช้|ยื่นคำขอ)/.test(m)
+  ) {
+    return false;
+  }
+  if (/(ฟีเจอร์|feature|features|ฟังก์ชัน|ความสามารถ)/.test(m)) return false;
+
+  // คำถามเมตาสั้นๆ ชัดเจน (รวมชิปคำแนะนำ เช่น "มีเอกสารอะไรบ้างในชุดความรู้นี้")
+  if (
+    /^(มี)?เอกสารอะไรบ้าง$/.test(m)
+    || /^มีเอกสารอะไร$/.test(m)
+    || /^(ระบบ|บอท|ตอนนี้)?มีเอกสารอะไรบ้าง$/.test(m)
+    || /^มีเอกสารอะไรบ้างใน(ระบบ|บอท|ชุดความรู้)(นี้)?$/.test(m)
+    || /^มี(ไฟล์|knowledge|ชุดความรู้)อะไรบ้าง(ใน(ระบบ|บอท|ชุดความรู้)(นี้)?)?$/.test(m)
+    || /^ราย(ชื่อ|การ)เอกสาร$/.test(m)
+    || /^เอกสารที่มี(อยู่)?$/.test(m)
+    || /^มีหัวข้ออะไรบ้าง$/.test(m)
+  ) {
+    return true;
+  }
+
+  // รูปแบบทั่วไป แต่จำกัดความยาว กันไปทับคำถามเนื้อหา
+  if (
+    m.length <= 48
+    && /^(มี)?(เอกสาร|ไฟล์|ชุดความรู้|knowledge).*(อะไรบ้าง|บ้าง)(ใน(ระบบ|บอท|ชุดความรู้)(นี้)?)?$/.test(m)
+  ) {
+    return true;
+  }
+  return false;
+};
+
+/** ถามฟีเจอร์/ความสามารถของระบบ */
+export const isSystemFeatureQuery = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  return /(มี(ฟีเจอร์|feature|features|ฟังก์ชัน|ความสามารถ)|(ฟีเจอร์|feature|features|ฟังก์ชัน|ความสามารถ).*(อะไรบ้าง|ของระบบ|ระบบ)|ระบบทำอะไรได้|บอททำอะไรได้|มีอะไรบ้างในระบบ|ในระบบมีอะไรบ้าง)/.test(m);
+};
+
 export const isSystemCapabilityQuery = (message) => {
   const m = normalizeText(message);
   if (!m) return false;
-  return /(มี(ข้อมูล|เอกสาร|ความรู้).*(อะไรบ้าง|บ้าง)|มีเอกสารอะไร.*(ระบบ|ถามได้)|ระบบมีอะไรบ้าง|ถามอะไรได้บ้าง|มีเรื่องอะไรให้ถาม|ช่วยอะไรได้บ้าง|มีหัวข้ออะไรบ้าง)/.test(m);
+  if (isDocumentListQuery(m) || isSystemFeatureQuery(m)) return true;
+  return /(ระบบมีอะไรบ้าง|ถามอะไรได้บ้าง|มีเรื่องอะไรให้ถาม|ช่วยอะไรได้บ้าง|ทำอะไรได้บ้าง)/.test(m);
+};
+
+/** มีสัญญาณว่าเกี่ยวกับเอกสาร/ธุรกิจองค์กร — ใช้กัน false-positive ของตัวจับคุยเล่น */
+export const hasDocumentDomainSignal = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  if (
+    isAuthorityDecisionQuery(m)
+    || isPricingIntent(m)
+    || isOverviewStyleQuery(m)
+    || isSystemCapabilityQuery(m)
+    || isApproverRolesQuery(m)
+    || isConsumerInternetPriceQuery(m)
+    || isUndergroundDarkFiberPriceQuery(m)
+  ) {
+    return true;
+  }
+  if (
+    /(เอกสาร|ราคา|ค่าบริการ|ส่วนลด|อนุมัติ|อำนาจ|คำสั่ง|อัตรา|สัญญา|ระเบียบ|knowledge|pdf|ขั้นตอน|เงื่อนไข|บริการ|ลูกค้า|องค์กร|floor|บาท|mbps|โปรเน็ต|dark\s*fiber|\bnt\b|เสาโทร|ใยแก้วนำแสง)/i.test(m)
+  ) {
+    return true;
+  }
+  // คำถาม follow-up เชิงเอกสาร / ถามฟีเจอร์ระบบ — อย่าตัดเป็นคุยเล่น
+  if (/(อธิบาย|รายละเอียด|เพิ่มเติม|อ้างอิง|จากคำตอบ|จากเมื่อกี้|ข้อที่เกี่ยวข้อง|ผู้อนุมัติ|ฟีเจอร์|feature|ฟังก์ชัน|ความสามารถ)/.test(m)) {
+    return true;
+  }
+  if (/\d/.test(m) && /(บาท|%|วัน|เดือน|ปี|mbps)/i.test(m)) return true;
+  return false;
+};
+
+/** คำถามคุยเล่น/นอกเอกสารชัดเจน — ต้องปฏิเสธก่อนเรียก LLM (ไม่ใช่แค่พึ่ง prompt) */
+export const isCasualOffTopicQuery = (message) => {
+  const m = normalizeText(message);
+  if (!m) return false;
+  if (hasDocumentDomainSignal(message)) return false;
+
+  const patterns = [
+    /(หิว|อาหาร|เมนู|ร้านอาหาร|อร่อย|กินอะไร|แนะนำอาหาร|สูตรอาหาร|ทำอาหาร|ของหวาน|กาแฟ|ชาบู|ปิ้งย่าง|delivery|สั่งเหล้า)/,
+    /(อากาศ|ฝนตก|ร้อนไหม|หนาวไหม|พยากรณ์อากาศ|weather)/,
+    /(เล่าเรื่อง|มุขตลก|เรื่องตลก|joke|ขำๆ|เล่นมั้ย|เล่นอะไรดี)/,
+    /(หนังอะไร|ซีรีส์|เพลงอะไร|ฟังเพลง|เกมอะไร|ดูอะไรดี|netflix|youtube)/,
+    /(รัก|แฟน|เดท|อกหัก|โสด|คุยเล่น)/,
+    /(ทำนายฝัน|ดูดวง|หวย|เลขเด็ด)/,
+    /(เที่ยวไหน|ที่เที่ยว|โรงแรม|ท่องเที่ยว)/,
+    // ชีวิตประจำวัน / หาอะไรทำ / อารมณ์
+    /(ง่วง|เบื่อ|เหงา|เครียด|เซ็ง|ง่วงนอน|นอนไม่หลับ|หาอะไรทำ|ทำอะไรดี|ทำไรดี|มีอะไรทำ|ฆ่าเวลา|เพลิน|สนุกๆ|กิจกรรมหน่อย|แนะนำ.*(ทำ|เล่น|ดู|ฟัง|อ่าน)|ช่วยคิด.*(หน่อย|ที))/,
+    /(how are you|what should i do|i'?m bored|i'?m hungry|i'?m sleepy)/i,
+  ];
+  if (patterns.some((re) => re.test(m))) return true;
+
+  // ข้อความสั้นแบบคุยเล่น ไม่มีสัญญาณเอกสาร — เช่น "ว่างไหม", "คุยหน่อย", "แนะนำหน่อย"
+  if (
+    m.length <= 48
+    && /(หน่อย|มั้ย|ไหม|ดีไหม|ทำไงดี|อะไรดี|ทัก|คุย|แนะนำ|ว่าง|เหงา|ง่วง|เบื่อ)/.test(m)
+    && !/(เท่าไหร่|กี่บาท|ใคร|เมื่อไหร่|ขั้นตอน|เงื่อนไข)/.test(m)
+  ) {
+    return true;
+  }
+  return false;
 };
 
 export const isUnintelligibleQuery = (message) => {
@@ -245,7 +425,8 @@ export const hasSufficientGroundingEvidence = (message, groundingChunks) => {
   const chunks = Array.isArray(groundingChunks) ? groundingChunks : [];
   if (chunks.length === 0) return false;
   const tokens = extractEvidenceTokens(message);
-  if (tokens.length === 0) return true;
+  // ไม่มีคำหลักให้จับคู่ = ยังยืนยัน grounding ไม่ได้ (กันคำถามคุยเล่นหลุดไปให้ LLM)
+  if (tokens.length === 0) return false;
   const contextText = chunks
     .slice(0, 4)
     .map((chunk) => String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? "").toLowerCase())
@@ -261,9 +442,13 @@ export const hasSufficientGroundingEvidence = (message, groundingChunks) => {
   // คำถาม authority มักมีคำว่า Floor Price/เปอร์เซ็นต์ปนอยู่ แต่หลักฐานที่ต้องการคือสายอนุมัติ ไม่ใช่ราคา
   // จึงต้องไม่ใช้เกณฑ์ pricing-strict ที่บังคับสัญญาณราคา
   if (isAuthorityDecisionQuery(message)) {
-    // ไม่บังคับ match ตัวเลข เพราะคำถามแนว authority มักใส่เงื่อนไขตัวเลขหลายแบบ
-    // แต่ใจความที่ต้องตอบคือผู้อนุมัติ/สายอนุมัติ
-    return matchedText >= 1 && hasAuthoritySignalInContext;
+    // ไม่บังคับ match ตัวเลข — ใจความคือสายอนุมัติ
+    if (hasAuthoritySignalInContext && (matchedText >= 1 || matchedNumeric >= 1)) return true;
+    // คำถามยืนยันบทบาท: มีสัญญาณอำนาจ + บริการ/ส่วนลดใน context ก็พอให้ตอบได้
+    if (isAuthorityRoleConfirmQuery(message) && hasAuthoritySignalInContext) {
+      return /(dark\s*fiber|เส้นใย|corporate|ส่วนลด|floor|อนุมัติ|อำนาจ)/i.test(contextText);
+    }
+    return false;
   }
 
   if (isPricingIntent(message)) {

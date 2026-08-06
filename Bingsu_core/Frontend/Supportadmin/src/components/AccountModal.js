@@ -1,9 +1,10 @@
 import { useMemo, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { HiX, HiOutlineUser, HiTrash, HiOutlineMail } from 'react-icons/hi';
 import avatarMale from '../assets/avatars/user_male.png';
 import avatarFemale from '../assets/avatars/user_female.png';
 import ChangePasswordModal from './ChangePasswordModal';
-import { userAPI, getErrorMessage } from '../services/api';
+import { api, userAPI, getErrorMessage } from '../services/api';
 
 const AVATAR_CHOICES = [
   { key: 'preset:user_male', label: 'ผู้ชาย', src: avatarMale },
@@ -17,12 +18,17 @@ const getAvatarSrc = (v) => {
 };
 
 function AccountModal({ isOpen, onClose, onProfileUpdated }) {
+  const navigate = useNavigate();
   const [isEditMode, setIsEditMode] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('preset:user_male');
   const [originalData, setOriginalData] = useState({ name: '', email: '', avatarUrl: 'preset:user_male' });
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,8 +39,43 @@ function AccountModal({ isOpen, onClose, onProfileUpdated }) {
     if (isOpen) {
       loadUserData();
       setIsEditMode(false);
+      setIsDeleteModalOpen(false);
+      setDeletePassword('');
+      setDeleteError('');
     }
   }, [isOpen]);
+
+  const openDeleteModal = () => {
+    setDeletePassword('');
+    setDeleteError('');
+    setIsDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeleting) return;
+    setIsDeleteModalOpen(false);
+    setDeletePassword('');
+    setDeleteError('');
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword.trim()) {
+      setDeleteError('กรุณากรอกรหัสผ่าน');
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await userAPI.deleteAccount(deletePassword);
+      try { api.logout(); } catch (_) {}
+      onClose?.();
+      navigate('/login', { replace: true });
+    } catch (err) {
+      setDeleteError(getErrorMessage(err) || 'ลบบัญชีไม่สำเร็จ');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const loadUserData = async () => {
     setIsLoading(true);
@@ -258,12 +299,14 @@ function AccountModal({ isOpen, onClose, onProfileUpdated }) {
                 )}
 
                 {!isEditMode && (
-                  <div className='flex items-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg border border-red-200 hover:border-red-300 transition-colors cursor-pointer'>
+                  <button
+                    type='button'
+                    onClick={openDeleteModal}
+                    className='w-full flex items-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-lg border border-red-200 hover:border-red-300 transition-colors'
+                  >
                     <HiTrash className='text-red-600 text-lg' />
-                    <button type='button' className='text-red-600 hover:text-red-700 font-medium transition-colors'>
-                      ลบบัญชี
-                    </button>
-                  </div>
+                    <span className='text-red-600 hover:text-red-700 font-medium'>ลบบัญชี</span>
+                  </button>
                 )}
               </div>
 
@@ -301,6 +344,65 @@ function AccountModal({ isOpen, onClose, onProfileUpdated }) {
           isOpen={isChangePasswordModalOpen}
           onClose={() => setIsChangePasswordModalOpen(false)}
         />
+
+        {isDeleteModalOpen && (
+          <div
+            className='fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4'
+            onClick={closeDeleteModal}
+          >
+            <div
+              className='bg-white rounded-xl shadow-xl max-w-md w-full border border-gray-200'
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className='flex items-center justify-between p-5 border-b border-gray-200'>
+                <h3 className='text-lg font-semibold text-gray-900'>ยืนยันการลบบัญชี</h3>
+                <button type='button' onClick={closeDeleteModal} className='text-gray-400 hover:text-gray-600' disabled={isDeleting}>
+                  <HiX className='text-2xl' />
+                </button>
+              </div>
+              <div className='p-5 space-y-4'>
+                <p className='text-sm text-gray-600 leading-relaxed'>
+                  การลบบัญชีจะลบข้อมูลที่เกี่ยวข้องและกู้คืนไม่ได้ กรุณากรอกรหัสผ่านเพื่อยืนยัน
+                </p>
+                <div>
+                  <label htmlFor='sa-delete-account-password' className='block text-sm font-medium text-gray-700 mb-1.5'>
+                    รหัสผ่าน
+                  </label>
+                  <input
+                    id='sa-delete-account-password'
+                    type='password'
+                    value={deletePassword}
+                    onChange={(e) => setDeletePassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteAccount(); }}
+                    autoFocus
+                    disabled={isDeleting}
+                    className='w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent'
+                    placeholder='กรอกรหัสผ่านของคุณ'
+                  />
+                </div>
+                {deleteError ? <p className='text-sm text-red-600'>{deleteError}</p> : null}
+              </div>
+              <div className='flex justify-end gap-3 p-5 border-t border-gray-200'>
+                <button
+                  type='button'
+                  onClick={closeDeleteModal}
+                  disabled={isDeleting}
+                  className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium disabled:opacity-50'
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type='button'
+                  onClick={handleDeleteAccount}
+                  disabled={isDeleting}
+                  className='px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold disabled:opacity-50'
+                >
+                  {isDeleting ? 'กำลังลบ...' : 'ลบบัญชี'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

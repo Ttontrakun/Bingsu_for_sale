@@ -18,24 +18,28 @@ function CreatePassword() {
   const [error, setError] = useState('');
   const [isVerified, setIsVerified] = useState(false);
 
-  // Check if email is verified and token exists
+  const [setupToken, setSetupToken] = useState('');
+
+  // Check if email is verified and token exists — strip token from URL immediately
   useEffect(() => {
-    const token = searchParams.get('token');
+    const token = searchParams.get('token') || location.state?.token || '';
     const verified = location.state?.verified;
+    if (token) {
+      setSetupToken(token);
+      window.history.replaceState(window.history.state, '', window.location.pathname);
+    }
 
     if (!token) {
       setError('ไม่พบ verification token กรุณายืนยันอีเมลก่อน');
-      // Redirect to verifying page after 3 seconds
       setTimeout(() => {
         navigate('/verifying');
       }, 3000);
       return;
     }
 
-    if (verified) {
+    if (verified || token) {
       setIsVerified(true);
     } else {
-      // If not verified, redirect to verifying page
       setError('กรุณายืนยันอีเมลก่อนสร้างรหัสผ่าน');
       setTimeout(() => {
         navigate('/verifying');
@@ -73,8 +77,7 @@ function CreatePassword() {
       return;
     }
 
-    const token = searchParams.get('token');
-    if (!token) {
+    if (!setupToken) {
       setError('ไม่พบ verification token');
       return;
     }
@@ -82,7 +85,7 @@ function CreatePassword() {
     setIsSubmitting(true);
 
     try {
-      await authAPI.setPassword(token, password);
+      await authAPI.setPassword(setupToken, password);
       // Password set successfully - redirect to approval or login
     navigate('/approval');
     } catch (error) {

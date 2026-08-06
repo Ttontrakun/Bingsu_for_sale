@@ -14,7 +14,7 @@ const ReferenceChips = ({ references, onOpenReference }) => {
           const isPrivateRef = String(ref.docId) === '__private__';
           const pos = Array.isArray(ref.positions) ? ref.positions[0] : null;
           const pageLabel = isPrivateRef
-            ? 'เนื้อหาส่วนตัว'
+            ? 'ข้อมูลส่วนตัว'
             : pos?.lineHint || (Number.isFinite(pos?.page) ? `หน้า ${pos.page}` : '');
           return (
             <button
@@ -24,15 +24,21 @@ const ReferenceChips = ({ references, onOpenReference }) => {
                 e.stopPropagation();
                 onOpenReference(ref);
               }}
-              className='inline-flex items-center gap-1.5 max-w-[260px] rounded-full border border-gray-200 bg-white pl-1 pr-2.5 py-[3px] text-xs text-gray-700 shadow-sm hover:border-amber-300 hover:bg-amber-50/70 transition-colors'
+              className={`inline-flex items-center gap-1.5 max-w-[260px] rounded-full border pl-1 pr-2.5 py-[3px] text-xs shadow-sm transition-colors ${
+                isPrivateRef
+                  ? 'border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100 font-semibold'
+                  : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300 hover:bg-amber-50/70'
+              }`}
               title={`เปิดแหล่งที่มา: ${ref.displayName}${pageLabel ? ` (${pageLabel})` : ''}`}
             >
-              <span className='inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-400 text-[10px] font-semibold text-gray-900 flex-shrink-0'>
+              <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold flex-shrink-0 ${
+                isPrivateRef ? 'bg-violet-500 text-white' : 'bg-amber-400 text-gray-900'
+              }`}>
                 {i + 1}
               </span>
               <span className='truncate min-w-0'>{ref.displayName}</span>
               {pageLabel && (
-                <span className='text-[11px] text-gray-500 flex-shrink-0'>{pageLabel}</span>
+                <span className={`text-[11px] flex-shrink-0 ${isPrivateRef ? 'text-violet-700' : 'text-gray-500'}`}>{pageLabel}</span>
               )}
             </button>
           );

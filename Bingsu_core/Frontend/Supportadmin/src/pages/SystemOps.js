@@ -8,10 +8,12 @@ import {
   HiCog,
   HiTranslate,
   HiCurrencyDollar,
+  HiBadgeCheck,
 } from 'react-icons/hi';
 import { api } from '../services/api';
 import { SynonymsPanel } from './Synonyms';
 import { ServiceRatesPanel } from './ServiceRates';
+import { ApprovalAuthorityPanel } from './ApprovalAuthority';
 
 const fmtDate = (v) => {
   if (!v) return '-';
@@ -43,6 +45,7 @@ function SystemOps({ userRole }) {
     if (isAdmin) {
       list.push({ id: 'synonyms', label: 'Synonyms', icon: HiTranslate });
       list.push({ id: 'rates', label: 'Service Rates', icon: HiCurrencyDollar });
+      list.push({ id: 'authority', label: 'อำนาจอนุมัติ', icon: HiBadgeCheck });
     }
     return list;
   }, [canManage, isAdmin]);
@@ -396,6 +399,11 @@ function SystemOps({ userRole }) {
       {/* Tab: Service Rates */}
       {tab === 'rates' && isAdmin && (
         <ServiceRatesPanel showHeader={false} />
+      )}
+
+      {/* Tab: Approval Authority */}
+      {tab === 'authority' && isAdmin && (
+        <ApprovalAuthorityPanel showHeader={false} />
       )}
 
       {toast && (

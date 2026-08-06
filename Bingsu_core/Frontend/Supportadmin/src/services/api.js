@@ -137,7 +137,14 @@ export const api = {
     });
     return data;
   },
-  logout: () => setSession(null, null),
+  logout: async () => {
+    try {
+      await request('/api/auth/logout', { method: 'POST' });
+    } catch (_) {
+      /* still clear local state */
+    }
+    setSession(null, null);
+  },
   getMe: () => request('/api/auth/me'),
   getReport: () => request('/api/support/report'),
   getFeedback: (rating = 'down', limit = 50, offset = 0) =>
@@ -264,6 +271,17 @@ export const api = {
     }),
   deleteServiceRate: (id) =>
     request(`/api/support/service-rates/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
+  // ตารางอำนาจอนุมัติ
+  getApprovalAuthorityRules: () => request('/api/support/approval-authority'),
+  createApprovalAuthorityRule: (payload) =>
+    request('/api/support/approval-authority', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  updateApprovalAuthorityRule: (id, payload) =>
+    request(`/api/support/approval-authority/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
+  deleteApprovalAuthorityRule: (id) =>
+    request(`/api/support/approval-authority/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
 };
 
 // Credential API functions
@@ -302,6 +320,13 @@ export const userAPI = {
     });
     return data?.user ?? data;
   },
+
+  /** ลบบัญชีตัวเอง — ต้องส่งรหัสผ่านยืนยัน */
+  deleteAccount: async (password) =>
+    request('/api/auth/delete-account', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    }),
 };
 
 const ROLE_LABELS = {

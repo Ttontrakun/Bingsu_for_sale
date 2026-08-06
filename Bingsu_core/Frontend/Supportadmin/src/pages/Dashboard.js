@@ -320,7 +320,7 @@ const Sparkline = ({ data, color = '#3B82F6', height = 40 }) => {
 
 function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   const [isVisible, setIsVisible] = useState(false);
-  const [filter, setFilter] = useState('system'); // 'all', 'user', 'system'
+  const [filter, setFilter] = useState('user'); // 'all', 'user', 'system'
   const [errorRange, setErrorRange] = useState('week');
   const [reportData, setReportData] = useState(null);
   const [metricsData, setMetricsData] = useState(null);
@@ -343,10 +343,8 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
 
   useEffect(() => {
     api.getReport().then(setReportData).catch(() => {});
-    if (userRole === 'admin' || userRole === 'admin_metrics') {
-      api.getMetrics().then(setMetricsData).catch(() => {});
-      api.getAdminActivity(14).then(setAdminActivity).catch(() => {});
-    }
+    api.getMetrics().then(setMetricsData).catch(() => {});
+    api.getAdminActivity(14).then(setAdminActivity).catch(() => {});
   }, [userRole]);
 
   useEffect(() => {
@@ -393,7 +391,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   }, []);
 
   useEffect(() => {
-    if (filter === 'system' || userRole === 'support') {
+    if (filter === 'system') {
       setFaqCategories(null);
       return;
     }
@@ -406,7 +404,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
 
   // เอกสารที่ถูกอ้างอิงบ่อย (แทนการ์ด "ประเภทคำถามที่พบบ่อย")
   useEffect(() => {
-    if (filter === 'system' || userRole === 'support') {
+    if (filter === 'system') {
       setCitedDocs(null);
       return;
     }
@@ -418,7 +416,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   }, [filter, userRole]);
 
   useEffect(() => {
-    if (filter === 'system' || userRole === 'support') {
+    if (filter === 'system') {
       setTokenUsageData(null);
       return;
     }
@@ -430,7 +428,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   }, [filter, userRole]);
 
   useEffect(() => {
-    if (filter === 'system' || userRole === 'support') {
+    if (filter === 'system') {
       setUserRoleDistributionData(null);
       return;
     }
@@ -441,10 +439,6 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   }, [filter, userRole]);
 
   useEffect(() => {
-    if (userRole === 'support') {
-      setErrorLogOverview(null);
-      return;
-    }
     api
       .getLogs({ take: 2000 })
       .then((data) => {
@@ -619,13 +613,8 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       });
   }, [userRole]);
 
-  // Lock filter to 'system' for Support users
-  const isAdmin = userRole !== 'support';
-  useEffect(() => {
-    if (!isAdmin) {
-      setFilter('system');
-    }
-  }, [isAdmin]);
+  // Dashboard เต็มรูปแบบเหมือน admin สำหรับ support / admin / admin_metrics
+  const isAdmin = true;
 
   const scrollToChart = (ref) => {
     if (ref?.current) {

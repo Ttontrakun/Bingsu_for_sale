@@ -404,7 +404,22 @@ adminRouter.get("/backup", authenticate, requireAdmin, async (_req, res) => {
     uploadFiles,
     usageDaily,
   ] = await Promise.all([
-    prisma.user.findMany(),
+    prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        approvalStatus: true,
+        isActive: true,
+        avatarUrl: true,
+        emailVerifiedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        expiresAt: true,
+        // intentionally omit passwordHash / reset / verification tokens
+      },
+    }),
     prisma.document.findMany(),
     prisma.documentShare.findMany(),
     prisma.bot.findMany(),
@@ -432,11 +447,14 @@ adminRouter.get("/backup", authenticate, requireAdmin, async (_req, res) => {
 
 adminRouter.post("/restore", authenticate, requireAdmin, async (req, res) => {
   const payload = req.body ?? {};
+  if (payload?.confirm !== true) {
+    res.status(400).json({ error: "Restore requires confirm: true" });
+    return;
+  }
   try {
     await prisma.$transaction(async (tx) => {
-      if (Array.isArray(payload.users) && payload.users.length) {
-        await tx.user.createMany({ data: payload.users, skipDuplicates: true });
-      }
+      // Users backup ไม่รวม passwordHash — ไม่ create user จาก restore (กัน incomplete row / escalate)
+      // ถ้ามี users ใน payload จะถูกข้าม; ต้องมี user อยู่ในระบบอยู่แล้วสำหรับ FK ของตารางอื่น
       if (Array.isArray(payload.documents) && payload.documents.length) {
         await tx.document.createMany({ data: payload.documents, skipDuplicates: true });
       }

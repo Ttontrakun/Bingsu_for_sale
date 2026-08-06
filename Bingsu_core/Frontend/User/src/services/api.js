@@ -144,8 +144,8 @@ export const authAPI = {
             email,
             password,
         });
-        if (response.data.user) {
-            localStorage.setItem('user', JSON.stringify(response.data.user));
+        if (response.data.user?.id) {
+            localStorage.setItem('user', JSON.stringify({ id: response.data.user.id }));
         }
         return response.data;
     },
@@ -210,8 +210,13 @@ export const authAPI = {
         return response.data;
     },
 
-    // Logout
-    logout: () => {
+    // Logout — ลบ session ฝั่งเซิร์ฟเวอร์ + เคลียร์ cookie
+    logout: async () => {
+        try {
+            await api.post('/auth/logout');
+        } catch (_) {
+            /* still clear local state */
+        }
         localStorage.removeItem('user');
     },
 };
@@ -262,6 +267,12 @@ export const userAPI = {
     // Token quota (today)
     getTokenQuotaToday: async () => {
         const response = await api.get('/auth/quota');
+        return response.data;
+    },
+
+    /** ลบบัญชีตัวเอง — ต้องส่งรหัสผ่านยืนยัน */
+    deleteAccount: async (password) => {
+        const response = await api.post('/auth/delete-account', { password });
         return response.data;
     },
 

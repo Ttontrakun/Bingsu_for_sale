@@ -5,7 +5,7 @@
  */
 import express from "express";
 import { prisma } from "../db.js";
-import { authenticate, requireAdminMetrics, requireRole } from "../lib/auth.js";
+import { authenticate, requireRole } from "../lib/auth.js";
 import { FREE_DAILY_TOKEN_LIMIT } from "../config.js";
 import { getDateKey } from "../services/usage.js";
 
@@ -21,7 +21,7 @@ const pendingApprovalReadyFilter = {
   passwordResetExpiresAt: null,
 };
 
-adminMetricsRouter.get("/metrics", authenticate, requireAdminMetrics, async (_req, res) => {
+adminMetricsRouter.get("/metrics", authenticate, requireRole("support", "admin", "admin_metrics"), async (_req, res) => {
   const [
     usersCount,
     documentsCount,
@@ -52,7 +52,7 @@ adminMetricsRouter.get("/metrics", authenticate, requireAdminMetrics, async (_re
   });
 });
 
-adminMetricsRouter.get("/activity", authenticate, requireAdminMetrics, async (req, res) => {
+adminMetricsRouter.get("/activity", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {
   const daysRaw = Number(req.query?.days);
   const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, Math.floor(daysRaw))) : 14;
   const to = new Date();

@@ -1,11 +1,12 @@
 import express from "express";
 import { prisma } from "../db.js";
-import { authenticate, requireRole } from "../lib/auth.js";
+import { authenticate, requireRole, sanitizeUser } from "../lib/auth.js";
 import { logEvent } from "../lib/logging.js";
 import { getLastActivityByUserIds } from "../lib/lastUserActivity.js";
 import { getRequestContext } from "../lib/requestContext.js";
 import { maskLogForExport } from "../lib/privacy.js";
 import { invalidateRateCache } from "../services/ntCorpPricingDb.js";
+import { invalidateApprovalAuthorityCache } from "../services/approvalAuthorityDb.js";
 
 const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const DEFAULT_BOT_PROMPT = [
@@ -285,7 +286,7 @@ supportRouter.get("/pending-users", authenticate, requireRole("support", "admin"
     },
     orderBy: { createdAt: "desc" },
   });
-  res.json(users);
+  res.json(users.map((u) => sanitizeUser(u)));
 });
 
 /** รายชื่อลูกค้าที่ลงทะเบียน (role user ทั้งรออนุมัติและอนุมัติแล้ว) — ให้ Support ดูอีเมลใน Overview */
@@ -436,7 +437,7 @@ supportRouter.patch("/pending-users/:id", authenticate, requireRole("support", "
       ...context,
     },
   });
-  res.json(updated);
+  res.json(sanitizeUser(updated));
 });
 
 supportRouter.post(
@@ -491,7 +492,7 @@ supportRouter.post(
       },
     });
 
-    res.json(updated);
+    res.json(sanitizeUser(updated));
   },
 );
 
@@ -734,6 +735,139 @@ supportRouter.delete("/service-rates/:id", authenticate, requireRole("admin"), a
   invalidateRateCache();
   if (removed) {
     await logEvent({ event: "service_rate.deleted", actorId: req.user?.id, targetType: "service_rate", targetId: req.params.id, meta: { service: removed.service, kind: removed.kind, speed: removed.speed } }).catch(() => {});
+  }
+  res.json({ ok: true });
+});
+
+// ===== ตารางอำนาจอนุมัติ (ApprovalAuthorityRule) — admin แก้เพื่อให้ chat lookup ใช้ค่าล่าสุด =====
+const normalizePctOrNull = (v) => {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+};
+
+supportRouter.get("/approval-authority", authenticate, requireRole("admin"), async (_req, res) => {
+  const items = await prisma.approvalAuthorityRule.findMany({
+    orderBy: [{ serviceKey: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+  });
+  res.json(items);
+});
+
+supportRouter.post("/approval-authority", authenticate, requireRole("admin"), async (req, res) => {
+  const serviceKey = String(req.body?.serviceKey || "").trim().toLowerCase().replace(/\s+/g, "_");
+  const serviceName = String(req.body?.serviceName || "").trim();
+  const conditionKey = String(req.body?.conditionKey || "").trim();
+  const conditionLabel = req.body?.conditionLabel != null ? String(req.body.conditionLabel).trim() : null;
+  const approverAbbr = String(req.body?.approverAbbr || "").trim();
+  const approverFull = req.body?.approverFull != null ? String(req.body.approverFull).trim() : null;
+  const note = req.body?.note != null ? String(req.body.note).trim() : null;
+  const sortOrder = Math.round(Number(req.body?.sortOrder ?? 0));
+  const active = req.body?.active === false || req.body?.active === "false" ? false : true;
+  const minPct = normalizePctOrNull(req.body?.minPct);
+  const maxPct = normalizePctOrNull(req.body?.maxPct);
+  if (!serviceKey || !serviceName || !conditionKey || !approverAbbr) {
+    res.status(400).json({ error: "serviceKey, serviceName, conditionKey, approverAbbr required" });
+    return;
+  }
+  if (minPct === undefined || maxPct === undefined) {
+    res.status(400).json({ error: "minPct/maxPct invalid" });
+    return;
+  }
+  if (!Number.isFinite(sortOrder)) {
+    res.status(400).json({ error: "sortOrder invalid" });
+    return;
+  }
+  const item = await prisma.approvalAuthorityRule.create({
+    data: {
+      serviceKey,
+      serviceName,
+      conditionKey,
+      conditionLabel: conditionLabel || null,
+      minPct,
+      maxPct,
+      approverAbbr,
+      approverFull: approverFull || null,
+      note: note || null,
+      sortOrder,
+      active,
+    },
+  });
+  invalidateApprovalAuthorityCache();
+  await logEvent({
+    event: "approval_authority.created",
+    actorId: req.user?.id,
+    targetType: "approval_authority",
+    targetId: item.id,
+    meta: { serviceKey, conditionKey, approverAbbr },
+  }).catch(() => {});
+  res.status(201).json(item);
+});
+
+supportRouter.patch("/approval-authority/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const data = {};
+  if (req.body?.serviceKey != null) {
+    data.serviceKey = String(req.body.serviceKey).trim().toLowerCase().replace(/\s+/g, "_");
+  }
+  if (req.body?.serviceName != null) data.serviceName = String(req.body.serviceName).trim();
+  if (req.body?.conditionKey != null) data.conditionKey = String(req.body.conditionKey).trim();
+  if (req.body?.conditionLabel !== undefined) {
+    data.conditionLabel = req.body.conditionLabel == null || req.body.conditionLabel === ""
+      ? null
+      : String(req.body.conditionLabel).trim();
+  }
+  if (req.body?.approverAbbr != null) data.approverAbbr = String(req.body.approverAbbr).trim();
+  if (req.body?.approverFull !== undefined) {
+    data.approverFull = req.body.approverFull == null || req.body.approverFull === ""
+      ? null
+      : String(req.body.approverFull).trim();
+  }
+  if (req.body?.note !== undefined) {
+    data.note = req.body.note == null || req.body.note === "" ? null : String(req.body.note).trim();
+  }
+  if (req.body?.sortOrder !== undefined) {
+    const sortOrder = Math.round(Number(req.body.sortOrder));
+    if (!Number.isFinite(sortOrder)) { res.status(400).json({ error: "sortOrder invalid" }); return; }
+    data.sortOrder = sortOrder;
+  }
+  if (req.body?.active !== undefined) {
+    data.active = !(req.body.active === false || req.body.active === "false");
+  }
+  if (req.body?.minPct !== undefined) {
+    const minPct = normalizePctOrNull(req.body.minPct);
+    if (minPct === undefined) { res.status(400).json({ error: "minPct invalid" }); return; }
+    data.minPct = minPct;
+  }
+  if (req.body?.maxPct !== undefined) {
+    const maxPct = normalizePctOrNull(req.body.maxPct);
+    if (maxPct === undefined) { res.status(400).json({ error: "maxPct invalid" }); return; }
+    data.maxPct = maxPct;
+  }
+  if (data.serviceKey === "") { res.status(400).json({ error: "serviceKey required" }); return; }
+  if (Object.keys(data).length === 0) { res.status(400).json({ error: "no fields" }); return; }
+  const item = await prisma.approvalAuthorityRule.update({ where: { id: req.params.id }, data }).catch(() => null);
+  if (!item) { res.status(404).json({ error: "not found" }); return; }
+  invalidateApprovalAuthorityCache();
+  await logEvent({
+    event: "approval_authority.updated",
+    actorId: req.user?.id,
+    targetType: "approval_authority",
+    targetId: item.id,
+    meta: { serviceKey: item.serviceKey, conditionKey: item.conditionKey, approverAbbr: item.approverAbbr },
+  }).catch(() => {});
+  res.json(item);
+});
+
+supportRouter.delete("/approval-authority/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const removed = await prisma.approvalAuthorityRule.delete({ where: { id: req.params.id } }).catch(() => null);
+  invalidateApprovalAuthorityCache();
+  if (removed) {
+    await logEvent({
+      event: "approval_authority.deleted",
+      actorId: req.user?.id,
+      targetType: "approval_authority",
+      targetId: req.params.id,
+      meta: { serviceKey: removed.serviceKey, conditionKey: removed.conditionKey },
+    }).catch(() => {});
   }
   res.json({ ok: true });
 });
