@@ -8,7 +8,6 @@ import ReferenceChips from '../components/chat/ReferenceChips';
 import { 
   HiArrowLeft, 
   HiOutlinePaperAirplane, 
-  HiOutlineUser,
   HiClipboardCopy,
   HiCheck,
   HiX,
@@ -18,10 +17,27 @@ import {
   HiChevronDown,
   HiRefresh,
 } from 'react-icons/hi';
-import { HiChatBubbleLeftRight } from 'react-icons/hi2';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
+import avatarMale from '../assets/avatars/user_male.png';
+import avatarFemale from '../assets/avatars/user_female.png';
 import { showToast } from '../components/ToastNotification';
 import { chatMessageAPI, chatAPI, botAPI, userAPI, privateContextAPI, getErrorMessage } from '../services/api';
+
+const AVATAR_SRC_BY_KEY = {
+  'preset:user_male': avatarMale,
+  'preset:user_female': avatarFemale,
+};
+const getUserAvatarSrc = (avatarUrl) => AVATAR_SRC_BY_KEY[String(avatarUrl || '')] || avatarMale;
+const readStoredUserAvatarUrl = () => {
+  try {
+    const raw = localStorage.getItem('user');
+    if (!raw) return 'preset:user_male';
+    const user = JSON.parse(raw);
+    return user?.avatarUrl || 'preset:user_male';
+  } catch {
+    return 'preset:user_male';
+  }
+};
 
 
 const formatToken = (n) => {
@@ -182,6 +198,7 @@ function Chat() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [userAvatarUrl, setUserAvatarUrl] = useState(() => readStoredUserAvatarUrl());
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [typingStage, setTypingStage] = useState(0);
@@ -193,6 +210,18 @@ function Chat() {
     document.title = (chatName && chatName !== 'New Chat') ? `${chatName} - ${base}` : base;
     return () => { document.title = base; };
   }, [chatName]);
+
+  // ซิงค์รูปโปรไฟล์กับ Sidebar / AccountModal (localStorage.user)
+  useEffect(() => {
+    const syncAvatar = () => setUserAvatarUrl(readStoredUserAvatarUrl());
+    syncAvatar();
+    window.addEventListener('storage', syncAvatar);
+    window.addEventListener('focus', syncAvatar);
+    return () => {
+      window.removeEventListener('storage', syncAvatar);
+      window.removeEventListener('focus', syncAvatar);
+    };
+  }, []);
   // help bot: ใช้ซ่อนปุ่มคำสั่งลัดเฉพาะแชทบอทช่วยสอน
   const [helpBotId, setHelpBotId] = useState(null);
   const [chatBotId, setChatBotId] = useState(null);
@@ -1880,13 +1909,17 @@ function Chat() {
                         {/* Avatar — โหมดเต็มความกว้าง: จอใหญ่ดัน avatar ไปช่องว่างซ้าย (lg:-ml-11) ให้บับเบิลกว้างเต็มตรงช่องพิมพ์; จอเล็กซ่อน avatar กันโดนขอบจอตัด (บับเบิลก็ยังเต็มความกว้าง) */}
                         <div className={`flex-shrink-0 w-8 h-8 mt-1 ${botFullWidth ? 'hidden lg:block lg:-ml-11' : ''}`}>
                           {isUser ? (
-                            <div className='w-8 h-8 bg-gradient-to-br from-gray-400 to-gray-500 rounded-full flex items-center justify-center shadow-sm'>
-                              <HiOutlineUser className='text-white text-sm' />
-                            </div>
+                            <img
+                              src={getUserAvatarSrc(userAvatarUrl)}
+                              alt="คุณ"
+                              className="w-8 h-8 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
+                            />
                           ) : (
-                            <div className='w-8 h-8 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center shadow-sm'>
-                              <HiChatBubbleLeftRight className='text-white text-sm' />
-                            </div>
+                            <img
+                              src={bingsuLogo}
+                              alt="บอท"
+                              className="w-8 h-8 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
+                            />
                           )}
                         </div>
                         

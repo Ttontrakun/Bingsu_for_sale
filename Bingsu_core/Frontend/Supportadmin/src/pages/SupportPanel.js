@@ -21,6 +21,15 @@ import {
 } from 'react-icons/hi';
 import { api, mapAdminUserToDisplay, getStoredUser, normalizeDashboardRole } from '../services/api';
 
+const THAI_MONTH_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+];
+const THAI_MONTH_SHORT_INDEX = THAI_MONTH_SHORT.reduce((acc, label, index) => {
+  acc[label] = index;
+  return acc;
+}, {});
+
 function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) {
   const isEnabledFlag = (value) => value === true;
   const normalizeGroup = (group) => {
@@ -317,10 +326,22 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   const parseDisplayDateToDate = useCallback((value) => {
     if (!value || value === '-') return null;
 
+    // รูปแบบเก่า: 05/08/69
     if (value.includes('/')) {
       const [day, month, shortYear] = value.split('/').map((part) => parseInt(part, 10));
       const buddhistYear = 2500 + shortYear;
       return new Date(buddhistYear - 543, month - 1, day);
+    }
+
+    // รูปแบบใหม่: 05 ส.ค. 69
+    const shortMatch = String(value).trim().match(/^(\d{1,2})\s+([^\s]+)\s+(\d{2})$/);
+    if (shortMatch) {
+      const day = parseInt(shortMatch[1], 10);
+      const month = THAI_MONTH_SHORT_INDEX[shortMatch[2]];
+      const shortYear = parseInt(shortMatch[3], 10);
+      if (Number.isFinite(day) && Number.isFinite(month) && Number.isFinite(shortYear)) {
+        return new Date(2500 + shortYear - 543, month, day);
+      }
     }
 
     return parseThaiDate(value);
@@ -328,9 +349,9 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
 
   const formatShortDate = (date) => {
     const day = String(date.getDate()).padStart(2, '0');
-    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const month = THAI_MONTH_SHORT[date.getMonth()];
     const year = String((date.getFullYear() + 543) % 100).padStart(2, '0');
-    return `${day}/${month}/${year}`;
+    return `${day} ${month} ${year}`;
   };
 
   const formatThaiDate = (date) => {
@@ -347,8 +368,10 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
 
   const formatDisplayDate = (value) => {
     if (!value || value === '-') return '-';
-    if (value.includes('/')) return value;
-    return formatShortDate(parseThaiDate(value));
+    // แปลงทั้งรูปแบบเก่า (05/08/69) และชื่อเดือนเต็ม ให้เป็นชื่อย่อ
+    const parsed = parseDisplayDateToDate(value);
+    if (!parsed || Number.isNaN(parsed.getTime())) return value;
+    return formatShortDate(parsed);
   };
 
   const getDaysUntilExpiry = useCallback((expiresAtValue) => {
@@ -865,7 +888,17 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
 
       {/* Users Table — เลื่อนเฉพาะส่วนนี้ */}
       <div ref={tableScrollRef} className="flex-1 min-h-0 overflow-auto bg-white rounded-lg border border-gray-100">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table className="w-full table-fixed divide-y divide-gray-200">
+          <colgroup>
+            <col className="w-[12%]" />
+            <col className="w-[16%]" />
+            <col className="w-[18%]" />
+            <col className="w-[14%]" />
+            <col className="w-[11%]" />
+            <col className="w-[11%]" />
+            <col className="w-[8%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <thead className="bg-white border-b border-gray-200 sticky top-0 z-10">
             <tr>
               <th className="px-4 py-3 text-left text-sm font-normal text-gray-600 bg-white">
@@ -1013,30 +1046,31 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                   )}
                 </td>
                 <td className="px-4 py-4">
-                  <div className="flex items-center space-x-3">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-medium ${user.avatarColor}`}>
+                  <div className="flex items-center space-x-3 min-w-0">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white font-medium shrink-0 ${user.avatarColor}`}>
                       {user.avatar}
                     </div>
                     <span 
                       onClick={() => highlightedUserId && setHighlightedUserId(null)}
-                      className="text-gray-900"
+                      className="text-gray-900 truncate"
+                      title={user.username}
                     >
                       {user.username}
                     </span>
                   </div>
                 </td>
-                <td className="px-4 py-4 text-gray-600">{user.email}</td>
+                <td className="px-4 py-4 text-gray-600 truncate" title={user.email}>{user.email}</td>
                 <td className="px-4 py-4 text-gray-600">
                   {user.roleType !== 'pending' ? (
-                    <span className="text-sm text-gray-800 tabular-nums">{user.lastActive}</span>
+                    <span className="text-sm text-gray-800 tabular-nums block truncate" title={user.lastActive}>{user.lastActive}</span>
                   ) : (
                     '-'
                   )}
                 </td>
-                <td className="px-4 py-4 text-gray-600">
+                <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                   {user.roleType !== 'pending' ? formatDisplayDate(user.createdAt) : '-'}
                 </td>
-                <td className={`px-4 py-4 ${
+                <td className={`px-4 py-4 whitespace-nowrap ${
                   user.roleType === 'user' && isExpiryExpiredOrSoon(user.expiresAt) 
                     ? 'text-red-500 font-semibold' 
                     : 'text-gray-600'
@@ -1045,7 +1079,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
                     <div className="flex items-center gap-2">
                       <span className="tabular-nums">{formatDisplayDate(user.expiresAt)}</span>
                       {isExpiryToday(user.expiresAt) ? (
-                        <HiCalendar className="w-4 h-4 text-red-500" title="วันหมดอายุวันนี้" />
+                        <HiCalendar className="w-4 h-4 text-red-500 shrink-0" title="วันหมดอายุวันนี้" />
                       ) : null}
                     </div>
                   ) : (

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   HiChevronLeft, 
@@ -15,7 +15,7 @@ import {
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
-import { api } from '../services/api';
+import { api, userAPI } from '../services/api';
 import avatarMale from '../assets/avatars/user_male.png';
 import avatarFemale from '../assets/avatars/user_female.png';
 
@@ -28,11 +28,31 @@ function Navbar({ onCollapseChange, userRole }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
-  const [selectedAvatar, setSelectedAvatar] = useState(null);
+  const [selectedAvatar, setSelectedAvatar] = useState('preset:user_male');
   const [profileName, setProfileName] = useState('Profile');
   const navigate = useNavigate();
   const location = useLocation();
   const profileInitial = (profileName?.trim()?.charAt(0) || 'P').toUpperCase();
+
+  const applyProfile = useCallback((user) => {
+    if (!user || typeof user !== 'object') return;
+    if (user.name) setProfileName(String(user.name));
+    const key = String(user.avatarUrl || '');
+    if (AVATAR_SRC_BY_KEY[key]) setSelectedAvatar(key);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const user = await userAPI.getCurrentUser();
+        if (!cancelled) applyProfile(user);
+      } catch {
+        // ignore — keep defaults
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [applyProfile]);
 
   const toggleSidebar = () => {
     const newState = !isCollapsed;
@@ -211,11 +231,7 @@ function Navbar({ onCollapseChange, userRole }) {
     <AccountModal
       isOpen={isAccountModalOpen}
       onClose={() => setIsAccountModalOpen(false)}
-      selectedAvatar={selectedAvatar}
-      onAvatarChange={setSelectedAvatar}
-      profileName={profileName}
-      onProfileNameChange={setProfileName}
-      profileInitial={profileInitial}
+      onProfileUpdated={applyProfile}
     />
     </>
   );

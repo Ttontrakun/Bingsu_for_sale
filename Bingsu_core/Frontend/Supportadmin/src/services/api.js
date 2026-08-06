@@ -319,6 +319,38 @@ export function normalizeDashboardRole(role) {
   return s || 'user';
 }
 
+const USER_AVATAR_COLORS = [
+  'bg-blue-500',
+  'bg-indigo-500',
+  'bg-violet-500',
+  'bg-purple-500',
+  'bg-fuchsia-500',
+  'bg-pink-500',
+  'bg-rose-500',
+  'bg-red-500',
+  'bg-orange-500',
+  'bg-amber-500',
+  'bg-yellow-500',
+  'bg-lime-500',
+  'bg-green-500',
+  'bg-emerald-500',
+  'bg-teal-500',
+  'bg-cyan-500',
+  'bg-sky-500',
+];
+
+/** สุ่มสีแบบคงที่จาก id/ชื่อ — คนเดียวกันได้สีเดิมทุกครั้ง */
+function pickAvatarColor(seed) {
+  const s = String(seed || '');
+  let hash = 0;
+  for (let i = 0; i < s.length; i += 1) {
+    hash = ((hash << 5) - hash) + s.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % USER_AVATAR_COLORS.length;
+  return USER_AVATAR_COLORS[idx];
+}
+
 /**
  * แปลง user จาก backend (pending-users) เป็นรูปแบบที่หน้า Support ใช้แสดง
  */
@@ -339,7 +371,7 @@ export function mapPendingUserToDisplay(backendUser) {
     expiresAt: '-',
     isEnabled: false,
     avatar: (name.charAt(0) || '?').toUpperCase(),
-    avatarColor: 'bg-gray-400',
+    avatarColor: pickAvatarColor(backendUser.id || name),
     approvalStatus: backendUser.approvalStatus,
   };
 }
@@ -368,10 +400,14 @@ function formatShortThaiDateFromIso(iso) {
   if (!iso) return '-';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '-';
+  const thaiMonthShort = [
+    'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+    'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+  ];
   const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const month = thaiMonthShort[d.getMonth()];
   const year = String((d.getFullYear() + 543) % 100).padStart(2, '0');
-  return `${day}/${month}/${year}`;
+  return `${day} ${month} ${year}`;
 }
 
 export function mapAdminUserToDisplay(backendUser) {
@@ -398,7 +434,7 @@ export function mapAdminUserToDisplay(backendUser) {
     expiresAt: backendUser.role === 'user' ? formatShortThaiDateFromIso(backendUser.expiresAt) : '-',
     isEnabled: backendUser.isActive === true,
     avatar: (name.charAt(0) || '?').toUpperCase(),
-    avatarColor: 'bg-gray-400',
+    avatarColor: pickAvatarColor(backendUser.id || name),
     approvalStatus: backendUser.approvalStatus,
   };
 }

@@ -16,7 +16,7 @@ const getAvatarSrc = (v) => {
   return found?.src || null;
 };
 
-function AccountModal({ isOpen, onClose }) {
+function AccountModal({ isOpen, onClose, onProfileUpdated }) {
   const [isEditMode, setIsEditMode] = useState(false);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -44,7 +44,7 @@ function AccountModal({ isOpen, onClose }) {
       const userData = {
         name: user?.name || '',
         email: user?.email || '',
-        avatarUrl: user?.avatarUrl || 'preset:user_male',
+        avatarUrl: getAvatarSrc(user?.avatarUrl) ? user.avatarUrl : 'preset:user_male',
       };
       setName(userData.name);
       setEmail(userData.email);
@@ -82,15 +82,21 @@ function AccountModal({ isOpen, onClose }) {
     setSuccess('');
     try {
       const updatedUser = await userAPI.updateProfile({ name: name.trim(), avatarUrl });
+      const savedAvatar = getAvatarSrc(updatedUser?.avatarUrl)
+        ? updatedUser.avatarUrl
+        : (getAvatarSrc(avatarUrl) ? avatarUrl : 'preset:user_male');
       const userData = {
         name: updatedUser?.name || name.trim(),
         email: updatedUser?.email || email,
-        avatarUrl: updatedUser?.avatarUrl || avatarUrl,
+        avatarUrl: savedAvatar,
       };
       setOriginalData(userData);
       setName(userData.name);
       setEmail(userData.email);
       setAvatarUrl(userData.avatarUrl);
+      if (typeof onProfileUpdated === 'function') {
+        onProfileUpdated(userData);
+      }
       setSuccess('บันทึกข้อมูลเรียบร้อยแล้ว');
       setIsEditMode(false);
       setTimeout(() => setSuccess(''), 3000);
