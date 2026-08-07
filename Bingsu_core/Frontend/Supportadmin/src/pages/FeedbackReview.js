@@ -24,8 +24,10 @@ function FeedbackReview({ userRole }) {
   const [expanded, setExpanded] = useState(() => new Set());
   const [metrics, setMetrics] = useState(null);
 
+  const METRICS_DAYS = 30;
+
   const loadMetrics = useCallback(() => {
-    api.getQualityMetrics(30).then(setMetrics).catch(() => setMetrics(null));
+    api.getQualityMetrics(METRICS_DAYS).then(setMetrics).catch(() => setMetrics(null));
   }, []);
 
   useEffect(() => {
@@ -34,7 +36,7 @@ function FeedbackReview({ userRole }) {
   }, [canSee, loadMetrics]);
 
   const load = useCallback(async () => {
-    // โหลดรายการ feedback เฉพาะตอนดู "พอใจ / ไม่พอใจ"
+    // โหลดรายการ feedback เฉพาะตอนดู "พอใจ / ไม่พอใจ" — ใช้ช่วงวันเดียวกับการ์ด
     if (view !== 'up' && view !== 'down') {
       setItems([]);
       setTotal(0);
@@ -44,7 +46,7 @@ function FeedbackReview({ userRole }) {
     setLoading(true);
     setError('');
     try {
-      const data = await api.getFeedback(view, 100, 0);
+      const data = await api.getFeedback(view, 100, 0, METRICS_DAYS);
       setItems(Array.isArray(data?.items) ? data.items : []);
       setTotal(Number(data?.total) || 0);
     } catch (e) {

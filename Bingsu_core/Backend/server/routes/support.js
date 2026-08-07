@@ -117,9 +117,13 @@ supportRouter.get(
         : "down";
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
       const offset = Math.max(0, Number(req.query.offset) || 0);
+      // ใช้ช่วงวันเดียวกับ quality-metrics (default 30) — เกินแล้วไม่โชว์
+      const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+      const since = new Date(Date.now() - days * 86400000);
+      const where = { rating, createdAt: { gte: since } };
 
       const feedbacks = await prisma.messageFeedback.findMany({
-        where: { rating },
+        where,
         orderBy: { createdAt: "desc" },
         take: limit,
         skip: offset,
@@ -176,8 +180,8 @@ supportRouter.get(
         }),
       );
 
-      const total = await prisma.messageFeedback.count({ where: { rating } });
-      res.json({ items, total, limit, offset, rating });
+      const total = await prisma.messageFeedback.count({ where });
+      res.json({ items, total, limit, offset, rating, days });
     } catch (error) {
       console.error("get support feedback failed", error);
       res.status(500).json({ error: "Failed to load feedback" });

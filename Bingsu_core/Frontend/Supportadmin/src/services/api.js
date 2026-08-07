@@ -147,8 +147,8 @@ export const api = {
   },
   getMe: () => request('/api/auth/me'),
   getReport: () => request('/api/support/report'),
-  getFeedback: (rating = 'down', limit = 50, offset = 0) =>
-    request(`/api/support/feedback?rating=${encodeURIComponent(rating)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}`),
+  getFeedback: (rating = 'down', limit = 50, offset = 0, days = 30) =>
+    request(`/api/support/feedback?rating=${encodeURIComponent(rating)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&days=${encodeURIComponent(days)}`),
   getQualityMetrics: (days = 30) =>
     request(`/api/support/quality-metrics?days=${encodeURIComponent(days)}`),
   getMetrics: () => request('/api/admin/metrics'),
