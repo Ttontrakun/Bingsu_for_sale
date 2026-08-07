@@ -6,11 +6,9 @@ import {
   HiBookOpen, 
   HiUserGroup,
   HiExclamationCircle,
-  HiTrendingUp,
   HiArrowUp,
   HiArrowDown,
   HiSparkles,
-  HiLightningBolt,
   HiCheckCircle,
   HiShieldCheck
 } from 'react-icons/hi';
@@ -240,6 +238,15 @@ const getErrorRangeLabel = (range) => {
   return 'สัปดาห์ล่าสุด';
 };
 
+const TOKEN_RANGE_DAYS = { day: 1, week: 7, month: 30 };
+const getTokenRangeLabel = (range) => {
+  if (range === 'day') return '1 วันล่าสุด';
+  if (range === 'week') return '7 วันล่าสุด';
+  return '30 วันล่าสุด';
+};
+const RANGE_DAYS = TOKEN_RANGE_DAYS;
+const getRangeLabel = getTokenRangeLabel;
+
 const getLocalDateKey = (value) => {
   const d = value instanceof Date ? value : new Date(value || 0);
   if (!Number.isFinite(d.getTime())) return '';
@@ -322,6 +329,8 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   const [isVisible, setIsVisible] = useState(false);
   const [filter, setFilter] = useState('user'); // 'all', 'user', 'system'
   const [errorRange, setErrorRange] = useState('week');
+  const [tokenRange, setTokenRange] = useState('month'); // day | week | month
+  const [usersRange, setUsersRange] = useState('week'); // day | week | month
   const [reportData, setReportData] = useState(null);
   const [metricsData, setMetricsData] = useState(null);
   const [healthData, setHealthData] = useState(null);
@@ -344,8 +353,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   useEffect(() => {
     api.getReport().then(setReportData).catch(() => {});
     api.getMetrics().then(setMetricsData).catch(() => {});
-    api.getAdminActivity(14).then(setAdminActivity).catch(() => {});
   }, [userRole]);
+
+  useEffect(() => {
+    const days = RANGE_DAYS[usersRange] || 7;
+    api.getAdminActivity(days).then(setAdminActivity).catch(() => setAdminActivity(null));
+  }, [userRole, usersRange]);
 
   useEffect(() => {
     const t0 = Date.now();
@@ -421,11 +434,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       return;
     }
     const scope = filter === 'user' ? 'user' : 'all';
+    const days = TOKEN_RANGE_DAYS[tokenRange] || 30;
     api
-      .getTokenUsage(scope, 30)
+      .getTokenUsage(scope, days)
       .then((data) => setTokenUsageData(data || null))
       .catch(() => setTokenUsageData(null));
-  }, [filter, userRole]);
+  }, [filter, userRole, tokenRange]);
 
   useEffect(() => {
     if (filter === 'system') {
@@ -676,7 +690,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
     // Filter data based on selected filter
     let dailyUsers, tokenUsage, dailyUsersChart, tokenUsageChart;
 
-    const buildLast7Days = (series, role) => {
+    const buildLastNDays = (series, role, days) => {
       const map = new Map();
       (Array.isArray(series) ? series : [])
         .filter((r) => String(r?.role || '') === role)
@@ -689,14 +703,17 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
 
       const out = [];
       const today = new Date();
-      for (let i = 6; i >= 0; i--) {
+      const n = Math.max(1, Number(days) || 7);
+      for (let i = n - 1; i >= 0; i--) {
         const d = new Date(today);
         d.setDate(today.getDate() - i);
         const key = d.toISOString().slice(0, 10);
-        const label =
-          i === 0 ? 'วันนี้' :
-          i === 1 ? 'เมื่อวาน' :
-          `${i} วันก่อน`;
+        let label;
+        if (n <= 7) {
+          label = i === 0 ? 'วันนี้' : i === 1 ? 'เมื่อวาน' : `${i} วันก่อน`;
+        } else {
+          label = d.toLocaleDateString('th-TH', { day: 'numeric', month: 'short' });
+        }
         out.push({ date: label, key, value: map.get(key) || 0 });
       }
       return out;
@@ -704,21 +721,22 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
 
     // Use real admin activity when available (admin/admin_metrics). Fallback to mock if not.
     if ((filter === 'all' || filter === 'user') && adminActivity?.series) {
-      const userSeries7 = buildLast7Days(adminActivity.series, 'user');
-      const modelSeries7 = buildLast7Days(adminActivity.series, 'model');
-      const todayUsers = userSeries7[userSeries7.length - 1]?.value || 0;
-      const yesterdayUsers = userSeries7[userSeries7.length - 2]?.value || 0;
+      const usersDays = RANGE_DAYS[usersRange] || 7;
+      const userSeries = buildLastNDays(adminActivity.series, 'user', usersDays);
+      const modelSeries = buildLastNDays(adminActivity.series, 'model', usersDays);
+      const todayUsers = userSeries[userSeries.length - 1]?.value || 0;
+      const yesterdayUsers = userSeries.length > 1 ? (userSeries[userSeries.length - 2]?.value || 0) : 0;
       const usersChange = yesterdayUsers ? ((todayUsers - yesterdayUsers) / Math.max(1, yesterdayUsers)) * 100 : 0;
 
-      const todayModel = modelSeries7[modelSeries7.length - 1]?.value || 0;
-      const yesterdayModel = modelSeries7[modelSeries7.length - 2]?.value || 0;
+      const todayModel = modelSeries[modelSeries.length - 1]?.value || 0;
+      const yesterdayModel = modelSeries.length > 1 ? (modelSeries[modelSeries.length - 2]?.value || 0) : 0;
       const modelChange = yesterdayModel ? ((todayModel - yesterdayModel) / Math.max(1, yesterdayModel)) * 100 : 0;
 
       dailyUsers = { today: todayUsers, yesterday: yesterdayUsers, change: Number(usersChange.toFixed(1)) };
       // ไม่มี token จริงใน endpoint นี้ → ใช้จำนวน model messages เป็น proxy เพื่อให้เป็นข้อมูลจริงจากระบบ
       tokenUsage = { today: todayModel, yesterday: yesterdayModel, change: Number(modelChange.toFixed(1)) };
-      dailyUsersChart = userSeries7.map((r) => ({ date: r.date, users: r.value }));
-      tokenUsageChart = modelSeries7.map((r) => ({ date: r.date, tokens: r.value }));
+      dailyUsersChart = userSeries.map((r) => ({ date: r.date, users: r.value }));
+      tokenUsageChart = modelSeries.map((r) => ({ date: r.date, tokens: r.value }));
     } else {
       // fallback
       if (filter === 'user') {
@@ -958,7 +976,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       latestErrorAt: errorLogOverview?.latestAt || null,
       latestErrorMessage: errorLogOverview?.latestMessage || '—',
     };
-  }, [filter, users, groups, reportData, metricsData, adminActivity, healthData, healthResponseTimeMs, faqCategories, tokenUsageData, userRoleDistributionData, errorLogOverview, errorRange]);
+  }, [filter, users, groups, reportData, metricsData, adminActivity, healthData, healthResponseTimeMs, faqCategories, tokenUsageData, userRoleDistributionData, errorLogOverview, errorRange, usersRange]);
 
   const StatCard = ({ 
     title, 
@@ -1248,12 +1266,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
         </div>
 
         <StatCard
-          title="ผู้ใช้งานรายวัน"
+          title={`ผู้ใช้งาน ${getRangeLabel(usersRange)}`}
           value={metrics.dailyUsers.today}
           icon={HiUsers}
           change={metrics.dailyUsers.change}
           changeType="up"
-          subtitle="ผู้ใช้ที่ใช้งานวันนี้"
+          subtitle={usersRange === 'day' ? 'ข้อความจากผู้ใช้วันนี้' : `ข้อความจากผู้ใช้ · ${getRangeLabel(usersRange)}`}
           iconColor="bg-[#F5C200]"
           gradient={GRADIENT_COLORS.sandy}
           sparklineData={metrics.dailyUsersChart.map(d => d.users)}
@@ -1411,12 +1429,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           </div>
         </div>
         <StatCard
-          title="Token 30 วันล่าสุด"
+          title={`Token ${getTokenRangeLabel(tokenRange)}`}
           value={metrics.tokenUsage.today}
           icon={HiKey}
           change={undefined}
           changeType="up"
-          subtitle="รวม token 30 วันล่าสุด"
+          subtitle={`รวม token ${getTokenRangeLabel(tokenRange)}`}
           iconColor="bg-[#8B8680]"
           gradient={['#8B8680', '#8B8680']}
           sparklineData={metrics.tokenUsageChart.map(d => d.tokens / 10000)}
@@ -1435,23 +1453,42 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           ref={dailyUsersChartRef}
           className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-all duration-300"
         >
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center gap-3">
               <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
                 <HiUsers className="text-white text-2xl" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-800">ผู้ใช้งานรายวัน</h3>
-                <p className="text-sm text-gray-600">7 วันล่าสุด</p>
+                <h3 className="text-2xl font-bold text-gray-800">ผู้ใช้งาน</h3>
+                <p className="text-sm text-gray-600">{getRangeLabel(usersRange)}</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 bg-[#F2E9DA] px-3 py-1 rounded-full">
-              <HiTrendingUp className="text-[#8B8680]" />
-              <span className="text-sm font-semibold text-[#8B8680]">+{metrics.dailyUsers.change}%</span>
+            <div className="flex items-center gap-2">
+              {[
+                { id: 'day', label: 'รายวัน' },
+                { id: 'week', label: 'รายสัปดาห์' },
+                { id: 'month', label: 'รายเดือน' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setUsersRange(opt.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    usersRange === opt.id
+                      ? 'bg-[#8B8680] text-white shadow'
+                      : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
           </div>
           <ResponsiveContainer width="100%" height={320}>
-            <LineChart data={metrics.dailyUsersChart}>
+            <LineChart
+              data={metrics.dailyUsersChart}
+              margin={{ top: 8, right: 8, left: 0, bottom: usersRange === 'month' ? 36 : 8 }}
+            >
               <defs>
                 <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#F5C200" stopOpacity={1}/>
@@ -1464,6 +1501,10 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 stroke="#6B7280"
                 style={{ fontSize: '12px', fontWeight: '500' }}
                 tickLine={false}
+                interval={usersRange === 'month' ? 3 : 0}
+                angle={usersRange === 'month' ? -30 : 0}
+                textAnchor={usersRange === 'month' ? 'end' : 'middle'}
+                height={usersRange === 'month' ? 48 : 28}
               />
               <YAxis 
                 stroke="#6B7280"
@@ -1490,25 +1531,48 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           ref={tokenUsageChartRef}
           className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-all duration-300"
         >
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
             <div className="flex items-center gap-3">
               <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
                 <HiKey className="text-white text-2xl" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-800">Token 30 วันล่าสุด</h3>
-                <p className="text-sm text-gray-600">30 วันล่าสุด</p>
+                <h3 className="text-2xl font-bold text-gray-800">Token</h3>
+                <p className="text-sm text-gray-600">
+                  {getTokenRangeLabel(tokenRange)}
+                  <span className="text-gray-400"> · รวม </span>
+                  <span className="font-semibold text-gray-700">
+                    {Number(metrics.tokenUsage.today || 0).toLocaleString('th-TH')}
+                  </span>
+                </p>
               </div>
             </div>
-            {metrics.tokenUsage.change !== undefined && (
-              <div className="flex items-center gap-2 bg-[#F2E9DA] px-3 py-1 rounded-full">
-                <HiLightningBolt className="text-[#8B8680]" />
-                <span className="text-sm font-semibold text-[#8B8680]">+{metrics.tokenUsage.change}%</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {[
+                { id: 'day', label: 'รายวัน' },
+                { id: 'week', label: 'รายสัปดาห์' },
+                { id: 'month', label: 'รายเดือน' },
+              ].map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setTokenRange(opt.id)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    tokenRange === opt.id
+                      ? 'bg-[#8B8680] text-white shadow'
+                      : 'text-gray-600 bg-gray-100 hover:bg-gray-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={320}>
-            <AreaChart data={metrics.tokenUsageChart}>
+            <AreaChart
+              data={metrics.tokenUsageChart}
+              margin={{ top: 8, right: 8, left: 0, bottom: tokenRange === 'month' ? 36 : 8 }}
+            >
               <defs>
                 <linearGradient id="colorTokens" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#F5C200" stopOpacity={0.4}/>
@@ -1521,6 +1585,10 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 stroke="#6B7280"
                 style={{ fontSize: '12px', fontWeight: '500' }}
                 tickLine={false}
+                interval={tokenRange === 'month' ? 3 : 0}
+                angle={tokenRange === 'month' ? -30 : 0}
+                textAnchor={tokenRange === 'month' ? 'end' : 'middle'}
+                height={tokenRange === 'month' ? 48 : 28}
               />
               <YAxis 
                 stroke="#6B7280"

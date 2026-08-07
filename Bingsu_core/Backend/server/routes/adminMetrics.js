@@ -278,7 +278,8 @@ adminMetricsRouter.get("/top-cited-documents", authenticate, requireRole("suppor
 adminMetricsRouter.get("/token-usage", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {
   const scope = String(req.query?.scope || "all").toLowerCase(); // all | user (ตอนนี้ใช้รวมทั้งหมด)
   const daysRaw = Number(req.query?.days);
-  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(30, Math.floor(daysRaw))) : 7;
+  // รองรับ รายวัน(1) / รายสัปดาห์(7) / รายเดือน(30)
+  const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, Math.floor(daysRaw))) : 7;
 
   const now = new Date();
   const toKey = now.toISOString().slice(0, 10); // UTC dateKey
@@ -305,7 +306,12 @@ adminMetricsRouter.get("/token-usage", authenticate, requireRole("support", "adm
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now.getTime() - i * 24 * 60 * 60 * 1000);
     const dateKey = d.toISOString().slice(0, 10);
-    const label = i === 0 ? "วันนี้" : i === 1 ? "เมื่อวาน" : `${i} วันก่อน`;
+    let label;
+    if (days <= 7) {
+      label = i === 0 ? "วันนี้" : i === 1 ? "เมื่อวาน" : `${i} วันก่อน`;
+    } else {
+      label = d.toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+    }
     const t = totalsByDateKey[dateKey] || { totalTokens: 0, promptTokens: 0, completionTokens: 0 };
     const tokens = t.totalTokens > 0 ? t.totalTokens : t.promptTokens + t.completionTokens;
     daily.push({
