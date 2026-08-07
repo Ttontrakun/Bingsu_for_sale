@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
+import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, userAPI, getErrorMessage } from '../services/api';
 
@@ -137,7 +138,11 @@ function Auth() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
-      <NtBrandBar />
+      <NtBrandBar
+        logoSrc={ntLogo}
+        className="relative z-20 flex h-[55px] shrink-0 items-center justify-start bg-[#FFD100] px-4 shadow-sm md:px-6"
+        logoClassName="h-9 w-auto max-w-[240px] object-contain object-left"
+      />
 
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
       <div className="relative w-full max-w-[500px] rounded-[1.75rem] bg-white p-8 md:p-9 shadow-[0_10px_30px_rgba(0,0,0,0.08)] m-4"

@@ -12,8 +12,13 @@ import AnnouncementBanner from '../components/AnnouncementBanner';
 import { showToast } from '../components/ToastNotification';
 import { chatAPI, botAPI, privateContextAPI } from '../services/api';
 
-const OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
+const OFFICIAL_BOT_DESCRIPTION = 'ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้';
 const LEGACY_BOT_DESCRIPTION = 'บอทผู้ช่วยประจำระบบ';
+const LEGACY_OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
+const isDefaultBotDescription = (value) => {
+  const text = String(value || '').trim();
+  return !text || text === LEGACY_BOT_DESCRIPTION || text === LEGACY_OFFICIAL_BOT_DESCRIPTION;
+};
 const isCorruptedText = (value) => {
   const text = String(value || '').trim();
   if (!text) return false;
@@ -455,9 +460,8 @@ function Homepage({ privateMode = false }) {
 
         {/* Description — ใช้คำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท) หรือข้อความเริ่มต้น */}
         <p className='text-gray-600 text-center max-w-2xl leading-relaxed mb-10'>
-          {selectedBotObject?.description &&
-           selectedBotObject.description.trim() !== LEGACY_BOT_DESCRIPTION &&
-           !isCorruptedText(selectedBotObject.description)
+          {!isDefaultBotDescription(selectedBotObject?.description) &&
+           !isCorruptedText(selectedBotObject?.description)
             ? selectedBotObject.description.split('\n').map((line, i) => (
                 <span key={i}>
                   {line}
@@ -465,9 +469,7 @@ function Homepage({ privateMode = false }) {
                 </span>
               ))
             : (
-              <>
-                {OFFICIAL_BOT_DESCRIPTION}
-              </>
+              <span>{OFFICIAL_BOT_DESCRIPTION}</span>
             )}
         </p>
 
@@ -635,7 +637,7 @@ function Homepage({ privateMode = false }) {
                   ? (composerPrivateCommand
                     ? (composerPrivateCommand === 'remember' ? 'พิมพ์ข้อมูลที่ต้องการให้ระบบจำ...' : 'พิมพ์คำสั่งการตอบของ AI...')
                     : 'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI')
-                  : 'How can I help today?...'
+                  : 'ถามเกี่ยวกับเอกสารในระบบ เช่น "อัตราค่าบริการ NT Corporate Internet"'
               }
               rows={1}
               className='flex-1 outline-none text-gray-700 text-base placeholder-gray-400 bg-transparent resize-none overflow-y-auto min-h-[1.5rem] max-h-32'

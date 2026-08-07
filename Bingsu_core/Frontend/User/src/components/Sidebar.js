@@ -255,6 +255,25 @@ function Sidebar({
     refreshMe();
   }, [refreshMe]);
 
+  // ซิงก์ avatar/ชื่อทันทีเมื่อบันทึกใน AccountModal
+  useEffect(() => {
+    const onProfileUpdated = (event) => {
+      const next = event?.detail;
+      if (!next || typeof next !== 'object') {
+        refreshMe();
+        return;
+      }
+      setMe((prev) => ({
+        ...(prev || {}),
+        name: next.name ?? prev?.name,
+        email: next.email ?? prev?.email,
+        avatarUrl: next.avatarUrl ?? prev?.avatarUrl,
+      }));
+    };
+    window.addEventListener('user-profile-updated', onProfileUpdated);
+    return () => window.removeEventListener('user-profile-updated', onProfileUpdated);
+  }, [refreshMe]);
+
   // ฟัง event เมื่อมีการสร้างแชทใหม่จากหน้า homepage
   useEffect(() => {
     const handleChatsUpdated = () => {

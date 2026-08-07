@@ -57,7 +57,7 @@ export async function ensureUserDefaultBot(userId) {
       data: {
         name: DEFAULT_BOT_NAME,
         prompt: DEFAULT_BOT_PROMPT,
-        description: "ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล",
+        description: "ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้",
         model: null,
         avatarUrl: "emoji:🤖",
         ownerId: systemOwner?.id || userId,

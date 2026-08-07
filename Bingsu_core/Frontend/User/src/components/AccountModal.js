@@ -157,9 +157,14 @@ function AccountModal({ isOpen, onClose }) {
       setName(userData.name);
       setEmail(updatedUser.email || email);
       setAvatarUrl(userData.avatarUrl);
-      
-      // localStorage stores only { id } — no PII to update
-      
+
+      // แจ้ง Sidebar / Chat ให้ซิงก์ avatar (ไม่เก็บโปรไฟล์ใน localStorage)
+      try {
+        window.dispatchEvent(new CustomEvent('user-profile-updated', { detail: userData }));
+      } catch (_) {
+        /* ignore */
+      }
+
       // Show success message
       setSuccess('บันทึกข้อมูลเรียบร้อยแล้ว');
       setIsEditMode(false);

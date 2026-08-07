@@ -1,6 +1,7 @@
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { HiOutlineMail, HiCheck, HiX, HiArrowLeft } from 'react-icons/hi';
+import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, getErrorMessage } from '../services/api';
 
@@ -105,7 +106,11 @@ function Verifying() {
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
-      <NtBrandBar />
+      <NtBrandBar
+        logoSrc={ntLogo}
+        className="relative z-20 flex h-[55px] shrink-0 items-center justify-start bg-[#FFD100] px-4 shadow-sm md:px-6"
+        logoClassName="h-9 w-auto max-w-[240px] object-contain object-left"
+      />
 
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
       <div

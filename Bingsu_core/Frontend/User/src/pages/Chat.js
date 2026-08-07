@@ -29,23 +29,15 @@ const AVATAR_SRC_BY_KEY = {
   'preset:user_female': avatarFemale,
 };
 const getUserAvatarSrc = (avatarUrl) => AVATAR_SRC_BY_KEY[String(avatarUrl || '')] || avatarMale;
-const readStoredUserAvatarUrl = () => {
-  try {
-    const raw = localStorage.getItem('user');
-    if (!raw) return 'preset:user_male';
-    const user = JSON.parse(raw);
-    return user?.avatarUrl || 'preset:user_male';
-  } catch {
-    return 'preset:user_male';
-  }
-};
+const DEFAULT_USER_AVATAR = 'preset:user_male';
 
 
 const formatToken = (n) => {
   const x = Number(n || 0);
   return Number.isFinite(x) ? x.toLocaleString('th-TH') : '0';
 };
-const OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
+const OFFICIAL_BOT_DESCRIPTION = 'ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้';
+const LEGACY_OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
 const ENABLE_MESSAGE_EDIT_BUTTON = false;
 // ซ่อนปุ่มเลือกโหมด (Flash/Detail) ไว้ก่อน — ใช้ Detail (120B บน H100) เป็นหลักเสมอ
 const ENABLE_MODE_SELECTOR = false;
@@ -55,6 +47,13 @@ const isCorruptedText = (value) => {
   if (!text) return false;
   const qCount = (text.match(/\?/g) || []).length;
   return qCount >= 3 && qCount / Math.max(1, text.length) > 0.25;
+};
+const resolveBotDescription = (description) => {
+  const text = String(description || '').trim();
+  if (!text || text === LEGACY_OFFICIAL_BOT_DESCRIPTION || isCorruptedText(text)) {
+    return OFFICIAL_BOT_DESCRIPTION;
+  }
+  return text;
 };
 
 const normalizeReferenceQuote = (input) => {
@@ -221,7 +220,7 @@ function Chat() {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [userAvatarUrl, setUserAvatarUrl] = useState(() => readStoredUserAvatarUrl());
+  const [userAvatarUrl, setUserAvatarUrl] = useState(DEFAULT_USER_AVATAR);
   const [chatInput, setChatInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [typingStage, setTypingStage] = useState(0);
@@ -234,15 +233,29 @@ function Chat() {
     return () => { document.title = base; };
   }, [chatName]);
 
-  // ซิงค์รูปโปรไฟล์กับ Sidebar / AccountModal (localStorage.user)
+  // โหลด/ซิงก์รูปโปรไฟล์จาก API + event จาก AccountModal
   useEffect(() => {
-    const syncAvatar = () => setUserAvatarUrl(readStoredUserAvatarUrl());
-    syncAvatar();
-    window.addEventListener('storage', syncAvatar);
-    window.addEventListener('focus', syncAvatar);
+    let cancelled = false;
+    const loadAvatar = async () => {
+      try {
+        const user = await userAPI.getCurrentUser();
+        if (!cancelled) {
+          setUserAvatarUrl(user?.avatarUrl || DEFAULT_USER_AVATAR);
+        }
+      } catch {
+        if (!cancelled) setUserAvatarUrl(DEFAULT_USER_AVATAR);
+      }
+    };
+    loadAvatar();
+    const onProfileUpdated = (event) => {
+      const next = event?.detail?.avatarUrl;
+      if (next) setUserAvatarUrl(next);
+      else loadAvatar();
+    };
+    window.addEventListener('user-profile-updated', onProfileUpdated);
     return () => {
-      window.removeEventListener('storage', syncAvatar);
-      window.removeEventListener('focus', syncAvatar);
+      cancelled = true;
+      window.removeEventListener('user-profile-updated', onProfileUpdated);
     };
   }, []);
   // help bot: ใช้ซ่อนปุ่มคำสั่งลัดเฉพาะแชทบอทช่วยสอน
@@ -1939,9 +1952,7 @@ function Chat() {
                   Welcome to {selectedBot?.name || 'Enterprise AI Chatbot Chat'}
                 </h2>
                 <p className='text-gray-500 text-center mb-8 max-w-2xl'>
-                  {selectedBot?.description && !isCorruptedText(selectedBot.description)
-                    ? selectedBot.description
-                    : OFFICIAL_BOT_DESCRIPTION}
+                  {resolveBotDescription(selectedBot?.description)}
                 </p>
               </div>
             ) : (
