@@ -25,9 +25,6 @@ import { supportRouter } from "./routes/support.js";
 import { announcementsRouter } from "./routes/announcements.js";
 import { conversationsRouter, messagesRouter, chatRouter, privateContextRouter } from "./routes/conversations.js";
 import { healthRouter } from "./routes/health.js";
-import { integrationsRouter } from "./routes/integrations.js";
-import { statsRouter } from "./routes/stats.js";
-import { subscriptionRouter } from "./routes/subscription.js";
 import { testOcrRouter } from "./routes/testOcr.js";
 import { webhooksRouter, handleLineWebhookPost } from "./routes/webhooks.js";
 import { bingFormatRouter } from "./routes/bingFormat.js";
@@ -92,6 +89,7 @@ app.use(express.json({ limit: "25mb" })); // ใหญ่ขึ้นเพื�
 app.use(cookieParser());
 app.use("/uploads/avatars", express.static(path.join(uploadsDir, "avatars"), { fallthrough: false }));
 app.use("/uploads/bot-avatars", express.static(path.join(uploadsDir, "bot-avatars"), { fallthrough: false }));
+// Manual PDFs: ไม่เปิด static สาธารณะ — ใช้ GET /api/admin/manual/file/:filename (auth)
 app.use((req, res, next) => {
   const headerValue = req.headers["x-request-id"];
   const requestId = Array.isArray(headerValue) ? headerValue[0] : headerValue || crypto.randomUUID();
@@ -165,9 +163,6 @@ app.use("/api/conversations", conversationsRouter);
 app.use("/api/messages", messagesRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/private-context", privateContextRouter);
-app.use("/api", integrationsRouter);
-app.use("/api", statsRouter);
-app.use("/api", subscriptionRouter);
 app.use("/api/internal", internalRouter);
 app.use("/api/test", testOcrRouter);
 app.use("/api/webhooks", webhooksRouter);

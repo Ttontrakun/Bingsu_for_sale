@@ -13,7 +13,6 @@ import {
   createUploadSession,
   enqueueUploadBatch,
   getUploadPaths,
-  previewPdfStructure,
 } from "../services/uploadQueue.js";
 import {
   MAX_UPLOAD_PART_BYTES,
@@ -43,33 +42,9 @@ const rawUpload = express.raw({
   limit: MAX_UPLOAD_PART_BYTES,
 });
 
-/** โครงสร้างก่อนอัปโหลด — ส่ง fileBase64, fileName, contentType, structureProvider (optional: "typhoon" | "paddle_llm") */
-uploadsRouter.post("/upload/preview-structure", authenticate, async (req, res) => {
-  try {
-    const { fileBase64, fileName, contentType, structureProvider } = req.body ?? {};
-    if (!fileBase64) {
-      return res.status(400).json({ error: "ต้องส่ง fileBase64" });
-    }
-    const buffer = Buffer.from(fileBase64, "base64");
-    const name = fileName && typeof fileName === "string" ? fileName : "document.pdf";
-    const type = contentType && typeof contentType === "string" ? contentType : "application/pdf";
-    const file = await previewPdfStructure({
-      buffer,
-      fileName: name,
-      contentType: type,
-      structureProvider: structureProvider === "typhoon" || structureProvider === "paddle_llm" ? structureProvider : undefined,
-    });
-    return res.json({ sourceFiles: [file] });
-  } catch (e) {
-    console.error("Preview structure error:", e);
-    const msg = e?.message || "Preview failed";
-    return res.status(500).json({
-      error: msg,
-      hint: /ไม่สามารถเชื่อมต่อ OCR|fetch failed|ECONNREFUSED|bad address/i.test(msg)
-        ? "ตรวจสอบว่า container api รันอยู่: docker compose --profile app ps — ถ้า api แสดง Exited (137) แปลว่า OOM (หน่วยความจำไม่พอ) ให้เพิ่ม RAM ให้ Docker (เช่น Docker Desktop → Settings → Resources) แล้ว docker compose start api"
-        : undefined,
-    });
-  }
+/** ปิดแล้ว — ไม่มี UI เรียก (อัปโหลดใช้ path อื่น) */
+uploadsRouter.post("/upload/preview-structure", authenticate, async (_req, res) => {
+  res.status(410).json({ error: "Preview-structure endpoint disabled — no UI" });
 });
 
 uploadsRouter.post("/upload-batches", authenticate, async (req, res) => {

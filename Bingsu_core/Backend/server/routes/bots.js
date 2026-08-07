@@ -31,10 +31,12 @@ function botPatchChangeLabels(body, documentIdsTouched) {
   return labels;
 }
 
-const formatBot = (bot) => ({
+const isStaff = (user) => user?.role === "admin" || user?.role === "support";
+
+const formatBot = (bot, { includePrompt = false } = {}) => ({
   id: bot.id,
   name: bot.name,
-  prompt: bot.prompt,
+  ...(includePrompt ? { prompt: bot.prompt } : {}),
   description: bot.description,
   model: bot.model,
   avatarUrl: bot.avatarUrl,
@@ -63,7 +65,13 @@ botsRouter.get("/", authenticate, async (req, res) => {
   });
   // ไม่โชว์บอทช่วยสอนในหน้ารายการ Bot (ใช้เบื้องหลังสำหรับ 3 ปุ่มบน homepage)
   const filtered = bots.filter((b) => b.name !== HELP_BOT_NAME);
-  res.json(filtered.map(formatBot));
+  res.json(
+    filtered.map((bot) =>
+      formatBot(bot, {
+        includePrompt: isStaff(req.user) || bot.ownerId === req.user.id,
+      }),
+    ),
+  );
 });
 
 botsRouter.post("/", authenticate, async (req, res) => {
@@ -173,8 +181,8 @@ botsRouter.post("/", authenticate, async (req, res) => {
 
 const HELP_DOC_DISPLAY_NAME = "คู่มือการใช้งาน";
 
-// ไม่ต้องล็อกอิน — ให้ 3 ปุ่มบอทช่วยสอนบน homepage ใช้ได้เลย
-botsRouter.get("/help-config", async (req, res) => {
+// ต้องล็อกอิน — ไม่ส่ง system prompt (กันรั่วคำสั่งบอท)
+botsRouter.get("/help-config", authenticate, async (_req, res) => {
   const helpDoc = await prisma.document.findFirst({
     where: { displayName: HELP_DOC_DISPLAY_NAME },
     select: { id: true },
@@ -189,12 +197,15 @@ botsRouter.get("/help-config", async (req, res) => {
         some: { documentId: helpDoc.id },
       },
     },
-    include: {
-      documents: {
-        include: {
-          document: { select: { id: true, displayName: true } },
-        },
-      },
+    select: {
+      id: true,
+      name: true,
+      description: true,
+      model: true,
+      avatarUrl: true,
+      enabled: true,
+      createdAt: true,
+      updatedAt: true,
     },
   });
   const helpBot = candidates.find((b) => b.name === HELP_BOT_NAME) || candidates[0] || null;
@@ -204,7 +215,16 @@ botsRouter.get("/help-config", async (req, res) => {
   res.json({
     botId: helpBot.id,
     documentId: helpDoc.id,
-    bot: formatBot(helpBot),
+    bot: {
+      id: helpBot.id,
+      name: helpBot.name,
+      description: helpBot.description,
+      model: helpBot.model,
+      avatarUrl: helpBot.avatarUrl,
+      enabled: helpBot.enabled !== false,
+      createdAt: helpBot.createdAt,
+      updatedAt: helpBot.updatedAt,
+    },
   });
 });
 
@@ -224,7 +244,11 @@ botsRouter.get("/:id", authenticate, async (req, res) => {
     res.status(404).json({ error: "Bot not found" });
     return;
   }
-  res.json(formatBot(bot));
+  res.json(
+    formatBot(bot, {
+      includePrompt: isStaff(req.user) || bot.ownerId === req.user.id,
+    }),
+  );
 });
 
 botsRouter.patch("/:id", authenticate, async (req, res) => {

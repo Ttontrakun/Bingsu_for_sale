@@ -34,8 +34,34 @@ const loadRules = async () => {
 };
 
 const detectServiceKey = (m) => {
+  // ลำดับสำคัญ: ชื่อเฉพาะก่อนชื่อกว้าง
+  if (/(corporate\s*internet\s*lite|corp\s*lite)/.test(m)) return "corp_lite";
   if (/(nt\s*dark\s*fiber|dark\s*fiber|เส้นใยแก้วนำแสง)/.test(m)) return "dark_fiber";
-  if (/(nt\s*corporate|corporate\s*internet|ลูกค้าองค์กร)/.test(m)) return "corporate";
+  if (/\biig\b|อินเตอร์เน็ตเกตเวย์|อินเทอร์เน็ตเกตเวย์/.test(m)) return "iig";
+  if (/(carrier\s*ethernet|nt\s*mpls|\bmpls\b)/.test(m)) return "carrier_mpls";
+  if (/(private\s*line|nt\s*pl\b)/.test(m)) return "private_line";
+  if (/(sip\s*trunk)/.test(m)) return "sip_trunk";
+  if (/(business\s*fixed|fixed\s*line\s*ธุรกิจ)/.test(m)) return "business_fixed";
+  if (/(cloud\s*pbx|mobile\s*pbx|v-?pbx|virtual\s*pbx)/.test(m)) return "cloud_pbx";
+  if (/(thailand\s*ix|\btix\b)/.test(m)) return "thailand_ix";
+  if (/(inmarsat)/.test(m)) return "inmarsat";
+  if (/(asiasat)/.test(m)) return "asiasat5";
+  if (/(satellite\s*tv|sat\s*tv)/.test(m)) return "sat_tv";
+  if (/(transponder|ช่องสัญญาณดาวเทียม)/.test(m)) return "sat_transponder";
+  if (/(tv\s*transmission|ถ่ายทอดโทรทัศน์)/.test(m)) return "tv_tx";
+  if (/(international\s*ethernet|international\s*mpls|ipl\s*full|full\s*circuit)/.test(m)) {
+    if (/border|ชายแดน/.test(m)) return "intl_eth_mpls_border";
+    return "intl_eth_mpls_full";
+  }
+  if (/(international\s*private\s*line|nt\s*ipl|\bipl\b)/.test(m)) {
+    if (/60\s*ปลายทาง/.test(m)) return "ipl_border_60";
+    if (/border|ชายแดน/.test(m)) return "ipl_border";
+    return "ipl_full";
+  }
+  if (/(isdn|pri)/.test(m)) return "isdn_pri_sip";
+  if (/(ทดลองใช้|trial)/.test(m)) return "trial";
+  if (/(nt\s*corporate|corporate\s*internet)/.test(m)) return "corporate";
+  if (/(กลุ่มดิจิทัล|digital\s*group)/.test(m)) return "digital_group";
   return null;
 };
 
@@ -60,25 +86,35 @@ const pickRule = (rules, { pct, overFloor, toFloorBand }) => {
   if (overFloor) {
     return rules.find((r) => r.conditionKey === "over_floor") || null;
   }
-  if (toFloorBand || (pct != null && pct > 50)) {
+  if (toFloorBand) {
+    return rules.find((r) => r.conditionKey === "to_floor")
+      || rules.find((r) => r.conditionKey === "pct_gt_50_floor")
+      || null;
+  }
+  if (pct != null && pct > 50) {
     const gt50 = rules.find((r) => r.conditionKey === "pct_gt_50_floor");
     if (gt50) return gt50;
   }
   if (pct != null) {
     const byRange = rules.find((r) => {
-      if (r.conditionKey === "over_floor") return false;
+      if (["over_floor", "to_floor", "trial_days", "install_waive", "contract_value"].includes(r.conditionKey)) {
+        return false;
+      }
       const min = r.minPct == null ? -Infinity : Number(r.minPct);
       const max = r.maxPct == null ? Infinity : Number(r.maxPct);
       return pct >= min && pct <= max;
     });
     if (byRange) return byRange;
     if (pct <= 50) {
-      return rules.find((r) => r.conditionKey === "pct_le_50") || null;
+      return rules.find((r) => r.conditionKey === "pct_le_50")
+        || rules.find((r) => r.conditionKey === "pct_range" && Number(r.maxPct) >= pct)
+        || null;
     }
   }
-  // ไม่มี % ชัด แต่ถามอำนาจทั่วไปของบริการ → คืนช่วงหลัก (เลข 50) ถ้ามี
+  // ไม่มี % ชัด → คืนช่วง % หลักของบริการ ถ้ามี
   return rules.find((r) => r.conditionKey === "pct_le_50")
     || rules.find((r) => r.conditionKey === "pct_range")
+    || rules.find((r) => r.conditionKey === "to_floor")
     || rules[0]
     || null;
 };

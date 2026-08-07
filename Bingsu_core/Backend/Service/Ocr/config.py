@@ -22,3 +22,5 @@ TYPHOON_SPLIT_PDF_PAGE_THRESHOLD = int(os.getenv("TYPHOON_SPLIT_PDF_PAGE_THRESHO
 TYPHOON_OCR_API_KEY = (os.getenv("TYPHOON_OCR_API_KEY", "") or "").strip()
 # Typhoon OCR API endpoint (NICT Solution)
 TYPHOON_OCR_API_URL = os.getenv("TYPHOON_OCR_API_URL", "https://matcha-api.ntictsolution.com/api/v1/ocr").rstrip("/")
+# Shared secret for calling this OCR service from legacy (X-API-Key / Bearer)
+OCR_SERVICE_API_KEY = (os.getenv("OCR_SERVICE_API_KEY", "") or "").strip()

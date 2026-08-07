@@ -160,8 +160,7 @@ export const api = {
   getTokenUsage: (scope = 'all', days = 7) =>
     request(`/api/admin/token-usage?scope=${encodeURIComponent(scope)}&days=${encodeURIComponent(days)}`),
   getUserRoleDistribution: () => request('/api/admin/user-role-distribution'),
-  getHealth: () => request('/api/health'),
-  getPendingUsers: () => request('/api/support/pending-users'),
+  getHealth: () => request('/api/health/detailed'),
   /** ลูกค้าที่ลงทะเบียน (รออนุมัติ + อนุมัติแล้ว) พร้อมอีเมล — สำหรับบทบาท Support */
   getSupportCustomers: () => request('/api/support/customers'),
   updatePendingUser: (userId, approvalStatus) =>
@@ -193,8 +192,7 @@ export const api = {
     return request(`/api/support/logs?${sp.toString()}`);
   },
   getAdminUsers: () => request('/api/admin/users'),
-  // System page: รายงานคำถามที่ตอบไม่ได้ / สถานะคิวไฟล์ / ประกาศ
-  getNoAnswerQuestions: (days = 30) => request(`/api/admin/no-answer-questions?days=${encodeURIComponent(days)}`),
+  // System page: สถานะคิวไฟล์ / ประกาศ
   getUploadBatches: (status = '') =>
     request(`/api/admin/upload-batches${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   retryUploadBatch: (id) =>
@@ -210,21 +208,6 @@ export const api = {
   deleteAnnouncement: (id) =>
     request(`/api/admin/announcements/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
   getAdminBots: () => request('/api/admin/bots'),
-  getAdminGroups: () => request('/api/admin/groups'),
-  createAdminGroup: (payload) =>
-    request('/api/admin/groups', { method: 'POST', body: JSON.stringify(payload || {}) }),
-  updateAdminGroup: (id, payload) =>
-    request(`/api/admin/groups/${encodeURIComponent(String(id || ''))}`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload || {}),
-    }),
-  updateAdminGroupMembers: (id, memberIds) =>
-    request(`/api/admin/groups/${encodeURIComponent(String(id || ''))}/members`, {
-      method: 'PUT',
-      body: JSON.stringify({ memberIds: Array.isArray(memberIds) ? memberIds : [] }),
-    }),
-  deleteAdminGroup: (id) =>
-    request(`/api/admin/groups/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
   createAdminBot: (payload) =>
     request('/api/admin/bots', { method: 'POST', body: JSON.stringify(payload || {}) }),
   getAdminDocuments: () => request('/api/admin/documents'),
@@ -234,6 +217,65 @@ export const api = {
   getGuide: () => request('/api/admin/guide'),
   updateGuide: (text, mode = 'replace') =>
     request('/api/admin/guide', { method: 'PATCH', body: JSON.stringify({ text, mode }) }),
+  getManual: () => request('/api/admin/manual'),
+  updateManual: (documents) =>
+    request('/api/admin/manual', {
+      method: 'PUT',
+      body: JSON.stringify({ documents: Array.isArray(documents) ? documents : [] }),
+    }),
+  uploadManualPdf: async (file) => {
+    if (!file) throw new Error('file is required');
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getStoredToken();
+    const url = `${getApiBaseURL()}/api/admin/manual/upload`;
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
+      if (typeof msg !== 'string') msg = String(msg);
+      if (res.status === 401) {
+        setSession(null, null);
+        throw new Error('SESSION_EXPIRED');
+      }
+      throw new Error(msg);
+    }
+    return data;
+  },
+  /** Resolve stored upload path (/uploads/...) against API base for display */
+  resolveUploadUrl: (filePath) => {
+    const raw = String(filePath || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw) || raw.startsWith('blob:')) return raw;
+    // Manual PDFs — authenticated route only
+    if (raw.startsWith('/uploads/manual/') || raw.includes('/api/admin/manual/file/')) {
+      const name = raw.split('/').pop();
+      const base = getApiBaseURL() || (typeof window !== 'undefined' ? window.location?.origin : '') || '';
+      return `${base.replace(/\/$/, '')}/api/admin/manual/file/${encodeURIComponent(name)}`;
+    }
+    if (raw.startsWith('/uploads/')) {
+      const base = getApiBaseURL() || (typeof window !== 'undefined' ? window.location?.origin : '') || '';
+      return `${base.replace(/\/$/, '')}${raw}`;
+    }
+    // static public files under Supportadmin (legacy PDFs in /public)
+    return raw;
+  },
+  /** Fetch Manual PDF with session cookie / bearer (for react-pdf) */
+  fetchManualPdfBlob: async (filePath) => {
+    const url = api.resolveUploadUrl(filePath);
+    if (!url) throw new Error('Invalid file path');
+    const token = getStoredToken();
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(getResponseErrorText(data) || `HTTP ${res.status}`);
+    }
+    return res.blob();
+  },
   deleteBot: (id) => request(`/api/admin/bots/${id}`, { method: 'DELETE' }),
   deleteDocument: (id) => request(`/api/admin/documents/${id}`, { method: 'DELETE' }),
   updateDocument: (id, payload) =>
@@ -248,7 +290,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ newPassword }),
     }),
-  deleteAdminUser: (id) => request(`/api/admin/users/${id}`, { method: 'DELETE' }),
   // คำพ้องความหมาย (Synonyms)
   getSynonyms: () => request('/api/support/synonyms'),
   createSynonym: (payload) =>
@@ -282,17 +323,28 @@ export const api = {
     }),
   deleteApprovalAuthorityRule: (id) =>
     request(`/api/support/approval-authority/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
+  // Super PM / Product Manager
+  getProductManagers: () => request('/api/support/product-managers'),
+  createProductManager: (payload) =>
+    request('/api/support/product-managers', { method: 'POST', body: JSON.stringify(payload || {}) }),
+  updateProductManager: (id, payload) =>
+    request(`/api/support/product-managers/${encodeURIComponent(String(id || ''))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload || {}),
+    }),
+  deleteProductManager: (id) =>
+    request(`/api/support/product-managers/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
 };
 
 // Credential API functions
 export const credentialAPI = {
   // Change password
   changePassword: async (oldPassword, newPassword) => {
-    return request('/api/credentials/change-password', {
+    return request('/api/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({
-        old_password: oldPassword,
-        new_password: newPassword,
+        currentPassword: oldPassword,
+        newPassword,
       }),
     });
   },
@@ -374,31 +426,6 @@ function pickAvatarColor(seed) {
   }
   const idx = Math.abs(hash) % USER_AVATAR_COLORS.length;
   return USER_AVATAR_COLORS[idx];
-}
-
-/**
- * แปลง user จาก backend (pending-users) เป็นรูปแบบที่หน้า Support ใช้แสดง
- */
-export function mapPendingUserToDisplay(backendUser) {
-  const name = backendUser.name || backendUser.email || '-';
-  const createdAt = backendUser.createdAt
-    ? new Date(backendUser.createdAt).toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
-    : '-';
-  return {
-    id: backendUser.id,
-    username: name,
-    name,
-    email: backendUser.email || '',
-    role: 'รอดำเนินการ',
-    roleType: 'pending',
-    lastActive: '-',
-    createdAt,
-    expiresAt: '-',
-    isEnabled: false,
-    avatar: (name.charAt(0) || '?').toUpperCase(),
-    avatarColor: pickAvatarColor(backendUser.id || name),
-    approvalStatus: backendUser.approvalStatus,
-  };
 }
 
 /**

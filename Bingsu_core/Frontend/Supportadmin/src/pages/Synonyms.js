@@ -255,7 +255,6 @@ export function SynonymsPanel({ canEdit = true, showHeader = true }) {
                     ))}
                     <span className="text-gray-400">→</span>
                     <span className="font-semibold text-gray-900">{it.term}</span>
-                    <span className="text-xs text-gray-400">(ในเอกสาร)</span>
                     {!it.enabled && <span className="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">ปิดใช้งาน</span>}
                   </div>
                   {it.note && <div className="text-xs text-gray-500 mt-1">{it.note}</div>}

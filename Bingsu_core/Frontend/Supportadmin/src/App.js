@@ -14,7 +14,6 @@ import FeedbackReview from './pages/FeedbackReview';
 import SystemOps from './pages/SystemOps';
 import Login from './pages/Login';
 import Navbar from './components/Navbar';
-import NtBrandBar from './components/NtBrandBar';
 import NotificationBell from './components/NotificationBell';
 import { api, getStoredUser, mapAdminUserToDisplay, normalizeDashboardRole } from './services/api';
 
@@ -109,22 +108,20 @@ function AppContent() {
   const defaultPath = canSeeDashboard ? '/dashboard' : '/knowledge';
 
   return (
-    <div className="flex h-screen flex-col bg-white relative">
-      <NtBrandBar />
-      <div className="flex min-h-0 flex-1 relative">
-        <Navbar
-          onCollapseChange={setIsSidebarCollapsed}
-          userRole={userRole}
-        />
-        {/* Main Content */}
-        <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''}`}>
+    <div className="flex h-screen bg-white relative">
+      <Navbar
+        onCollapseChange={setIsSidebarCollapsed}
+        userRole={userRole}
+      />
+      {/* Main Content */}
+      <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''}`}>
           <div className="flex justify-end mb-3 shrink-0">
             <NotificationBell users={users} />
           </div>
           <Routes>
             <Route path="/" element={<Navigate to={defaultPath} replace />} />
             <Route path="/dashboard" element={canSeeDashboard ? <Dashboard users={users} groups={[]} userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
-            <Route path="/homepage" element={<Home />} />
+            <Route path="/homepage" element={<Home userRole={userRole} />} />
             <Route path="/home" element={<Navigate to="/homepage" replace />} />
             <Route path="/bots" element={canSeeBots ? <Bots userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
             <Route path="/bots/create" element={isAdmin ? <BotDetail /> : <Navigate to="/bots" replace />} />
@@ -132,16 +129,16 @@ function AppContent() {
             <Route path="/knowledge" element={<Knowledge userRole={userRole} />} />
             <Route path="/knowledge/create" element={<SupportCreateKnowledge />} />
             <Route path="/knowledge/:id/add-data" element={<KnowledgeDocumentRoute />} />
-            <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} groups={[]} setGroups={() => {}} onRefreshPending={loadUsers} />} />
+            <Route path="/support-panel" element={<SupportPanel users={users} setUsers={setUsers} onRefreshPending={loadUsers} />} />
             <Route path="/logs" element={canSeeLogs ? <ActivityLogs userRole={userRole} /> : <Navigate to="/knowledge" replace />} />
             <Route path="/feedback" element={<FeedbackReview userRole={userRole} />} />
             <Route path="/synonyms" element={<Navigate to="/system?tab=synonyms" replace />} />
             <Route path="/service-rates" element={<Navigate to="/system?tab=rates" replace />} />
             <Route path="/approval-authority" element={<Navigate to="/system?tab=authority" replace />} />
+            <Route path="/product-managers" element={<Navigate to="/system?tab=pm" replace />} />
             <Route path="/system" element={<SystemOps userRole={userRole} />} />
           </Routes>
-        </main>
-      </div>
+      </main>
     </div>
   );
 }

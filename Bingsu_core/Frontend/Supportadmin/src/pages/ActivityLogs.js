@@ -58,6 +58,12 @@ const EVENT_LABEL_TH = {
   'synonym.deleted': 'ลบคำพ้องความหมาย',
   'service_rate.updated': 'อัปเดตอัตราค่าบริการ',
   'service_rate.deleted': 'ลบอัตราค่าบริการ',
+  'approval_authority.created': 'เพิ่มกฎอำนาจอนุมัติ',
+  'approval_authority.updated': 'แก้ไขกฎอำนาจอนุมัติ',
+  'approval_authority.deleted': 'ลบกฎอำนาจอนุมัติ',
+  'product_manager.created': 'เพิ่มรายชื่อ Super PM / PM',
+  'product_manager.updated': 'แก้ไขรายชื่อ Super PM / PM',
+  'product_manager.deleted': 'ลบรายชื่อ Super PM / PM',
   'upload.batch.completed': 'อัปโหลดไฟล์ (ครบชุด)',
   'upload.batch.failed': 'อัปโหลดไฟล์ (ล้มเหลว)',
   'admin.upload.batch.retry': 'Retry อัปโหลดไฟล์ (แอดมิน)',
@@ -70,6 +76,8 @@ const EVENT_LABEL_TH = {
   'admin.bot.created': 'สร้างบอท (แอดมิน)',
   'admin.bot.updated': 'แก้ไขบอท (แอดมิน)',
   'admin.guide.updated': 'แก้ไขคู่มือ (แอดมิน)',
+  'manual.updated': 'แก้ไขหน้า Manual',
+  'manual.pdf.uploaded': 'อัปโหลด PDF หน้า Manual',
   'bot.deleted': 'ลบบอท',
   'admin.announcement.created': 'สร้างประกาศ',
   'admin.announcement.updated': 'แก้ไขประกาศ',
@@ -364,6 +372,14 @@ function formatAdminSummary(eventMessage, meta) {
       return know
         ? `อัปเดตเนื้อหาคู่มือ — เอกสาร ${q(know)}`
         : 'อัปเดตเนื้อหาคู่มือการใช้งาน';
+    case 'manual.updated':
+      return Number.isFinite(Number(m.documentCount))
+        ? `อัปเดตหน้า Manual — ${Number(m.documentCount)} หัวข้อหลัก`
+        : 'อัปเดตหน้า Manual';
+    case 'manual.pdf.uploaded':
+      return m.originalName
+        ? `อัปโหลด PDF หน้า Manual — ${q(String(m.originalName).slice(0, 80))}`
+        : 'อัปโหลด PDF หน้า Manual';
     case 'admin.announcement.created':
       return m.message
         ? `สร้างประกาศใหม่ — ${q(String(m.message).slice(0, 80))}`
@@ -408,6 +424,33 @@ function formatAdminSummary(eventMessage, meta) {
       const speed = m.speed != null ? `${Number(m.speed).toLocaleString('en-US')} Mbps` : '';
       const parts = [svc, kind, speed].filter(Boolean);
       return parts.length ? `ลบอัตราค่าบริการ — ${parts.join(' · ')}` : 'ลบอัตราค่าบริการ';
+    }
+    case 'approval_authority.created':
+    case 'approval_authority.updated':
+    case 'approval_authority.deleted': {
+      const action = eventMessage.endsWith('.created')
+        ? 'เพิ่มกฎอำนาจอนุมัติ'
+        : eventMessage.endsWith('.deleted')
+          ? 'ลบกฎอำนาจอนุมัติ'
+          : 'แก้ไขกฎอำนาจอนุมัติ';
+      const parts = [
+        m.serviceName || m.serviceKey,
+        m.conditionLabel || m.conditionKey,
+        m.approverAbbr && `ผู้อนุมัติ ${m.approverAbbr}`,
+      ].filter(Boolean);
+      return parts.length ? `${action} — ${parts.join(' · ')}` : action;
+    }
+    case 'product_manager.created':
+    case 'product_manager.updated':
+    case 'product_manager.deleted': {
+      const action = eventMessage.endsWith('.created')
+        ? 'เพิ่มรายชื่อ Super PM / PM'
+        : eventMessage.endsWith('.deleted')
+          ? 'ลบรายชื่อ Super PM / PM'
+          : 'แก้ไขรายชื่อ Super PM / PM';
+      const who = [m.pmName, m.superPmName].filter(Boolean).join(' / ');
+      const parts = [m.serviceGroup || m.serviceKey, who, m.businessGroup].filter(Boolean);
+      return parts.length ? `${action} — ${parts.join(' · ')}` : action;
     }
     case 'admin.restore':
       return 'เริ่มกู้คืนข้อมูลจากสำรอง (backup)';
@@ -553,7 +596,7 @@ const EVENT_FILTER_GROUPS = [
     ],
   },
   {
-    label: 'Synonyms / Service Rates / ประกาศ',
+    label: 'ระบบ (Synonyms / Rates / อำนาจ / Super PM / ประกาศ)',
     keys: [
       'synonym.created',
       'synonym.updated',
@@ -562,6 +605,12 @@ const EVENT_FILTER_GROUPS = [
       'synonym.deleted',
       'service_rate.updated',
       'service_rate.deleted',
+      'approval_authority.created',
+      'approval_authority.updated',
+      'approval_authority.deleted',
+      'product_manager.created',
+      'product_manager.updated',
+      'product_manager.deleted',
       'admin.announcement.created',
       'admin.announcement.updated',
       'admin.announcement.enabled',
@@ -586,6 +635,8 @@ const EVENT_FILTER_GROUPS = [
       'admin.bot.updated',
       'bot.deleted',
       'admin.guide.updated',
+      'manual.updated',
+      'manual.pdf.uploaded',
       'admin.restore',
       'admin.restore.failed',
       'chat.retention.pruned',

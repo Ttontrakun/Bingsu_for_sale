@@ -6,7 +6,7 @@ import io
 import os
 import tempfile
 from typing import Any
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from config import (
     OCR_LANG,
@@ -20,6 +20,7 @@ from config import (
     TYPHOON_SYNC_SIZE_LIMIT_MB,
     TYPHOON_SPLIT_PDF_PAGE_THRESHOLD,
     MAX_FILE_SIZE_MB,
+    OCR_SERVICE_API_KEY,
 )
 
 app = FastAPI(title="Enterprise AI Chatbot OCR Service", version="1.0.0")
@@ -505,6 +506,18 @@ def _run_typhoon_ocr_on_image(image: Any) -> str:
         return (text or "").strip()
 
 
+def _require_ocr_service_auth(request: Request) -> None:
+    """Require OCR_SERVICE_API_KEY when configured (fail-open only if unset for local dev)."""
+    if not OCR_SERVICE_API_KEY:
+        return
+    auth = (request.headers.get("authorization") or "").strip()
+    bearer = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
+    x_key = (request.headers.get("x-api-key") or "").strip()
+    provided = bearer or x_key
+    if not provided or provided != OCR_SERVICE_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing OCR service API key")
+
+
 @app.get("/health")
 def health() -> dict:
     """Health check endpoint"""
@@ -513,11 +526,13 @@ def health() -> dict:
 
 @app.post("/api/ocr/extract")
 async def ocr_extract(
+    request: Request,
     file: UploadFile = File(...),
     lang: str = None,
     max_pages: int = None,
     dpi: int = None,
     use_angle_cls: bool = None,
+    _auth: None = Depends(_require_ocr_service_auth),
 ) -> dict:
     """
     Extract text from PDF or image file

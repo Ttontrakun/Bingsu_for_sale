@@ -31,7 +31,6 @@ const runSingleUpload = (req, res) =>
     upload.single("file")(req, res, (err) => (err ? reject(err) : resolve()));
   });
 
-const allowedShareRoles = new Set(["viewer", "editor"]);
 const MAX_TAGS = 20;
 const MAX_TAG_LENGTH = 32;
 
@@ -475,119 +474,12 @@ documentsRouter.patch("/:id", authenticate, async (req, res) => {
   await invalidateUserCaches(document.ownerId);
 });
 
-documentsRouter.get("/:id/shares", authenticate, async (req, res) => {
-  const document = await prisma.document.findFirst({
-    where: { id: req.params.id, ownerId: req.user.id },
-    include: {
-      shares: {
-        select: {
-          id: true,
-          role: true,
-          user: { select: { id: true, email: true, name: true } },
-        },
-      },
-    },
-  });
-
-  if (!document) {
-    res.status(404).json({ error: "Document not found" });
-    return;
-  }
-
-  res.json(document.shares);
-});
-
-documentsRouter.post("/:id/shares", authenticate, async (req, res) => {
-  const { email, role } = req.body ?? {};
-  if (!email) {
-    res.status(400).json({ error: "email is required" });
-    return;
-  }
-  const desiredRole = role || "viewer";
-  if (!allowedShareRoles.has(desiredRole)) {
-    res.status(400).json({ error: "role must be viewer or editor" });
-    return;
-  }
-
-  const document = await prisma.document.findFirst({
-    where: { id: req.params.id, ownerId: req.user.id },
-  });
-
-  if (!document) {
-    res.status(404).json({ error: "Document not found" });
-    return;
-  }
-
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  if (user.id === req.user.id) {
-    res.status(400).json({ error: "Owner already has access" });
-    return;
-  }
-
-  await prisma.documentShare.upsert({
-    where: {
-      documentId_userId: { documentId: document.id, userId: user.id },
-    },
-    update: { role: desiredRole },
-    create: { documentId: document.id, userId: user.id, role: desiredRole },
-  });
-
-  const shares = await prisma.documentShare.findMany({
-    where: { documentId: document.id },
-    select: {
-      id: true,
-      role: true,
-      user: { select: { id: true, email: true, name: true } },
-    },
-  });
-
-  res.json(shares);
-  await invalidateUserCaches(req.user.id);
-});
-
-documentsRouter.delete("/:id/shares", authenticate, async (req, res) => {
-  const { email } = req.body ?? {};
-  if (!email) {
-    res.status(400).json({ error: "email is required" });
-    return;
-  }
-
-  const document = await prisma.document.findFirst({
-    where: { id: req.params.id, ownerId: req.user.id },
-  });
-
-  if (!document) {
-    res.status(404).json({ error: "Document not found" });
-    return;
-  }
-
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  await prisma.documentShare.deleteMany({
-    where: { documentId: document.id, userId: user.id },
-  });
-
-  const shares = await prisma.documentShare.findMany({
-    where: { documentId: document.id },
-    select: {
-      id: true,
-      role: true,
-      user: { select: { id: true, email: true, name: true } },
-    },
-  });
-
-  res.json(shares);
-  await invalidateUserCaches(req.user.id);
-});
+const sharesDisabled = (_req, res) => {
+  res.status(410).json({ error: "Document shares endpoint disabled — no UI" });
+};
+documentsRouter.get("/:id/shares", authenticate, sharesDisabled);
+documentsRouter.post("/:id/shares", authenticate, sharesDisabled);
+documentsRouter.delete("/:id/shares", authenticate, sharesDisabled);
 
 documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
   try {

@@ -2,8 +2,10 @@ import express from "express";
 import os from "node:os";
 import { statfs } from "node:fs/promises";
 import { prisma } from "../db.js";
+import { authenticate, requireRole } from "../lib/auth.js";
 import {
   qdrantUrl,
+  qdrantApiKey,
   redisUrl,
   vectorDb,
   pineconeApiKey,
@@ -36,7 +38,9 @@ const withTimeout = async (promise, ms) => {
 const checkQdrant = async () => {
   if (!qdrantUrl) return { ok: false, error: "Missing QDRANT_URL" };
   try {
-    const response = await withTimeout(fetch(`${qdrantUrl}/collections`), 1500);
+    const headers = {};
+    if (qdrantApiKey) headers["api-key"] = qdrantApiKey;
+    const response = await withTimeout(fetch(`${qdrantUrl}/collections`, { headers }), 1500);
     if (!response.ok) {
       const text = await response.text();
       return { ok: false, error: text || `HTTP ${response.status}` };
@@ -100,7 +104,6 @@ const checkAiService = async () => {
   }
 };
 
-/** พื้นที่ดิสก์ที่ path (Node statfs) + หน่วยความจำ / load ของโปรเซส */
 const buildHostStats = async () => {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
@@ -149,9 +152,7 @@ const buildOcrHealth = () => {
     ok: configured,
     typhoonConfigured: Boolean(typhoon),
     pdfProvider,
-    note: configured
-      ? undefined
-      : "ยังไม่ได้ตั้งค่า OCR",
+    note: configured ? undefined : "ยังไม่ได้ตั้งค่า OCR",
   };
 };
 
@@ -179,7 +180,7 @@ const buildStorageHealth = (disk) => {
   };
 };
 
-healthRouter.get("/", async (_req, res) => {
+const buildDetailedHealth = async () => {
   const health = {
     ok: true,
     database: { ok: false },
@@ -196,8 +197,7 @@ healthRouter.get("/", async (_req, res) => {
   } catch (error) {
     console.error("Database connection failed", error);
     health.ok = false;
-    const dbErrorMsg = error instanceof Error ? error.message : String(error);
-    health.database = { ok: false, error: dbErrorMsg };
+    health.database = { ok: false, error: "database_unavailable" };
   }
 
   if (redisUrl) {
@@ -207,7 +207,7 @@ healthRouter.get("/", async (_req, res) => {
   }
 
   const vectorCheck = vectorDb === "pinecone" ? await checkPinecone() : await checkQdrant();
-  health.qdrant = vectorCheck;
+  health.qdrant = vectorCheck.ok ? { ok: true } : { ok: false, error: "vector_unavailable" };
 
   const aiCheck = aiHealthCheckEnabled
     ? await checkAiService()
@@ -218,15 +218,12 @@ healthRouter.get("/", async (_req, res) => {
         responseTimeMs: null,
         model: openaiModel || "—",
       };
-  let gatewayHost = null;
-  if (gatewayBaseUrl) {
-    try {
-      gatewayHost = new URL(gatewayBaseUrl).host;
-    } catch {
-      gatewayHost = null;
-    }
-  }
-  health.ai = { ...aiCheck, gatewayHost };
+  health.ai = {
+    ok: aiCheck.ok,
+    skipped: aiCheck.skipped || false,
+    responseTimeMs: aiCheck.responseTimeMs ?? null,
+    model: aiCheck.model || openaiModel || "—",
+  };
   health.vectorDb = vectorDb;
 
   const host = await buildHostStats();
@@ -235,7 +232,14 @@ healthRouter.get("/", async (_req, res) => {
     memoryUsedPercent: host.memoryUsedPercent,
     loadAverage: host.loadAverage,
     uptimeHours: host.uptimeHours,
-    disk: host.disk.ok ? host.disk : null,
+    disk: host.disk.ok
+      ? {
+          ok: true,
+          usedPercent: host.disk.usedPercent,
+          freeGb: host.disk.freeGb,
+          totalGb: host.disk.totalGb,
+        }
+      : null,
   };
   health.ocr = buildOcrHealth();
   health.storage = buildStorageHealth(host.disk);
@@ -246,12 +250,30 @@ healthRouter.get("/", async (_req, res) => {
     health.qdrant.ok &&
     aiCheck.ok;
 
-  // ok = ทุกระบบพร้อม (แชท/RAG เต็มรูปแบบ)
   health.ok = fullyOperational;
-  // coreOk = ฐานข้อมูลใช้งานได้ — ล็อกอิน / Supportadmin / รายชื่อผู้ใช้ ยังทำงาน
   health.coreOk = health.database.ok;
   health.degraded = health.database.ok && !fullyOperational;
+  return health;
+};
 
-  // HTTP 503 เฉพาะเมื่อ DB ล้ม — ไม่บล็อกทั้ง API เพราะ AI หรือ Qdrant ขัดข้องชั่วคราว
+/** สาธารณะ: บอกแค่ขึ้น/ลง ไม่เปิดเผย path / gateway / error ภายใน */
+healthRouter.get("/", async (_req, res) => {
+  let databaseOk = false;
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    databaseOk = true;
+  } catch {
+    databaseOk = false;
+  }
+  const redisOk = redisUrl ? isRedisReady() : true;
+  res.status(databaseOk ? 200 : 503).json({
+    ok: databaseOk && redisOk,
+    coreOk: databaseOk,
+  });
+});
+
+/** รายละเอียดเต็ม — เฉพาะ admin/support */
+healthRouter.get("/detailed", authenticate, requireRole("support", "admin", "admin_metrics"), async (_req, res) => {
+  const health = await buildDetailedHealth();
   res.status(health.database.ok ? 200 : 503).json(health);
 });

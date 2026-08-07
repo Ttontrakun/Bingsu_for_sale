@@ -1,6 +1,8 @@
 # bb - รันทั้ง Backend + Supportadmin ใน Docker (Postgres, Qdrant, Redis, Legacy, Supportadmin)
-# ใช้: cd bb && docker compose up -d --build
+# ใช้: cd Bingsu_core && docker compose --profile app up -d --build
 # Supportadmin: http://localhost:3014  |  API (legacy): http://localhost:5052
+#
+# Data-plane (postgres/redis/qdrant/ocr) bind 127.0.0.1 เท่านั้น — โดเมนผู้ใช้ไม่กระทบ
 
 services:
   postgres:
@@ -11,7 +13,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: ask_the_manual
     ports:
-      - "5436:5432"
+      - "127.0.0.1:5436:5432"
     volumes:
       - bb_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,16 +25,21 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     restart: unless-stopped
+    env_file:
+      - ./Backend/.env
     ports:
-      - "6336:6333"
+      - "127.0.0.1:6336:6333"
     volumes:
       - bb_qdrant_data:/qdrant/storage
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    env_file:
+      - ./Backend/.env
+    command: ["sh", "-c", "exec redis-server --requirepass \"$$REDIS_PASSWORD\""]
     ports:
-      - "6382:6379"
+      - "127.0.0.1:6382:6379"
     volumes:
       - bb_redis_data:/data
 
@@ -44,7 +51,7 @@ services:
     env_file:
       - ./Backend/.env
     ports:
-      - "8001:8001"
+      - "127.0.0.1:8001:8001"
     volumes:
       # Cache downloaded OCR models so container recreation doesn't re-download them
       - bb_ocr_models:/root/.paddlex
@@ -67,8 +74,8 @@ services:
       PORT: "5052"
       NODE_ENV: production
       SESSION_COOKIE_SECURE: "true"
+      # บังคับ host ภายใน Docker (ค่าใน .env อาจชี้ localhost สำหรับ dev บนโฮสต์)
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
-      REDIS_URL: redis://redis:6379
       QDRANT_URL: http://qdrant:6333
       OCR_API_URL: http://ocr:8001
       UPLOAD_QUEUE_MODE: redis
@@ -83,6 +90,8 @@ services:
         condition: service_started
     ports:
       - "5052:5052"
+    volumes:
+      - bb_uploads:/app/uploads
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:5052/api/ping"]
       interval: 15s
@@ -96,8 +105,8 @@ services:
       context: ./Frontend/Supportadmin
       dockerfile: Dockerfile
       args:
-        # ชี้ไป backend โดยตรงเพื่อลดปัญหาเรียก localhost:3014 ผิดพอร์ต
-        REACT_APP_API_BASE_URL: "http://localhost:5052"
+        # ใช้ origin ของหน้าเว็บ + nginx proxy /api (cookie ทำงานถูกต้อง)
+        REACT_APP_API_BASE_URL: ""
     ports:
       - "3014:80"
     restart: unless-stopped
@@ -116,3 +125,4 @@ volumes:
   bb_redis_data:
   bb_ocr_models:
   bb_ocr_cache:
+  bb_uploads:

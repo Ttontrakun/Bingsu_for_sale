@@ -30,7 +30,7 @@ const THAI_MONTH_SHORT_INDEX = THAI_MONTH_SHORT.reduce((acc, label, index) => {
   return acc;
 }, {});
 
-function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) {
+function SupportPanel({ users, setUsers, groups = [], setGroups = () => {}, onRefreshPending }) {
   const isEnabledFlag = (value) => value === true;
   const normalizeGroup = (group) => {
     const name = String(group?.name || 'กลุ่ม').trim() || 'กลุ่ม';
@@ -770,14 +770,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   const handleConfirmDeleteGroup = async () => {
-    if (confirmDeleteGroupId === null) return;
-    try {
-      await api.deleteAdminGroup(confirmDeleteGroupId);
-      setGroups((prev) => prev.filter((group) => String(group.id) !== String(confirmDeleteGroupId)));
-      setConfirmDeleteGroupId(null);
-    } catch (err) {
-      alert(err?.message || 'ลบกลุ่มไม่สำเร็จ');
-    }
+    setConfirmDeleteGroupId(null);
+    alert('ฟีเจอร์กลุ่มถูกปิดแล้ว');
   };
 
   const handleCancelDeleteGroup = () => {
@@ -795,19 +789,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   const handleCreateGroup = async () => {
-    const trimmedGroupName = newGroupName.trim();
-    const trimmedGroupDescription = newGroupDescription.trim();
-
-    if (!trimmedGroupName) {
-      return;
-    }
-    try {
-      const created = await api.createAdminGroup({ name: trimmedGroupName, description: trimmedGroupDescription, memberIds: [] });
-      setGroups((prevGroups) => [normalizeGroup(created), ...prevGroups]);
-      setShowCreateGroupModal(false);
-    } catch (err) {
-      alert(err?.message || 'สร้างกลุ่มไม่สำเร็จ');
-    }
+    setShowCreateGroupModal(false);
+    alert('ฟีเจอร์กลุ่มถูกปิดแล้ว');
   };
 
   const handleOpenGroupProfileModal = (groupId) => {
@@ -822,23 +805,7 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   const handleConfirmGroupDescription = async () => {
-    if (!selectedGroupId) return;
-
-    const trimmedName = groupProfileName.trim();
-    try {
-      const updated = await api.updateAdminGroup(selectedGroupId, {
-        name: trimmedName || selectedGroup?.name || 'กลุ่ม',
-        description: groupProfileDescription.trim(),
-      });
-      const normalized = normalizeGroup(updated);
-      setGroups((previousGroups) =>
-        previousGroups.map((group) =>
-          String(group.id) === String(selectedGroupId) ? normalized : group
-        )
-      );
-    } catch (err) {
-      alert(err?.message || 'บันทึกข้อมูลกลุ่มไม่สำเร็จ');
-    }
+    alert('ฟีเจอร์กลุ่มถูกปิดแล้ว');
   };
 
   const handleOpenEditMembersModal = (groupId) => {
@@ -863,19 +830,8 @@ function SupportPanel({ users, setUsers, groups, setGroups, onRefreshPending }) 
   };
 
   const handleSaveGroupMembers = async () => {
-    if (!selectedGroupId) return;
-    try {
-      const updated = await api.updateAdminGroupMembers(selectedGroupId, selectedMemberIds);
-      const normalized = normalizeGroup(updated);
-      setGroups((previousGroups) =>
-        previousGroups.map((group) =>
-          String(group.id) === String(selectedGroupId) ? normalized : group
-        )
-      );
-      setShowEditMembersModal(false);
-    } catch (err) {
-      alert(err?.message || 'บันทึกสมาชิกกลุ่มไม่สำเร็จ');
-    }
+    setShowEditMembersModal(false);
+    alert('ฟีเจอร์กลุ่มถูกปิดแล้ว');
   };
 
   return (

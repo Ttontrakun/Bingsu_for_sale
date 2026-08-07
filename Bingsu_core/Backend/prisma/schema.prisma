@@ -445,3 +445,35 @@ model ApprovalAuthorityRule {
   @@index([serviceKey, active])
   @@index([serviceKey, conditionKey])
 }
+
+/**
+ * รายชื่อ Super Product Manager / Product Manager ตามโครงสร้างบริการ
+ * ใช้ตอบ "ใครเป็น PM / Super PM ของบริการนี้"
+ */
+model ProductManagerEntry {
+  id             String   @id @default(cuid())
+  businessGroup  String
+  serviceGroup   String
+  serviceKey     String?
+  superPmName    String?
+  superPmTitle   String?
+  superPmAbbr    String?
+  pmName         String?
+  pmTitle        String?
+  pmAbbr         String?
+  sortOrder      Int      @default(0)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([serviceKey, active])
+  @@index([businessGroup])
+}
+
+/** หน้า Manual ใน Supportadmin — เก็บโครงสร้างหัวข้อ/เนื้อหา/ลิงก์ PDF เป็น JSON */
+model ManualPage {
+  id        String   @id @default("default")
+  payload   Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}

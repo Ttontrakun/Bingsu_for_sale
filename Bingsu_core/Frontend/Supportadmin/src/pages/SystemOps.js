@@ -4,16 +4,17 @@ import {
   HiRefresh,
   HiTrash,
   HiSpeakerphone,
-  HiCloudUpload,
   HiCog,
   HiTranslate,
   HiCurrencyDollar,
   HiBadgeCheck,
+  HiUserGroup,
 } from 'react-icons/hi';
 import { api } from '../services/api';
 import { SynonymsPanel } from './Synonyms';
 import { ServiceRatesPanel } from './ServiceRates';
 import { ApprovalAuthorityPanel } from './ApprovalAuthority';
+import { ProductManagersPanel } from './ProductManagers';
 
 const fmtDate = (v) => {
   if (!v) return '-';
@@ -24,15 +25,8 @@ const fmtDate = (v) => {
   }
 };
 
-const STATUS_LABELS = {
-  uploading: { text: 'รออัปโหลด/รอคิว', cls: 'bg-gray-100 text-gray-700' },
-  processing: { text: 'กำลังประมวลผล', cls: 'bg-blue-100 text-blue-700' },
-  done: { text: 'สำเร็จ', cls: 'bg-green-100 text-green-700' },
-  error: { text: 'ล้มเหลว', cls: 'bg-red-100 text-red-700' },
-};
-
 function SystemOps({ userRole }) {
-  const canView = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
+  const canView = userRole === 'admin' || userRole === 'support';
   const canManage = userRole === 'admin' || userRole === 'support';
   const isAdmin = userRole === 'admin';
 
@@ -41,16 +35,17 @@ function SystemOps({ userRole }) {
   const tabs = useMemo(() => {
     const list = [];
     if (canManage) list.push({ id: 'announce', label: 'ประกาศ', icon: HiSpeakerphone });
-    list.push({ id: 'uploads', label: 'สถานะไฟล์', icon: HiCloudUpload });
     if (isAdmin) {
       list.push({ id: 'synonyms', label: 'Synonyms', icon: HiTranslate });
       list.push({ id: 'rates', label: 'Service Rates', icon: HiCurrencyDollar });
       list.push({ id: 'authority', label: 'อำนาจอนุมัติ', icon: HiBadgeCheck });
+      list.push({ id: 'pm', label: 'Super PM / PM', icon: HiUserGroup });
     }
     return list;
   }, [canManage, isAdmin]);
 
   const tabFromUrl = searchParams.get('tab');
+  // ลิงก์เก่า ?tab=uploads → ไปแท็บแรก
   const tab = tabs.some((t) => t.id === tabFromUrl) ? tabFromUrl : tabs[0]?.id || 'announce';
 
   const setTab = (id) => {
@@ -63,24 +58,6 @@ function SystemOps({ userRole }) {
     setTimeout(() => setToast(''), 2500);
   };
 
-  // --- Tab: สถานะไฟล์ ---
-  const [upStatus, setUpStatus] = useState('');
-  const [upBatches, setUpBatches] = useState([]);
-  const [upLoading, setUpLoading] = useState(false);
-  const [retryingId, setRetryingId] = useState(null);
-  const loadUploads = useCallback(async () => {
-    setUpLoading(true);
-    try {
-      const data = await api.getUploadBatches(upStatus);
-      setUpBatches(Array.isArray(data?.batches) ? data.batches : []);
-    } catch {
-      showToast('โหลดสถานะไฟล์ไม่สำเร็จ');
-    } finally {
-      setUpLoading(false);
-    }
-  }, [upStatus]);
-
-  // --- Tab: ประกาศ ---
   const [annList, setAnnList] = useState([]);
   const [annLoading, setAnnLoading] = useState(false);
   const [annMessage, setAnnMessage] = useState('');
@@ -101,33 +78,10 @@ function SystemOps({ userRole }) {
 
   useEffect(() => {
     if (!canView) return;
-    if (tab === 'uploads') loadUploads();
     if (tab === 'announce') loadAnnouncements();
-  }, [canView, tab, loadUploads, loadAnnouncements]);
+  }, [canView, tab, loadAnnouncements]);
 
-  useEffect(() => {
-    if (tab !== 'uploads') return undefined;
-    const timer = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      loadUploads();
-    }, 15000);
-    return () => clearInterval(timer);
-  }, [tab, loadUploads]);
-
-  if (!canView) return <Navigate to="/knowledge" replace />;
-
-  const handleRetry = async (id) => {
-    setRetryingId(id);
-    try {
-      await api.retryUploadBatch(id);
-      showToast('ส่งเข้าคิวประมวลผลใหม่แล้ว');
-      loadUploads();
-    } catch (e) {
-      showToast(e?.message || 'retry ไม่สำเร็จ');
-    } finally {
-      setRetryingId(null);
-    }
-  };
+  if (!canView || tabs.length === 0) return <Navigate to="/knowledge" replace />;
 
   const handleCreateAnnouncement = async () => {
     if (!annMessage.trim()) {
@@ -166,14 +120,8 @@ function SystemOps({ userRole }) {
     }
   };
 
-  const handleRefresh = () => {
-    if (tab === 'uploads') loadUploads();
-    if (tab === 'announce') loadAnnouncements();
-  };
-
   return (
     <div className="w-full">
-      {/* Header — สไตล์เดียวกับหน้าอื่น */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
@@ -182,15 +130,15 @@ function SystemOps({ userRole }) {
           <div>
             <h1 className="text-2xl font-bold text-gray-800">System</h1>
             <p className="text-sm text-gray-600">
-              จัดการสถานะไฟล์ ประกาศ
-              {isAdmin ? ' คำพ้อง และอัตราค่าบริการ' : ''}
+              จัดการประกาศ
+              {isAdmin ? ' คำพ้อง อัตราค่าบริการ และโครงสร้างบริการ' : ''}
             </p>
           </div>
         </div>
-        {(tab === 'uploads' || tab === 'announce') && (
+        {tab === 'announce' && (
           <button
             type="button"
-            onClick={handleRefresh}
+            onClick={loadAnnouncements}
             className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 self-start"
           >
             <HiRefresh />
@@ -199,7 +147,6 @@ function SystemOps({ userRole }) {
         )}
       </div>
 
-      {/* Tabs */}
       <div className="flex flex-wrap gap-1 border-b border-gray-200 mb-6">
         {tabs.map((t) => (
           <button
@@ -217,102 +164,6 @@ function SystemOps({ userRole }) {
         ))}
       </div>
 
-      {/* Tab: สถานะไฟล์ */}
-      {tab === 'uploads' && (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-            <span>สถานะ:</span>
-            {[
-              { v: '', label: 'ทั้งหมด' },
-              { v: 'processing', label: 'กำลังประมวลผล' },
-              { v: 'error', label: 'ล้มเหลว' },
-              { v: 'done', label: 'สำเร็จ' },
-            ].map((o) => (
-              <button
-                key={o.v}
-                type="button"
-                onClick={() => setUpStatus(o.v)}
-                className={`px-3 py-1 rounded-full text-xs border ${
-                  upStatus === o.v
-                    ? 'bg-[#F5C200] text-gray-900 border-[#F5C200]'
-                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                }`}
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {upLoading && upBatches.length === 0 ? (
-            <p className="text-sm text-gray-500 py-6">กำลังโหลด...</p>
-          ) : upBatches.length === 0 ? (
-            <div className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl p-8 text-center">
-              ไม่มีรายการ
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-gray-200">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 text-gray-600 text-left">
-                  <tr>
-                    <th className="px-4 py-2.5 font-medium">ชื่อ</th>
-                    <th className="px-4 py-2.5 font-medium w-36">ผู้อัปโหลด</th>
-                    <th className="px-4 py-2.5 font-medium w-36">สถานะ</th>
-                    <th className="px-4 py-2.5 font-medium">รายละเอียด</th>
-                    <th className="px-4 py-2.5 font-medium w-44">อัปเดตล่าสุด</th>
-                    <th className="px-4 py-2.5 font-medium w-24"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 bg-white">
-                  {upBatches.map((b) => {
-                    const st = STATUS_LABELS[b.status] || { text: b.status, cls: 'bg-gray-100 text-gray-700' };
-                    return (
-                      <tr key={b.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2.5 text-gray-800">
-                          {b.displayName}
-                          {b.files?.length > 0 && (
-                            <span className="block text-xs text-gray-400">{b.files.map((f) => f.name).join(', ')}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-600 text-xs">{b.userName}</td>
-                        <td className="px-4 py-2.5">
-                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>{st.text}</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-xs">
-                          {b.status === 'error' ? (
-                            <span className="text-red-600">{b.error || 'ไม่ทราบสาเหตุ'}</span>
-                          ) : b.status === 'processing' ? (
-                            <span className="text-gray-600">
-                              {b.progressMessage || '-'}
-                              {b.progressTotal > 0 && ` (${b.progressCurrent}/${b.progressTotal})`}
-                            </span>
-                          ) : (
-                            <span className="text-gray-500">{b.documentName || b.progressMessage || '-'}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2.5 text-gray-600 text-xs">{fmtDate(b.updatedAt)}</td>
-                        <td className="px-4 py-2.5 text-right">
-                          {canManage && b.status === 'error' && (
-                            <button
-                              type="button"
-                              onClick={() => handleRetry(b.id)}
-                              disabled={retryingId === b.id}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-50 disabled:opacity-50"
-                            >
-                              <HiRefresh className={`text-sm ${retryingId === b.id ? 'animate-spin' : ''}`} />
-                              Retry
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Tab: ประกาศถึงผู้ใช้ */}
       {tab === 'announce' && canManage && (
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 flex flex-col gap-3">
@@ -337,51 +188,52 @@ function SystemOps({ userRole }) {
                 type="button"
                 onClick={handleCreateAnnouncement}
                 disabled={annSaving}
-                className="px-4 py-1.5 text-sm rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
+                className="ml-auto px-4 py-1.5 rounded-lg bg-[#F5C200] text-gray-900 text-sm font-semibold hover:bg-[#e0b000] disabled:opacity-50"
               >
-                {annSaving ? 'กำลังบันทึก...' : 'ประกาศ'}
+                {annSaving ? 'กำลังสร้าง...' : 'สร้างประกาศ'}
               </button>
             </div>
           </div>
 
-          {annLoading ? (
-            <p className="text-sm text-gray-500 py-4">กำลังโหลด...</p>
+          {annLoading && annList.length === 0 ? (
+            <p className="text-sm text-gray-500 py-6">กำลังโหลด...</p>
           ) : annList.length === 0 ? (
             <div className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl p-8 text-center">
               ยังไม่มีประกาศ
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              {annList.map((a) => (
-                <div key={a.id} className="flex items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
-                  <span className={`mt-0.5 inline-flex px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ${
-                    a.level === 'warning' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
-                  }`}>
-                    {a.level === 'warning' ? 'สำคัญ' : 'ทั่วไป'}
-                  </span>
+              {annList.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex flex-wrap items-start gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3"
+                >
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${a.active ? 'text-gray-800' : 'text-gray-400 line-through'}`}>{a.message}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">อัปเดต {fmtDate(a.updatedAt)}</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{item.message}</p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      {item.level} · {fmtDate(item.createdAt)}
+                      {item.active ? ' · กำลังแสดง' : ' · ปิดอยู่'}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => handleToggleAnnouncement(a)}
+                      onClick={() => handleToggleAnnouncement(item)}
                       className={`px-2.5 py-1 text-xs rounded-lg border ${
-                        a.active
-                          ? 'border-gray-300 text-gray-600 hover:bg-gray-50'
-                          : 'border-green-300 text-green-600 hover:bg-green-50'
+                        item.active
+                          ? 'border-green-300 text-green-800 bg-green-50'
+                          : 'border-gray-300 text-gray-600 bg-gray-50'
                       }`}
                     >
-                      {a.active ? 'ปิดแสดง' : 'เปิดใหม่อีกครั้ง'}
+                      {item.active ? 'เปิดอยู่' : 'ปิดอยู่'}
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDeleteAnnouncement(a)}
-                      className="p-1.5 rounded-lg text-red-500 hover:bg-red-50"
-                      title="ลบประกาศ"
+                      onClick={() => handleDeleteAnnouncement(item)}
+                      className="p-1.5 rounded-lg text-red-600 hover:bg-red-50"
+                      title="ลบ"
                     >
-                      <HiTrash className="text-base" />
+                      <HiTrash />
                     </button>
                   </div>
                 </div>
@@ -391,19 +243,20 @@ function SystemOps({ userRole }) {
         </div>
       )}
 
-      {/* Tab: Synonyms */}
       {tab === 'synonyms' && isAdmin && (
         <SynonymsPanel canEdit showHeader={false} />
       )}
 
-      {/* Tab: Service Rates */}
       {tab === 'rates' && isAdmin && (
         <ServiceRatesPanel showHeader={false} />
       )}
 
-      {/* Tab: Approval Authority */}
       {tab === 'authority' && isAdmin && (
         <ApprovalAuthorityPanel showHeader={false} />
+      )}
+
+      {tab === 'pm' && isAdmin && (
+        <ProductManagersPanel showHeader={false} />
       )}
 
       {toast && (

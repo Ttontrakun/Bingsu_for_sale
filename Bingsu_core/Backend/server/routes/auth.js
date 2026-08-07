@@ -465,7 +465,8 @@ authRouter.post("/verify-email", async (req, res) => {
     meta: { ...context },
   });
 
-  res.json({ ok: true, passwordSetupToken });
+  // จำเป็นสำหรับ SPA ตั้งรหัสหลังยืนยันอีเมล (one-time; ใช้ได้หลัง verify สำเร็จเท่านั้น)
+  res.json({ ok: true, passwordSetupRequired: true, passwordSetupToken });
 });
 
 authRouter.post("/resend-verification", async (req, res) => {

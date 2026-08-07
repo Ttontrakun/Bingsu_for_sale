@@ -4,6 +4,7 @@ import { authenticate } from "../lib/auth.js";
 import { logEvent } from "../lib/logging.js";
 import { getNtCorpInternetPricingReply } from "../services/ntCorpPricingDb.js";
 import { getApprovalAuthorityReply } from "../services/approvalAuthorityDb.js";
+import { getProductManagerReply } from "../services/productManagersDb.js";
 import {
   cacheDel,
   cacheGet,
@@ -1485,6 +1486,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
   const ntPricingReply = await getNtCorpInternetPricingReply(message);
   // โหมดส่วนตัว: ไม่ใช้ตารางอำนาจ/hardcode ระบบ — ให้ยึด Private Knowledge ของผู้ใช้
   const approvalAuthorityReply = privateMode ? null : await getApprovalAuthorityReply(message);
+  const productManagerReply = privateMode ? null : await getProductManagerReply(message);
   // โหมดปกติ: ขอให้จำ/ทับเอกสาร → ชี้ไปโหมดส่วนตัว + ยึดเอกสาร (ไม่เอออ่อว่าจำได้)
   let rememberGuidanceReply = null;
   let privateRememberReply = null;
@@ -1509,6 +1511,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     || privateRememberReply
     || rememberGuidanceReply
     || approvalAuthorityReply
+    || productManagerReply
     || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
   // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
   // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ
@@ -2205,6 +2208,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
   }
   const ntPricingReply = await getNtCorpInternetPricingReply(message);
   const approvalAuthorityReply = privateMode ? null : await getApprovalAuthorityReply(message);
+  const productManagerReply = privateMode ? null : await getProductManagerReply(message);
   let rememberGuidanceReply = null;
   let privateRememberReply = null;
   if (!isHelpBot && isRememberOverrideRequest(message)) {
@@ -2228,6 +2232,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
     || privateRememberReply
     || rememberGuidanceReply
     || approvalAuthorityReply
+    || productManagerReply
     || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
   // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
   // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ
@@ -2714,6 +2719,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const ntPricingReply = await getNtCorpInternetPricingReply(message);
   // LINE ไม่มีโหมดส่วนตัว — ใช้ตารางอำนาจระบบได้ตามปกติ
   const approvalAuthorityReply = privateMode ? null : await getApprovalAuthorityReply(message);
+  const productManagerReply = privateMode ? null : await getProductManagerReply(message);
   let rememberGuidanceReply = null;
   if (!privateMode && !isHelpBot && isRememberOverrideRequest(message)) {
     rememberGuidanceReply = buildRememberOverrideReply(
@@ -2725,6 +2731,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const deterministicReply = ntPricingReply
     || rememberGuidanceReply
     || approvalAuthorityReply
+    || productManagerReply
     || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
   // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
   // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ

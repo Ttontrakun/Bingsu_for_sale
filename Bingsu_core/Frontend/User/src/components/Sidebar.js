@@ -242,9 +242,9 @@ function Sidebar({
     try {
       const user = await userAPI.getCurrentUser();
       setMe(user || null);
-      if (user && typeof user === 'object') {
-        // keep latest avatarUrl/name for sidebar display
-        localStorage.setItem('user', JSON.stringify(user));
+      if (user && typeof user === 'object' && user.id) {
+        // เก็บเฉพาะ id — ไม่เก็บอีเมล/โปรไฟล์เต็มใน localStorage
+        localStorage.setItem('user', JSON.stringify({ id: user.id }));
       }
     } catch {
       // ignore

@@ -67,15 +67,24 @@ $postgresStoredPath = Protect-FileAes -Path $postgresDumpPath -KeyMaterial $Encr
 Write-Step "Creating Qdrant snapshots"
 $qdrantSnapshots = @()
 try {
-  $collectionsResp = Invoke-RestMethod -Method Get -Uri "http://localhost:6336/collections"
+  $qdrantHeaders = @{}
+  $envFileForQdrant = Join-Path (Split-Path -Parent $PSScriptRoot) "Backend\.env"
+  if (Test-Path $envFileForQdrant) {
+    $qKeyLine = Get-Content $envFileForQdrant | Where-Object { $_ -match '^\s*QDRANT_API_KEY=(.+)$' } | Select-Object -First 1
+    if ($qKeyLine -match '^\s*QDRANT_API_KEY=(.+)$') {
+      $qKey = $Matches[1].Trim().Trim('"').Trim("'")
+      if ($qKey) { $qdrantHeaders["api-key"] = $qKey }
+    }
+  }
+  $collectionsResp = Invoke-RestMethod -Method Get -Uri "http://localhost:6336/collections" -Headers $qdrantHeaders
   $collections = @($collectionsResp.result.collections.name)
   foreach ($collectionName in $collections) {
     Write-Step "Creating snapshot for collection: $collectionName"
-    $snapshotResp = Invoke-RestMethod -Method Post -Uri "http://localhost:6336/collections/$collectionName/snapshots"
+    $snapshotResp = Invoke-RestMethod -Method Post -Uri "http://localhost:6336/collections/$collectionName/snapshots" -Headers $qdrantHeaders
     $snapshotName = $snapshotResp.result.name
     if (-not $snapshotName) { continue }
     $snapshotFile = Join-Path $targetDir "$collectionName-$snapshotName.snapshot"
-    Invoke-WebRequest -Uri "http://localhost:6336/collections/$collectionName/snapshots/$snapshotName" -OutFile $snapshotFile
+    Invoke-WebRequest -Uri "http://localhost:6336/collections/$collectionName/snapshots/$snapshotName" -Headers $qdrantHeaders -OutFile $snapshotFile
     $storedSnapshot = Protect-FileAes -Path $snapshotFile -KeyMaterial $EncryptionKey
     $qdrantSnapshots += [PSCustomObject]@{
       collection = $collectionName

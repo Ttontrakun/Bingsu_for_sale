@@ -225,9 +225,9 @@ export const authAPI = {
 export const credentialAPI = {
     // Change password
     changePassword: async (oldPassword, newPassword) => {
-        const response = await api.post('/credentials/change-password', {
-            old_password: oldPassword,
-            new_password: newPassword,
+        const response = await api.post('/auth/change-password', {
+            currentPassword: oldPassword,
+            newPassword,
         });
         return response.data;
     },
@@ -277,57 +277,6 @@ export const userAPI = {
     },
 
     // Update user profile by ID (admin only)
-    updateProfileById: async (userId, profileData) => {
-        // Ensure userId is an integer
-        const userIdInt = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-        if (isNaN(userIdInt)) {
-            throw new Error('Invalid user ID');
-        }
-        const response = await api.put(`/users/${userIdInt}`, {
-            firstName: profileData.firstName,
-            lastName: profileData.lastName,
-            email: profileData.email,
-        });
-        return response.data;
-    },
-
-    // Get user by ID
-    getUserById: async (userId) => {
-        // Ensure userId is an integer
-        const userIdInt = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-        if (isNaN(userIdInt)) {
-            throw new Error('Invalid user ID');
-        }
-        const response = await api.get(`/users/${userIdInt}`);
-        return response.data;
-    },
-
-    // Admin functions for approval
-    // Get pending approval users (admin only)
-    getPendingUsers: async () => {
-        const response = await api.get('/users/pending');
-        return response.data;
-    },
-
-    // Approve a user (admin only)
-    approveUser: async (userId) => {
-        const userIdInt = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-        if (isNaN(userIdInt)) {
-            throw new Error('Invalid user ID');
-        }
-        const response = await api.put(`/users/${userIdInt}/approve`);
-        return response.data;
-    },
-
-    // Reject/unapprove a user (admin only)
-    rejectUser: async (userId) => {
-        const userIdInt = typeof userId === 'string' ? parseInt(userId, 10) : userId;
-        if (isNaN(userIdInt)) {
-            throw new Error('Invalid user ID');
-        }
-        const response = await api.put(`/users/${userIdInt}/reject`);
-        return response.data;
-    },
 };
 
 // Conversations API (backend ใช้ /api/conversations — chat = conversation)
@@ -624,184 +573,12 @@ export const botAPI = {
         return response.data;
     },
 
-    // Get bot by ID (backend ใช้ id แบบ string/cuid)
-    getBot: async (botId) => {
-        const id = botId != null ? String(botId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid bot ID');
-        const response = await api.get(`/bots/${encodeURIComponent(id)}`);
-        return response.data;
-    },
-
     // บอทช่วยสอน (ไม่โชว์ในหน้ารายการ — ใช้กับ 3 ปุ่มบน homepage)
     getHelpConfig: async () => {
         const response = await api.get('/bots/help-config');
         return response.data;
     },
 
-    // Create a new bot
-    createBot: async (botData) => {
-        const payload = {
-            name: botData.name,
-            prompt: botData.prompt || botData.systemPrompt || '',
-            description: botData.description || null,
-            model: botData.model || botData.modelId || null,
-            avatarUrl: botData.avatarUrl || null,
-            avatarBase64: botData.avatarBase64 || undefined,
-            enabled: botData.enabled !== undefined ? botData.enabled : true,
-            documentIds: botData.documentIds || []
-        };
-        
-        const response = await api.post('/bots', payload);
-        return response.data;
-    },
-
-    // Update a bot (id เป็น string/cuid)
-    updateBot: async (botId, botData) => {
-        const id = botId != null ? String(botId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid bot ID');
-        const response = await api.patch(`/bots/${encodeURIComponent(id)}`, {
-            name: botData.name,
-            prompt: botData.prompt || botData.systemPrompt,
-            description: botData.description,
-            model: botData.model || botData.modelId,
-            avatarUrl: botData.avatarUrl,
-            avatarBase64: botData.avatarBase64,
-            enabled: botData.enabled,
-            documentIds: botData.documentIds
-        });
-        return response.data;
-    },
-
-    // Delete a bot (id เป็น string/cuid)
-    deleteBot: async (botId) => {
-        const id = botId != null ? String(botId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid bot ID');
-        const response = await api.delete(`/bots/${encodeURIComponent(id)}`);
-        return response.data;
-    },
-};
-
-// Integrations API (LINE, etc.)
-export const integrationsAPI = {
-    list: async () => {
-        const response = await api.get('/integrations');
-        return response.data;
-    },
-    update: async (provider, payload) => {
-        const p = provider != null ? String(provider).trim() : '';
-        if (!p) throw new Error('Invalid provider');
-        const response = await api.patch(`/integrations/${encodeURIComponent(p)}`, payload);
-        return response.data;
-    },
-};
-
-// Document/Knowledge API functions
-export const documentAPI = {
-    // Get all documents
-    getDocuments: async () => {
-        const response = await api.get('/documents');
-        return response.data;
-    },
-
-    // Get document by ID (backend ใช้ id แบบ string/cuid)
-    getDocument: async (documentId) => {
-        const id = documentId != null ? String(documentId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-        const response = await api.get(`/documents/${encodeURIComponent(id)}`);
-        return response.data;
-    },
-
-    // Create a new document
-    createDocument: async (documentData) => {
-        const response = await api.post('/documents', documentData);
-        return response.data;
-    },
-
-    // Update a document (id เป็น string/cuid) — บันทึก + แปลงเป็น vector ใช้เวลานาน
-    updateDocument: async (documentId, documentData) => {
-        const id = documentId != null ? String(documentId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-        const VECTOR_TIMEOUT = 1200000; // 20 นาที (บันทึก+embed+Qdrant อาจช้า)
-        const response = await api.patch(`/documents/${encodeURIComponent(id)}`, documentData, {
-            timeout: VECTOR_TIMEOUT,
-        });
-        return response.data;
-    },
-
-    // Delete a document (id เป็น string/cuid)
-    deleteDocument: async (documentId) => {
-        const id = documentId != null ? String(documentId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-        const response = await api.delete(`/documents/${encodeURIComponent(id)}`);
-        return response.data;
-    },
-    // Get Qdrant status
-    getQdrantStatus: async () => {
-        const response = await api.get('/documents/qdrant/status');
-        return response.data;
-    },
-    // Process file with OCR (documentId เป็น string/cuid จาก backend)
-    // options: { provider: 'typhoon' } = ใช้ Typhoon OCR โดยตรง (แนะนำสำหรับ PDF สแกน)
-    processFileWithOCR: async (documentId, file, options = {}) => {
-        const id = documentId != null ? String(documentId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-        const formData = new FormData();
-        formData.append('file', file);
-        if (options.provider === 'typhoon') {
-            formData.append('provider', 'typhoon');
-        }
-        // OCR processing can take a long time, especially for large files or first-time model loading
-        // OCR อาจใช้เวลานาน (PDF หลายหน้า / Typhoon) — 10 นาที ให้สอดคล้องกับ nginx
-        const OCR_TIMEOUT = 600000; // 10 minutes
-        const response = await api.post(`/documents/${encodeURIComponent(id)}/files/ocr`, formData, {
-            headers: {
-                'Content-Type': 'multipart/form-data',
-            },
-            timeout: OCR_TIMEOUT,
-        });
-        return response.data;
-    },
-    /** จัดเรียงข้อความ OCR ด้วย AI (หัวข้อ/ย่อหน้า) — ต้องมี OPENAI_API_KEY หรือ OCR_LLM_* ใน backend */
-    structureOcrWithAi: async (documentId, text) => {
-        const id = documentId != null ? String(documentId).trim() : '';
-        if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-        const STRUCTURE_TIMEOUT = Number(process.env.REACT_APP_OCR_STRUCTURE_TIMEOUT_MS || 120000);
-        const response = await api.post(
-            `/documents/${encodeURIComponent(id)}/files/ocr/structure-text`,
-            { text },
-            { timeout: STRUCTURE_TIMEOUT },
-        );
-        return response.data;
-    },
-};
-
-// Database API functions
-export const databaseAPI = {
-    // Get all schemas
-    getAllSchemas: async () => {
-        const response = await api.get('/database/schemas');
-        return response.data;
-    },
-
-    // Get schema details by name
-    getSchemaDetails: async (schemaName) => {
-        const response = await api.get(`/database/schemas/${schemaName}`);
-        return response.data;
-    },
-
-    // Get Qdrant status
-    getQdrantStatus: async () => {
-        const response = await api.get('/documents/qdrant/status');
-        return response.data;
-    },
-
-    // Get table data
-    getTableData: async (schemaName, tableName, limit = 100, offset = 0) => {
-        const response = await api.get(`/database/schemas/${schemaName}/tables/${tableName}/data`, {
-            params: { limit, offset }
-        });
-        return response.data;
-    },
 };
 
 export default api;

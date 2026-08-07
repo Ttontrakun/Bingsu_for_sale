@@ -62,12 +62,7 @@ function Navbar({ onCollapseChange, userRole }) {
     }
   };
 
-  const isActive = (path) => {
-    if (path === '/chat') {
-      return location.pathname.startsWith('/chat');
-    }
-    return location.pathname === path;
-  };
+  const isActive = (path) => location.pathname === path || location.pathname.startsWith(`${path}/`);
 
   const handleManageAccount = () => {
     setIsAccountModalOpen(true);
@@ -86,6 +81,7 @@ function Navbar({ onCollapseChange, userRole }) {
   const canSeeBots = userRole === 'admin' || userRole === 'support';
   const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
   const canSeeFeedback = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
+  const canSeeSystem = userRole === 'admin' || userRole === 'support';
 
   return (
     <>
@@ -153,7 +149,7 @@ function Navbar({ onCollapseChange, userRole }) {
           {canSeeBots && (
             <div 
               onClick={() => navigate('/bots')}
-              className={`nav-item ${location.pathname.startsWith('/bots') || location.pathname.startsWith('/create-bot') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${location.pathname.startsWith('/bots') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
             >
               <HiDesktopComputer className='text-xl flex-shrink-0' />
               {!isCollapsed && <span>Bots</span>}
@@ -182,13 +178,15 @@ function Navbar({ onCollapseChange, userRole }) {
               {!isCollapsed && <span>Feedback</span>}
             </div>
           )}
-          <div
-            onClick={() => navigate('/system')}
-            className={`nav-item ${isActive('/system') || location.pathname.startsWith('/system') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-          >
-            <HiCog className='text-xl flex-shrink-0' />
-            {!isCollapsed && <span>System</span>}
-          </div>
+          {canSeeSystem && (
+            <div
+              onClick={() => navigate('/system')}
+              className={`nav-item ${isActive('/system') || location.pathname.startsWith('/system') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiCog className='text-xl flex-shrink-0' />
+              {!isCollapsed && <span>System</span>}
+            </div>
+          )}
           {canSeeLogs && (
             <div
               onClick={() => navigate('/logs')}

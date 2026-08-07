@@ -497,9 +497,19 @@ export const runOcrExtract = async ({
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+  const ocrServiceKey = (process.env.OCR_SERVICE_API_KEY || "").trim();
+  const ocrHeaders = ocrServiceKey
+    ? { Authorization: `Bearer ${ocrServiceKey}`, "X-API-Key": ocrServiceKey }
+    : undefined;
+
   let response;
   try {
-    response = await fetch(url, { method: "POST", body: form, signal: controller.signal });
+    response = await fetch(url, {
+      method: "POST",
+      body: form,
+      signal: controller.signal,
+      ...(ocrHeaders ? { headers: ocrHeaders } : {}),
+    });
   } catch (e) {
     clearTimeout(timeoutId);
     const msg = e?.message || String(e);

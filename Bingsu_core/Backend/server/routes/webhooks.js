@@ -32,40 +32,37 @@ const getApiKey = (req) => {
   return (req.headers["x-api-key"] || "").trim();
 };
 
+const timingSafeEqualString = (a, b) => {
+  const left = Buffer.from(String(a || ""), "utf8");
+  const right = Buffer.from(String(b || ""), "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+};
+
 /** POST /api/webhooks/ocr-ingest — รับข้อความ (จาก n8n หลังได้ผล OCR จากอีเมล) → สร้าง document + embed */
 webhooksRouter.post("/ocr-ingest", async (req, res) => {
   if (!ingestWebhookApiKey) {
     return res.status(503).json({ error: "Ingest webhook is not configured (INGEST_WEBHOOK_API_KEY)" });
   }
+  // บังคับ owner คงที่จาก env — ไม่รับ userId/userEmail จาก body (กันเขียนแทนบัญชีอื่น)
+  if (!ingestWebhookUserId) {
+    return res.status(503).json({ error: "Set INGEST_WEBHOOK_USER_ID in .env (required)" });
+  }
   const key = getApiKey(req);
-  if (key !== ingestWebhookApiKey) {
+  if (!timingSafeEqualString(key, ingestWebhookApiKey)) {
     return res.status(401).json({ error: "Invalid or missing API key (X-API-Key or Authorization: Bearer)" });
   }
-  const { displayName, text, userId: bodyUserId, userEmail: bodyUserEmail } = req.body ?? {};
-  const hasBodyUser = (typeof bodyUserId === "string" && bodyUserId.trim()) || (typeof bodyUserEmail === "string" && bodyUserEmail.trim());
-  if (!ingestWebhookUserId && !hasBodyUser) {
-    return res.status(503).json({ error: "Set INGEST_WEBHOOK_USER_ID in .env or send body.userId / body.userEmail" });
-  }
+  const { displayName, text } = req.body ?? {};
 
   const rawText = typeof text === "string" ? text.trim() : "";
   if (!rawText) {
     return res.status(400).json({ error: "body.text is required (string, the OCR result)" });
   }
 
-  let user = null;
-  const uid = typeof bodyUserId === "string" ? bodyUserId.trim() : "";
-  const email = typeof bodyUserEmail === "string" ? bodyUserEmail.trim() : "";
-  if (uid) {
-    user = await prisma.user.findUnique({ where: { id: uid } });
-  } else if (email) {
-    user = await prisma.user.findUnique({ where: { email } });
-  }
-  if (!user && ingestWebhookUserId) {
-    user = await prisma.user.findUnique({ where: { id: ingestWebhookUserId } });
-  }
+  const user = await prisma.user.findUnique({ where: { id: ingestWebhookUserId } });
   if (!user) {
     return res.status(400).json({
-      error: "User not found. Set body.userId or body.userEmail, or set INGEST_WEBHOOK_USER_ID in .env",
+      error: "INGEST_WEBHOOK_USER_ID user not found",
     });
   }
 

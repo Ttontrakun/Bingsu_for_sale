@@ -7,6 +7,7 @@ import { getRequestContext } from "../lib/requestContext.js";
 import { maskLogForExport } from "../lib/privacy.js";
 import { invalidateRateCache } from "../services/ntCorpPricingDb.js";
 import { invalidateApprovalAuthorityCache } from "../services/approvalAuthorityDb.js";
+import { invalidateProductManagerCache } from "../services/productManagersDb.js";
 
 const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const DEFAULT_BOT_PROMPT = [
@@ -798,7 +799,13 @@ supportRouter.post("/approval-authority", authenticate, requireRole("admin"), as
     actorId: req.user?.id,
     targetType: "approval_authority",
     targetId: item.id,
-    meta: { serviceKey, conditionKey, approverAbbr },
+    meta: {
+      serviceKey,
+      serviceName,
+      conditionKey,
+      conditionLabel: item.conditionLabel,
+      approverAbbr,
+    },
   }).catch(() => {});
   res.status(201).json(item);
 });
@@ -852,7 +859,15 @@ supportRouter.patch("/approval-authority/:id", authenticate, requireRole("admin"
     actorId: req.user?.id,
     targetType: "approval_authority",
     targetId: item.id,
-    meta: { serviceKey: item.serviceKey, conditionKey: item.conditionKey, approverAbbr: item.approverAbbr },
+    meta: {
+      serviceKey: item.serviceKey,
+      serviceName: item.serviceName,
+      conditionKey: item.conditionKey,
+      conditionLabel: item.conditionLabel,
+      approverAbbr: item.approverAbbr,
+      active: item.active,
+      changed: Object.keys(data),
+    },
   }).catch(() => {});
   res.json(item);
 });
@@ -866,7 +881,132 @@ supportRouter.delete("/approval-authority/:id", authenticate, requireRole("admin
       actorId: req.user?.id,
       targetType: "approval_authority",
       targetId: req.params.id,
-      meta: { serviceKey: removed.serviceKey, conditionKey: removed.conditionKey },
+      meta: {
+        serviceKey: removed.serviceKey,
+        serviceName: removed.serviceName,
+        conditionKey: removed.conditionKey,
+        conditionLabel: removed.conditionLabel,
+        approverAbbr: removed.approverAbbr,
+      },
+    }).catch(() => {});
+  }
+  res.json({ ok: true });
+});
+
+// ===== Super PM / Product Manager directory =====
+const nullIfEmpty = (v) => {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  return String(v).trim() || null;
+};
+
+supportRouter.get("/product-managers", authenticate, requireRole("admin"), async (_req, res) => {
+  const items = await prisma.productManagerEntry.findMany({
+    orderBy: [{ businessGroup: "asc" }, { sortOrder: "asc" }],
+  });
+  res.json(items);
+});
+
+supportRouter.post("/product-managers", authenticate, requireRole("admin"), async (req, res) => {
+  const businessGroup = String(req.body?.businessGroup || "").trim();
+  const serviceGroup = String(req.body?.serviceGroup || "").trim();
+  if (!businessGroup || !serviceGroup) {
+    res.status(400).json({ error: "businessGroup, serviceGroup required" });
+    return;
+  }
+  const sortOrder = Math.round(Number(req.body?.sortOrder ?? 0));
+  if (!Number.isFinite(sortOrder)) {
+    res.status(400).json({ error: "sortOrder invalid" });
+    return;
+  }
+  const item = await prisma.productManagerEntry.create({
+    data: {
+      businessGroup,
+      serviceGroup,
+      serviceKey: nullIfEmpty(req.body?.serviceKey) ?? null,
+      superPmName: nullIfEmpty(req.body?.superPmName) ?? null,
+      superPmTitle: nullIfEmpty(req.body?.superPmTitle) ?? null,
+      superPmAbbr: nullIfEmpty(req.body?.superPmAbbr) ?? null,
+      pmName: nullIfEmpty(req.body?.pmName) ?? null,
+      pmTitle: nullIfEmpty(req.body?.pmTitle) ?? null,
+      pmAbbr: nullIfEmpty(req.body?.pmAbbr) ?? null,
+      sortOrder,
+      active: !(req.body?.active === false || req.body?.active === "false"),
+    },
+  });
+  invalidateProductManagerCache();
+  await logEvent({
+    event: "product_manager.created",
+    actorId: req.user?.id,
+    targetType: "product_manager",
+    targetId: item.id,
+    meta: {
+      businessGroup,
+      serviceGroup,
+      serviceKey: item.serviceKey,
+      superPmName: item.superPmName,
+      pmName: item.pmName,
+    },
+  }).catch(() => {});
+  res.status(201).json(item);
+});
+
+supportRouter.patch("/product-managers/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const data = {};
+  if (req.body?.businessGroup != null) data.businessGroup = String(req.body.businessGroup).trim();
+  if (req.body?.serviceGroup != null) data.serviceGroup = String(req.body.serviceGroup).trim();
+  ["serviceKey", "superPmName", "superPmTitle", "superPmAbbr", "pmName", "pmTitle", "pmAbbr"].forEach((k) => {
+    if (req.body?.[k] !== undefined) data[k] = nullIfEmpty(req.body[k]);
+  });
+  if (req.body?.sortOrder !== undefined) {
+    const sortOrder = Math.round(Number(req.body.sortOrder));
+    if (!Number.isFinite(sortOrder)) { res.status(400).json({ error: "sortOrder invalid" }); return; }
+    data.sortOrder = sortOrder;
+  }
+  if (req.body?.active !== undefined) {
+    data.active = !(req.body.active === false || req.body.active === "false");
+  }
+  if (data.businessGroup === "" || data.serviceGroup === "") {
+    res.status(400).json({ error: "businessGroup/serviceGroup required" });
+    return;
+  }
+  if (Object.keys(data).length === 0) { res.status(400).json({ error: "no fields" }); return; }
+  const item = await prisma.productManagerEntry.update({ where: { id: req.params.id }, data }).catch(() => null);
+  if (!item) { res.status(404).json({ error: "not found" }); return; }
+  invalidateProductManagerCache();
+  await logEvent({
+    event: "product_manager.updated",
+    actorId: req.user?.id,
+    targetType: "product_manager",
+    targetId: item.id,
+    meta: {
+      businessGroup: item.businessGroup,
+      serviceGroup: item.serviceGroup,
+      serviceKey: item.serviceKey,
+      superPmName: item.superPmName,
+      pmName: item.pmName,
+      changed: Object.keys(data),
+    },
+  }).catch(() => {});
+  res.json(item);
+});
+
+supportRouter.delete("/product-managers/:id", authenticate, requireRole("admin"), async (req, res) => {
+  const removed = await prisma.productManagerEntry.delete({ where: { id: req.params.id } }).catch(() => null);
+  invalidateProductManagerCache();
+  if (removed) {
+    await logEvent({
+      event: "product_manager.deleted",
+      actorId: req.user?.id,
+      targetType: "product_manager",
+      targetId: req.params.id,
+      meta: {
+        businessGroup: removed.businessGroup,
+        serviceGroup: removed.serviceGroup,
+        serviceKey: removed.serviceKey,
+        superPmName: removed.superPmName,
+        pmName: removed.pmName,
+      },
     }).catch(() => {});
   }
   res.json({ ok: true });

@@ -12,6 +12,7 @@ import { adminMetricsRouter } from "./adminMetrics.js";
 import { adminUsersRouter } from "./adminUsers.js";
 import { adminUploadsRouter } from "./adminUploads.js";
 import { adminAnnouncementsRouter } from "./announcements.js";
+import { adminManualRouter } from "./adminManual.js";
 
 export const adminRouter = express.Router();
 
@@ -36,38 +37,8 @@ adminRouter.use(adminMetricsRouter);
 adminRouter.use(adminUsersRouter);
 adminRouter.use(adminUploadsRouter);
 adminRouter.use(adminAnnouncementsRouter);
+adminRouter.use(adminManualRouter);
 
-
-const toGroupDto = (chat) => ({
-  id: chat.id,
-  roomId: chat.id,
-  name: String(chat.name || "กลุ่ม"),
-  description: String(chat.description || ""),
-  memberCount: Array.isArray(chat.users) ? chat.users.length : 0,
-  members: Array.isArray(chat.users) ? chat.users.map((link) => link.userId) : [],
-  createdAt: chat.createdAt,
-  updatedAt: chat.updatedAt,
-});
-
-adminRouter.get("/groups", authenticate, requireRole("admin"), async (_req, res) => {
-  res.status(410).json({ error: "Group feature has been removed" });
-});
-
-adminRouter.post("/groups", authenticate, requireRole("admin"), async (_req, res) => {
-  res.status(410).json({ error: "Group feature has been removed" });
-});
-
-adminRouter.patch("/groups/:id", authenticate, requireRole("admin"), async (_req, res) => {
-  res.status(410).json({ error: "Group feature has been removed" });
-});
-
-adminRouter.put("/groups/:id/members", authenticate, requireRole("admin"), async (_req, res) => {
-  res.status(410).json({ error: "Group feature has been removed" });
-});
-
-adminRouter.delete("/groups/:id", authenticate, requireRole("admin"), async (_req, res) => {
-  res.status(410).json({ error: "Group feature has been removed" });
-});
 
 adminRouter.get("/documents", authenticate, requireRole("support", "admin"), async (_req, res) => {
   const documents = await prisma.document.findMany({
@@ -391,117 +362,11 @@ adminRouter.get("/upload-batches", authenticate, requireAdmin, async (_req, res)
   res.json(batches);
 });
 
+// Backup/Restore ปิดใช้งาน — ไม่มีหน้า UI ใน Supportadmin และเสี่ยงถ้าเปิด API ตรง
 adminRouter.get("/backup", authenticate, requireAdmin, async (_req, res) => {
-  const [
-    users,
-    documents,
-    shares,
-    bots,
-    botDocuments,
-    conversations,
-    messages,
-    uploadBatches,
-    uploadFiles,
-    usageDaily,
-  ] = await Promise.all([
-    prisma.user.findMany({
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        approvalStatus: true,
-        isActive: true,
-        avatarUrl: true,
-        emailVerifiedAt: true,
-        createdAt: true,
-        updatedAt: true,
-        expiresAt: true,
-        // intentionally omit passwordHash / reset / verification tokens
-      },
-    }),
-    prisma.document.findMany(),
-    prisma.documentShare.findMany(),
-    prisma.bot.findMany(),
-    prisma.botDocument.findMany(),
-    prisma.conversation.findMany(),
-    prisma.message.findMany(),
-    prisma.uploadBatch.findMany(),
-    prisma.uploadFile.findMany(),
-    prisma.usageDaily.findMany(),
-  ]);
-
-  res.json({
-    users,
-    documents,
-    shares,
-    bots,
-    botDocuments,
-    conversations,
-    messages,
-    uploadBatches,
-    uploadFiles,
-    usageDaily,
-  });
+  res.status(410).json({ error: "Backup endpoint disabled — no admin UI" });
 });
 
-adminRouter.post("/restore", authenticate, requireAdmin, async (req, res) => {
-  const payload = req.body ?? {};
-  if (payload?.confirm !== true) {
-    res.status(400).json({ error: "Restore requires confirm: true" });
-    return;
-  }
-  try {
-    await prisma.$transaction(async (tx) => {
-      // Users backup ไม่รวม passwordHash — ไม่ create user จาก restore (กัน incomplete row / escalate)
-      // ถ้ามี users ใน payload จะถูกข้าม; ต้องมี user อยู่ในระบบอยู่แล้วสำหรับ FK ของตารางอื่น
-      if (Array.isArray(payload.documents) && payload.documents.length) {
-        await tx.document.createMany({ data: payload.documents, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.shares) && payload.shares.length) {
-        await tx.documentShare.createMany({ data: payload.shares, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.bots) && payload.bots.length) {
-        await tx.bot.createMany({ data: payload.bots, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.botDocuments) && payload.botDocuments.length) {
-        await tx.botDocument.createMany({ data: payload.botDocuments, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.conversations) && payload.conversations.length) {
-        await tx.conversation.createMany({ data: payload.conversations, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.messages) && payload.messages.length) {
-        await tx.message.createMany({ data: payload.messages, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.uploadBatches) && payload.uploadBatches.length) {
-        await tx.uploadBatch.createMany({ data: payload.uploadBatches, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.uploadFiles) && payload.uploadFiles.length) {
-        await tx.uploadFile.createMany({ data: payload.uploadFiles, skipDuplicates: true });
-      }
-      if (Array.isArray(payload.usageDaily) && payload.usageDaily.length) {
-        await tx.usageDaily.createMany({ data: payload.usageDaily, skipDuplicates: true });
-      }
-    });
-    await logEvent({
-      event: "admin.restore",
-      actorId: req.user.id,
-      targetType: "backup",
-      targetId: null,
-      meta: { ...getRequestContext(req) },
-    });
-    res.json({ ok: true });
-  } catch (error) {
-    console.error("Restore failed", error);
-    await logEvent({
-      level: "error",
-      event: "admin.restore.failed",
-      actorId: req.user.id,
-      targetType: "backup",
-      targetId: null,
-      outcome: "failed",
-      meta: { error: error instanceof Error ? error.message : String(error), ...getRequestContext(req) },
-    });
-    res.status(500).json({ error: "Restore failed" });
-  }
+adminRouter.post("/restore", authenticate, requireAdmin, async (_req, res) => {
+  res.status(410).json({ error: "Restore endpoint disabled — no admin UI" });
 });
