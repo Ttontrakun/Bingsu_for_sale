@@ -1,10 +1,10 @@
 <div align="center">
 
-#  บิงซูบอท · Ask AA
+# บิงซูบอท · Ask AA
 
 **ระบบ Hybrid-RAG Chatbot ภาษาไทยสำหรับตอบคำถามจากเอกสารองค์กร**
 
-ค้นแบบผสม (dense + keyword + rerank) · คำนวณราคาแบบเป๊ะ 100% · อ้างอิงแหล่งที่มา
+ค้นแบบผสม (dense + keyword + rerank) · คำนวณราคา/อำนาจอนุมัติแบบเป๊ะ · อ้างอิงแหล่งที่มา
 
 <br>
 
@@ -18,50 +18,49 @@
 
 ---
 
-## ✨ ความสามารถ
+## ความสามารถ
 
 | | |
 |---|---|
-| 🔍 **Hybrid RAG** | ค้นผสม dense (vector) + keyword + rerank แม่นทั้งความหมายและคำเฉพาะ |
-| 📄 **อัปโหลดหลายรูปแบบ** | PDF (text + สแกน/OCR), Word, Excel — chunk + embed อัตโนมัติ |
-| 🎯 **คำนวณราคาเป๊ะ** | ราคา/ส่วนลด/อำนาจอนุมัติ ตอบจากสูตร + อัตราใน DB ไม่ให้ AI เดา |
-| 🔗 **Synonyms** | เชื่อม "ภาษาพูด ↔ คำทางการ" (แอดมินเพิ่มเองได้) |
-| 🧩 **แยกคำถามหลายข้อ** | ถามหลายเรื่องในข้อความเดียว — ค้นแยก ตอบครบ |
-| 📌 **อ้างอิงแหล่งที่มา** | แนบการ์ดอ้างอิง + กรองแหล่งที่ไม่ตรงคำถามออก |
-| 🔒 **โหมดส่วนตัว** | สั่งวิธีตอบ/ให้จำข้อมูล ด้วย `/สั่ง` และ `/จำ` |
-| 🛡️ **ปิดข้อมูล PII** | เซ็นเซอร์บัตร ปชช./เบอร์/อีเมล (ไม่โดนเลขราคา) |
+| **Hybrid RAG** | ค้นผสม dense (vector) + keyword + rerank |
+| **อัปโหลดหลายรูปแบบ** | PDF (text + สแกน/OCR), Word, Excel — chunk + embed อัตโนมัติ |
+| **ราคา / อำนาจอนุมัติ** | ตอบจากสูตร + ตารางใน DB (ไม่ให้ AI เดา) |
+| **Super PM / PM** | ตอบชื่อ Super PM / PM ตามโครงสร้างบริการ |
+| **Synonyms** | เชื่อมภาษาพูด ↔ คำทางการ (แอดมินแก้ได้) |
+| **แยกคำถามหลายข้อ** | ถามหลายเรื่องในข้อความเดียว — ค้นแยก ตอบครบ |
+| **อ้างอิงแหล่งที่มา** | การ์ดอ้างอิง + กรองแหล่งที่ไม่ตรงคำถาม |
+| **โหมดส่วนตัว** | สั่งวิธีตอบ / ให้จำ ด้วย `/สั่ง` และ `/จำ` |
+| **ปิดข้อมูล PII** | เซ็นเซอร์บัตร ปชช. / เบอร์ / อีเมล (ไม่โดนเลขราคา) |
 
 ---
 
-## 🏗️ สถาปัตยกรรม
+## สถาปัตยกรรม
 
 ```
 ผู้ใช้ถาม
    │
-   ├─(1) Deterministic ──── คำถามราคา/อำนาจอนุมัติ → ตอบจากสูตร + DB (เป๊ะ 100%)
+   ├─(1) Deterministic ──── ราคา / อำนาจอนุมัติ / Super PM → สูตร + DB
    │
    └─(2) RAG pipeline
         ├─ Query expansion (synonyms · multi-hop · แยกหลายคำถาม)
         ├─ Dense retrieval   → Qdrant
-        ├─ Keyword retrieval → คำตรงตัว (ตัวเลข/รุ่น/ชื่อ)
-        ├─ Merge → Rerank (bge-reranker-v2-m3)
-        ├─ Evidence gate     → ไม่มีหลักฐานจริงก็ไม่มั่ว
+        ├─ Keyword retrieval → คำตรงตัว
+        ├─ Merge → Rerank
+        ├─ Evidence gate
         └─ LLM ตอบ + การ์ดอ้างอิง
 ```
 
-<div align="center">
-
 ```
  Web (User) :8083 ─┐
-                   ├─► Legacy API :5052 ─► Postgres · Redis · Qdrant
+                   ├─► Legacy API :5052 ─► Postgres · Redis · Qdrant · OCR
  Supportadmin :3014 ┘
 ```
 
-</div>
+> Data-plane (Postgres / Redis / Qdrant / OCR) เปิดเฉพาะ `127.0.0.1` — ไม่เปิดออกอินเทอร์เน็ตโดยตรง
 
 ---
 
-## 🧱 Tech Stack
+## Tech Stack
 
 | ชั้น | เทคโนโลยี |
 |---|---|
@@ -74,206 +73,248 @@
 
 ---
 
-## 🚀 เริ่มใช้งาน (Docker)
+## เริ่มใช้งาน (Docker)
 
 ```bash
-cd bb                                   # เข้าโฟลเดอร์ Bingsu_core
-cp Backend/env.sample Backend/.env      # เตรียม .env (Windows: copy)
-#  ↳ เติมคีย์แชท + embedding + (ถ้าใช้สแกน) คีย์ OCR ใน Backend/.env
-docker compose up -d --build            # รันทั้ง stack (migration รันเองอัตโนมัติ)
-docker compose exec legacy node server/scripts/seed-admins.js   # สร้างแอดมิน (ครั้งแรก)
+cp Backend/env.sample Backend/.env      # Windows: copy Backend\env.sample Backend\.env
+# เติมคีย์แชท + embedding + (ถ้าใช้สแกน) คีย์ OCR
+# ตั้ง REDIS_PASSWORD · QDRANT_API_KEY · OCR_SERVICE_API_KEY (แนะนำสำหรับ production)
+docker compose up -d --build
+docker compose exec legacy node server/scripts/seed-admins.js   # ครั้งแรก
 ```
 
-<div align="center">
-
-| 🌐 User | 🛠️ Supportadmin | ⚙️ API |
+| User | Supportadmin | API |
 |:---:|:---:|:---:|
 | http://localhost:8083 | http://localhost:3014 | http://localhost:5052 |
 
-</div>
-
-> 💡 ตั้งค่า `SEED_ADMIN_*` / `SEED_SUPPORT_*` ใน `.env` ก่อนรัน seed
+> ตั้งค่า `SEED_ADMIN_*` / `SEED_SUPPORT_*` ใน `.env` ก่อนรัน seed · **อย่า commit `.env`**
 
 <details>
-<summary><b>🌐 เข้าจากเครื่องอื่นใน LAN</b></summary>
+<summary><b>เข้าจากเครื่องอื่นใน LAN</b></summary>
 
 <br>
 
-หา IP เครื่องเซิร์ฟเวอร์ (`ipconfig` / `ip addr`) แล้วเปิด `http://<IP>:8083`
+หา IP เซิร์ฟเวอร์ แล้วเปิด `http://<IP>:8083`  
 ถ้าเข้าไม่ได้ เปิด Windows Firewall (PowerShell แบบ Admin):
 
 ```powershell
-New-NetFirewallRule -DisplayName "bb User Web"     -Direction Inbound -Protocol TCP -LocalPort 8083 -Action Allow -Profile Private
-New-NetFirewallRule -DisplayName "bb Supportadmin" -Direction Inbound -Protocol TCP -LocalPort 3014 -Action Allow -Profile Private
-New-NetFirewallRule -DisplayName "bb Backend API"  -Direction Inbound -Protocol TCP -LocalPort 5052 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "Bingsu User Web"     -Direction Inbound -Protocol TCP -LocalPort 8083 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "Bingsu Supportadmin" -Direction Inbound -Protocol TCP -LocalPort 3014 -Action Allow -Profile Private
+New-NetFirewallRule -DisplayName "Bingsu Backend API"  -Direction Inbound -Protocol TCP -LocalPort 5052 -Action Allow -Profile Private
 ```
+
+ไม่ต้องเปิด Firewall ให้พอร์ต Postgres / Redis / Qdrant / OCR (ผูกแค่ localhost)
 
 </details>
 
 <details>
-<summary><b>⚙️ ติดตั้งแบบ Local (สำหรับ dev)</b></summary>
+<summary><b>ติดตั้งแบบ Local (dev)</b></summary>
 
 <br>
 
-รัน Backend/Frontend บนเครื่อง ใช้ Docker เฉพาะ infra
-
 ```bash
-cd bb
-docker compose up -d postgres redis qdrant        # 1) infra
+docker compose up -d postgres redis qdrant ocr
 
 cd Backend
-cp env.sample .env.local                           # 2) แก้ DATABASE_URL/REDIS_URL/QDRANT_URL ให้ชี้ localhost
+cp env.sample .env.local
+# แก้ DATABASE_URL / REDIS_URL (มีรหัส) / QDRANT_URL ให้ชี้ localhost
 npm install
 npm run prisma:generate
-npm run prisma:migrate:deploy                      # 3) เตรียม DB
-npm run seed:admins                                # (ครั้งแรก)
-npm run dev:legacy                                 # 4) Backend :5052
+npm run prisma:migrate:deploy
+npm run seed:admins
+npm run dev:legacy
 ```
 
-Frontend (อีก terminal):
+Frontend:
+
 ```bash
-cd bb/Frontend/User
-npm install && npm start                           # :3000 · ตั้ง REACT_APP_API_BASE_URL=http://localhost:5052
+cd Frontend/User
+npm install && npm start
+# REACT_APP_API_BASE_URL=http://localhost:5052
 ```
 
 </details>
 
 <details>
-<summary><b>🔑 Environment Variables ที่สำคัญ</b></summary>
+<summary><b>Environment Variables ที่สำคัญ</b></summary>
 
 <br>
 
-ตั้งใน `Backend/.env` (Docker) หรือ `Backend/.env.local` (Local)
+ตั้งใน `Backend/.env`
 
 | ตัวแปร | ความหมาย |
 |---|---|
 | `OPENAI_API_KEY` / `GEMINI_API_KEY` | คีย์โมเดลแชท |
-| `EMBEDDING_API_KEY` · `EMBEDDING_BASE_URL` · `EMBEDDING_MODEL` | ตั้งค่า embedding |
-| `DATABASE_URL` · `REDIS_URL` · `QDRANT_URL` | เชื่อม infra (Docker override ให้แล้ว) |
-| `SEED_ADMIN_EMAIL` · `SEED_ADMIN_PASSWORD` | บัญชี admin ตอน seed |
-| `SEED_SUPPORT_EMAIL` · `SEED_SUPPORT_PASSWORD` | บัญชี support ตอน seed |
-| `TYPHOON_OCR_API_KEY` · `TYPHOON_OCR_API_URL` | OCR สแกน (external) |
-| `OCR_API_URL` | OCR service ที่ self-host เอง (แทน Typhoon) |
+| `EMBEDDING_API_KEY` · `EMBEDDING_BASE_URL` · `EMBEDDING_MODEL` | embedding |
+| `DATABASE_URL` | Postgres (ใน Docker compose จะ override เป็น host `postgres`) |
+| `REDIS_URL` · `REDIS_PASSWORD` | Redis (ต้องตรงกัน) |
+| `QDRANT_URL` · `QDRANT_API_KEY` · `QDRANT__SERVICE__API_KEY` | Qdrant (ค่า key สองตัวควรตรงกัน) |
+| `OCR_API_URL` · `OCR_SERVICE_API_KEY` | OCR self-host + auth |
+| `TYPHOON_OCR_API_KEY` · `TYPHOON_OCR_API_URL` | OCR ภายนอก (ถ้าใช้) |
+| `SEED_ADMIN_EMAIL` · `SEED_ADMIN_PASSWORD` | seed admin |
+| `SEED_SUPPORT_EMAIL` · `SEED_SUPPORT_PASSWORD` | seed support |
+| `INGEST_WEBHOOK_API_KEY` · `INGEST_WEBHOOK_USER_ID` | webhook ingest (ถ้าใช้ — บังคับทั้งคู่) |
 | `UPLOAD_QUEUE_MODE` | `redis` (Docker) / `memory` (Local) |
-| `QDRANT_TOP_K` | จำนวน chunk ต่อคำถาม (ดีฟอลต์ 12) |
-
-> ⚠️ `env.sample` ไม่มี key — copy ไปเป็น `.env` แล้วเติมค่าจริง · **อย่า commit `.env`**
 
 </details>
 
 ---
 
-## 🔄 Deploy & ดูแลระบบ
+## Deploy & ดูแลระบบ
 
 ```bash
-# หลังแก้โค้ด Backend
+# Backend
 docker compose build legacy && docker compose up -d legacy
 
-# หลังแก้โค้ด Frontend (User)
+# User FE
 docker compose build web && docker compose up -d web
+
+# Supportadmin
+docker compose build supportadmin && docker compose up -d supportadmin
 ```
 
 | สถานการณ์ | ต้องทำ |
 |---|---|
-| แก้ schema ฐานข้อมูล | rebuild `legacy` → migration รันเองอัตโนมัติ |
-| แก้ pipeline Excel/เอกสาร | **อัปโหลดไฟล์ใหม่** (ของเดิม embed ไปแล้ว) |
-| เปลี่ยนโมเดล embedding | **re-index ทั้งหมด** (มิติเวกเตอร์ต่างกัน) |
-| ลืมรหัส admin/support | รีเซ็ตด้วยสคริปต์ (ดูด้านล่าง) |
+| แก้ schema | rebuild `legacy` → migration รันเอง |
+| แก้เอกสาร/Excel ใน pipeline | อัปโหลดไฟล์ใหม่ |
+| เปลี่ยนโมเดล embedding | re-index ทั้งหมด |
+| ลืมรหัส admin/support | ใช้ `reset-password.js` |
+| สำรองข้อมูล | `.\ops\backup.ps1` หรือ Task `BingsuDailyBackup` |
 
 <details>
-<summary><b>🔐 รีเซ็ตรหัส admin/support</b></summary>
+<summary><b>รีเซ็ตรหัส admin/support</b></summary>
 
 <br>
 
-รหัสใน DB เป็น bcrypt (ถอดกลับไม่ได้) — รีเซ็ตแทน:
-
 ```bash
-docker compose exec legacy node server/scripts/reset-password.js --list          # ดูอีเมลที่มี
+docker compose exec legacy node server/scripts/reset-password.js --list
 docker compose exec -e RESET_EMAIL=support@example.com -e RESET_PASSWORD="NewPass123!" \
   legacy node server/scripts/reset-password.js
 ```
 
 </details>
 
+<details>
+<summary><b>Backup</b></summary>
+
+<br>
+
+```powershell
+.\ops\backup.ps1
+# หรือลงทะเบียนรันอัตโนมัติทุกวัน 02:00
+.\ops\register-backup-task.ps1
+```
+
+ผลลัพธ์อยู่ที่ `backups/<timestamp>/` (Postgres dump + Qdrant snapshot)
+
+</details>
+
 ---
 
-## 🛠️ ฟีเจอร์แอดมิน (Supportadmin)
+## ฟีเจอร์แอดมิน (Supportadmin)
 
-เข้าที่ http://localhost:3014 · บัญชี role `admin`
+เข้าที่ http://localhost:3014
 
 | เมนู | ทำอะไร |
 |---|---|
+| **Manual** | คู่มือ/แบบฟอร์มในแอดมิน — admin แก้/อัปโหลด PDF ได้ (บันทึกใน DB) |
 | **Knowledge** | สร้างชุดความรู้ + อัปโหลดเอกสาร |
 | **Bots** | สร้าง/แก้บอท ตั้ง prompt เลือก Knowledge |
-| **Synonyms** | เพิ่มคำพ้อง เชื่อมภาษาพูด ↔ คำในเอกสาร |
-| **Service Rates** | แก้อัตราค่าบริการที่เครื่องคำนวณใช้ (ไม่ต้องแตะโค้ด) |
-| **Activity Logs** | ประวัติการกระทำในระบบ |
+| **Support Panel** | จัดการผู้ใช้ / อนุมัติ |
+| **System → ประกาศ** | ประกาศแถบในหน้าแชทผู้ใช้ |
+| **System → Synonyms** | คำพ้อง |
+| **System → Service Rates** | อัตราค่าบริการที่เครื่องคำนวณใช้ |
+| **System → อำนาจอนุมัติ** | ตารางกฎอนุมัติ (structured) |
+| **System → Super PM / PM** | รายชื่อ Super PM / PM ตามบริการ |
+| **Logs** | ประวัติการกระทำ / ล็อกอินล้มเหลว |
+| **Feedback** | ความคิดเห็นจากผู้ใช้ |
 
-> 📘 คู่มือละเอียดสำหรับผู้ดูแล: `คู่มือใช้งาน-Supportadmin.docx`
+> คู่มือผู้ดูแล: `คู่มือใช้งาน-Supportadmin.docx`
+
+---
+
+## ความปลอดภัย (สรุป)
+
+| รายการ | สถานะ |
+|---|---|
+| พอร์ต Postgres / Redis / Qdrant / OCR | bind `127.0.0.1` เท่านั้น |
+| Redis / Qdrant / OCR | ต้องมีรหัสหรือ API key |
+| Manual PDF | ดาวน์โหลดผ่าน API ที่ล็อกอินแล้วเท่านั้น |
+| System prompt ของบอทร่วม | ไม่ส่งให้ user ทั่วไป |
+| Webhook ingest | ต้องมี API key + `INGEST_WEBHOOK_USER_ID` คงที่ |
+| `/api/health` สาธารณะ | บอกแค่ขึ้น/ลง — รายละเอียดที่ `/api/health/detailed` (แอดมิน) |
+| Backup/restore ในแอป | ปิดแล้ว (410) — ใช้ `ops/backup.ps1` |
+
+**ตรวจเหตุการณ์ในแอป:** Supportadmin → **Logs**  
+**ดู log เซิร์ฟเวอร์:** `docker compose logs -f legacy`
+
+---
 
 <details>
-<summary><b>📟 คำสั่งที่ใช้บ่อย · Debug · พอร์ต</b></summary>
+<summary><b>คำสั่งที่ใช้บ่อย · พอร์ต</b></summary>
 
 <br>
 
 | คำสั่ง | ความหมาย |
 |---|---|
 | `docker compose up -d --build` | รันทั้ง stack |
-| `docker compose ps` | ดูสถานะ container |
-| `docker compose logs -f legacy` | ดู log Backend |
+| `docker compose ps` | สถานะ container |
+| `docker compose logs -f legacy` | log Backend |
 | `docker compose down` | ปิด stack |
 
-**Debug คำตอบไม่ตรง:** `GET /api/chat/:conversationId/debug-context?message=<คำถาม>`
-(แนบ `Authorization: Bearer ...`) → คืน `groundingChunks` · `references` · `usedFallback`
+**พอร์ตที่เปิดออกโฮสต์**
 
-**พอร์ต:** User `8083` · Supportadmin `3014` · Backend `5052` · Postgres `5436` · Redis `6382` · Qdrant `6336`
+| บริการ | พอร์ต | หมายเหตุ |
+|---|---|---|
+| User | `8083` | สาธารณะในเครื่อง/LAN ตาม Firewall |
+| Supportadmin | `3014` | เช่นกัน |
+| API (legacy) | `5052` | เช่นกัน |
+| Postgres | `127.0.0.1:5436` | เฉพาะ localhost |
+| Redis | `127.0.0.1:6382` | เฉพาะ localhost + รหัส |
+| Qdrant | `127.0.0.1:6336` | เฉพาะ localhost + API key |
+| OCR | `127.0.0.1:8001` | เฉพาะ localhost + API key |
 
 </details>
 
 <details>
-<summary><b>📁 โครงสร้างโปรเจกต์</b></summary>
+<summary><b>โครงสร้างโปรเจกต์</b></summary>
 
 <br>
 
 ```
-bb/  (Bingsu_core)
-├── README.md                    ← คู่มือนี้
-├── Docker-compose.yml           ← รันทั้ง stack
-├── Dockerfile.web               ← build Frontend User + nginx
-├── คู่มือใช้งาน-Supportadmin.docx ← คู่มือผู้ดูแล (non-dev)
+Bingsu_core/
+├── Docker-compose.yml
+├── Dockerfile.web
+├── ops/                     ← backup.ps1, schedule scripts
 ├── Backend/
-│   ├── env.sample               ← เทมเพลต .env (ไม่มี key)
-│   ├── prisma/                  ← schema + migrations
+│   ├── env.sample
+│   ├── prisma/
 │   └── server/
-│       ├── routes/              ← auth, conversations, documents, support ...
-│       ├── services/            ← rag.js, excel.js, rerank.js, uploadQueue.js ...
-│       ├── lib/                 ← privacy.js (PII mask) ฯลฯ
-│       └── scripts/             ← seed-admins.js, reset-password.js ...
+│       ├── routes/
+│       ├── services/        ← rag, excel, approvalAuthorityDb, productManagersDb ...
+│       └── scripts/
 └── Frontend/
-    ├── User/                    ← หน้าเว็บผู้ใช้
-    └── Supportadmin/            ← หน้าแอดมิน
+    ├── User/                ← แชทผู้ใช้
+    └── Supportadmin/        ← แอดมิน
 ```
-
-**ไฟล์บริการหลัก:** `rag.js` (hybrid retrieval) · `excel.js` (parse ตาราง) · `rerank.js` · `uploadQueue.js` (OCR/structure) · `ntCorpPricingDb.js` (คำนวณราคา)
 
 </details>
 
 <details>
-<summary><b>🩹 แก้ปัญหาเบื้องต้น</b></summary>
+<summary><b>แก้ปัญหาเบื้องต้น</b></summary>
 
 <br>
 
 | อาการ | แนวทางแก้ |
 |---|---|
-| เชื่อม backend ไม่ได้ / อัปโหลดไม่ได้ | เช็ค `docker compose ps` ว่า `legacy` + `web` รัน · พอร์ต 8083 ชนใช้ `docker-compose.port8080.yml` |
-| ล็อกอิน admin ไม่ได้ | seed ก่อน หรือ reset ด้วย `reset-password.js` |
-| เปิดจาก LAN ต่อ backend ไม่ได้ | เปิด Firewall พอร์ต 8083, 3014, **5052** |
-| อัปโหลดแล้วไม่ประมวลผล | Docker ต้องใช้ `UPLOAD_QUEUE_MODE=redis` + Redis รัน |
-| แชท/embedding error เรื่อง key | เช็คคีย์ใน `Backend/.env` |
-| Excel ตอบไม่ตรง | ลบเอกสารเดิมแล้วอัปใหม่ |
-| PDF สแกนอ่านไม่ออก | ตั้ง `TYPHOON_OCR_API_KEY` หรือ `OCR_API_URL` |
-
-**สคริปต์ช่วยตรวจ:** `.\check-worker.ps1` (หรือ `.bat`)
+| เชื่อม backend ไม่ได้ | `docker compose ps` ว่า `legacy` + `web` รัน · เปิดพอร์ต 5052 |
+| ล็อกอิน admin ไม่ได้ | seed หรือ `reset-password.js` |
+| Redis ต่อไม่ได้หลังอัปเดต | ตั้ง `REDIS_PASSWORD` ให้ตรงกับ `REDIS_URL` |
+| Qdrant 401 | ตั้ง `QDRANT_API_KEY` และ `QDRANT__SERVICE__API_KEY` ให้ตรงกัน |
+| OCR 401 | ตั้ง `OCR_SERVICE_API_KEY` ทั้งฝั่ง OCR และ legacy |
+| อัปโหลดแล้วไม่ประมวลผล | `UPLOAD_QUEUE_MODE=redis` + Redis รัน |
+| แชท/embedding error | เช็คคีย์ใน `Backend/.env` |
+| PDF สแกนอ่านไม่ออก | `TYPHOON_OCR_API_KEY` หรือ OCR self-host |
 
 </details>
 
@@ -281,8 +322,8 @@ bb/  (Bingsu_core)
 
 <div align="center">
 
-**ลิงก์:** [Backend](Backend/README.md) · [Frontend User](Frontend/User/README.md) · [Supportadmin](Frontend/Supportadmin/README.md) · คู่มือผู้ดูแล `.docx`
+Repo: [Ttontrakun/Bingsu_for_sale](https://github.com/Ttontrakun/Bingsu_for_sale)
 
-<sub>🫐 Ask AA — Hybrid RAG for NT</sub>
+<sub>Ask AA — Hybrid RAG for NT</sub>
 
 </div>
