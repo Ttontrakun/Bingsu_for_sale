@@ -18,6 +18,7 @@ import {
 import { Document, Page, pdfjs } from 'react-pdf';
 import { api } from '../services/api';
 import { useToast } from '../components/Toast';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
@@ -137,6 +138,7 @@ const toPersistable = (docs) =>
   });
 
 function Home({ userRole }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const toast = useToast();
   const viewerRef = useRef(null);
   const [pageWidth, setPageWidth] = useState(900);
@@ -433,9 +435,11 @@ function Home({ userRole }) {
             <HiHome className='text-white text-2xl' />
           </div>
           <div>
-            <h1 className='text-2xl font-bold text-gray-800'>Manual</h1>
-            <p className='text-sm text-gray-600'>
-              เอกสารคู่มือการใช้งานระบบ
+            <h1 className='text-2xl font-bold text-gray-800' style={getTextStyle('admin.manual.title')}>
+              {getCopy('admin.manual.title', 'Manual')}
+            </h1>
+            <p className='text-sm text-gray-600' style={getTextStyle('admin.manual.subtitle')}>
+              {getCopy('admin.manual.subtitle', 'คู่มือและเนื้อหาสำหรับทีม Support')}
               {(saving || uploading) ? ' — กำลังบันทึก...' : ''}
             </p>
           </div>

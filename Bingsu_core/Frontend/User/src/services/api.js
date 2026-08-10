@@ -310,6 +310,15 @@ export const conversationsAPI = {
         const response = await api.patch(`/conversations/${encodeURIComponent(sid)}`, { pinned: pinned === true });
         return response.data;
     },
+    updateBot: async (id, { botId, documentId } = {}) => {
+        const sid = id != null ? String(id).trim() : '';
+        if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid conversation ID');
+        if (!botId) throw new Error('botId is required');
+        const payload = { botId };
+        if (documentId) payload.documentId = documentId;
+        const response = await api.patch(`/conversations/${encodeURIComponent(sid)}`, payload);
+        return response.data;
+    },
     delete: async (id) => {
         const sid = id != null ? String(id).trim() : '';
         if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid conversation ID');
@@ -337,6 +346,9 @@ export const chatAPI = {
     },
     setChatPinned: async (chatId, pinned) => {
         return conversationsAPI.updatePinned(chatId, pinned);
+    },
+    setChatBot: async (chatId, botId, documentId = null) => {
+        return conversationsAPI.updateBot(chatId, { botId, documentId });
     },
     deleteChat: async (chatId) => {
         return conversationsAPI.delete(chatId);
@@ -567,18 +579,76 @@ export const privateContextAPI = {
 
 // Bot API functions
 export const botAPI = {
-    // Get all bots
     getBots: async () => {
         const response = await api.get('/bots');
         return response.data;
     },
-
-    // บอทช่วยสอน (ไม่โชว์ในหน้ารายการ — ใช้กับ 3 ปุ่มบน homepage)
+    getBot: async (id) => {
+        const response = await api.get(`/bots/${encodeURIComponent(String(id || ''))}`);
+        return response.data;
+    },
+    createBot: async (payload) => {
+        const response = await api.post('/bots', payload || {});
+        return response.data;
+    },
+    updateBot: async (id, payload) => {
+        const response = await api.patch(`/bots/${encodeURIComponent(String(id || ''))}`, payload || {});
+        return response.data;
+    },
+    deleteBot: async (id) => {
+        const response = await api.delete(`/bots/${encodeURIComponent(String(id || ''))}`);
+        return response.data;
+    },
     getHelpConfig: async () => {
         const response = await api.get('/bots/help-config');
         return response.data;
     },
+};
 
+export const knowledgeAPI = {
+    list: async () => {
+        const response = await api.get('/documents');
+        return response.data;
+    },
+    get: async (id) => {
+        const response = await api.get(`/documents/${encodeURIComponent(String(id || ''))}`);
+        return response.data;
+    },
+    create: async (payload) => {
+        const response = await api.post('/documents', payload || {});
+        return response.data;
+    },
+    update: async (id, payload) => {
+        const response = await api.patch(`/documents/${encodeURIComponent(String(id || ''))}`, payload || {});
+        return response.data;
+    },
+    delete: async (id) => {
+        const response = await api.delete(`/documents/${encodeURIComponent(String(id || ''))}`);
+        return response.data;
+    },
+    processFileWithOCR: async (documentId, file, options = {}) => {
+        const id = documentId != null ? String(documentId).trim() : '';
+        if (!id) throw new Error('Invalid document ID');
+        const formData = new FormData();
+        formData.append('file', file);
+        if (options.provider === 'typhoon') formData.append('provider', 'typhoon');
+        const response = await api.post(
+            `/documents/${encodeURIComponent(id)}/files/ocr`,
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 },
+        );
+        return response.data;
+    },
+    structureOcrWithAi: async (documentId, text) => {
+        const id = documentId != null ? String(documentId).trim() : '';
+        if (!id) throw new Error('Invalid document ID');
+        const response = await api.post(
+            `/documents/${encodeURIComponent(id)}/files/ocr/structure-text`,
+            { text: typeof text === 'string' ? text : '' },
+            { timeout: 600000 },
+        );
+        return response.data;
+    },
 };
 
 export default api;

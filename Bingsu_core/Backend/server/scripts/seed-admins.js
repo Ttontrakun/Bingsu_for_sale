@@ -58,6 +58,16 @@ const users = [
   },
 ];
 
+const adminDevEmail = String(process.env.SEED_ADMIN_DEV_EMAIL || "").trim().toLowerCase();
+if (adminDevEmail) {
+  users.push({
+    email: adminDevEmail,
+    name: String(process.env.SEED_ADMIN_DEV_NAME || "Admin Dev").trim(),
+    password: required("SEED_ADMIN_DEV_PASSWORD"),
+    role: "admin_dev",
+  });
+}
+
 const extraUserEmail = String(process.env.SEED_EXTRA_USER_EMAIL || "").trim().toLowerCase();
 if (extraUserEmail) {
   users.push({
@@ -82,8 +92,10 @@ const ensureStrongPassword = (value, label) => {
 const main = async () => {
   ensureStrongPassword(users[0].password, "SEED_ADMIN_PASSWORD");
   ensureStrongPassword(users[1].password, "SEED_SUPPORT_PASSWORD");
-  if (users[2]) {
-    ensureStrongPassword(users[2].password, "SEED_EXTRA_USER_PASSWORD");
+  for (const u of users.slice(2)) {
+    const label =
+      u.role === "admin_dev" ? "SEED_ADMIN_DEV_PASSWORD" : "SEED_EXTRA_USER_PASSWORD";
+    ensureStrongPassword(u.password, label);
   }
 
   if (mode === "dry-run") {
@@ -157,8 +169,9 @@ const main = async () => {
   console.log("Login credentials used in this run:");
   console.log(`  Admin:   ${users[0].email} / <provided via SEED_ADMIN_PASSWORD>`);
   console.log(`  Support: ${users[1].email} / <provided via SEED_SUPPORT_PASSWORD>`);
-  if (users[2]) {
-    console.log(`  Extra:   ${users[2].email} / <provided via SEED_EXTRA_USER_PASSWORD>`);
+  for (const u of users.slice(2)) {
+    const label = u.role === "admin_dev" ? "SEED_ADMIN_DEV_PASSWORD" : "SEED_EXTRA_USER_PASSWORD";
+    console.log(`  ${u.role}: ${u.email} / <provided via ${label}>`);
   }
 };
 

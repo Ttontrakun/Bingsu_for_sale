@@ -10,12 +10,15 @@ import {
   HiViewGrid,
   HiClipboardList,
   HiThumbUp,
-  HiCog
+  HiCog,
+  HiUsers,
+  HiOutlineUser,
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
 import { api, userAPI } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 import avatarMale from '../assets/avatars/user_male.png';
 import avatarFemale from '../assets/avatars/user_female.png';
 
@@ -32,7 +35,11 @@ function Navbar({ onCollapseChange, userRole }) {
   const [profileName, setProfileName] = useState('Profile');
   const navigate = useNavigate();
   const location = useLocation();
+  const { menuEnabled } = useAdminSystemConfig();
   const profileInitial = (profileName?.trim()?.charAt(0) || 'P').toUpperCase();
+  const surface = new URLSearchParams(location.search).get('surface');
+  const isUserSurface = location.pathname.startsWith('/dev') && surface !== 'supportadmin';
+  const isSupportSurface = location.pathname.startsWith('/dev') && surface === 'supportadmin';
 
   const applyProfile = useCallback((user) => {
     if (!user || typeof user !== 'object') return;
@@ -77,11 +84,127 @@ function Navbar({ onCollapseChange, userRole }) {
     navigate('/login');
   };
 
-  const canSeeDashboard = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
-  const canSeeBots = userRole === 'admin' || userRole === 'support';
-  const canSeeLogs = userRole === 'admin' || userRole === 'admin_metrics';
-  const canSeeFeedback = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
-  const canSeeSystem = userRole === 'admin' || userRole === 'support';
+  const isAdminDev = userRole === 'admin_dev';
+  const canSeeDashboard = !isAdminDev && (userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support') && menuEnabled('dashboard');
+  const canSeeBots = !isAdminDev && (userRole === 'admin' || userRole === 'support') && menuEnabled('bots');
+  const canSeeUserBots = !isAdminDev && (userRole === 'admin' || userRole === 'support') && menuEnabled('userBots');
+  const canSeeLogs = !isAdminDev && (userRole === 'admin' || userRole === 'admin_metrics') && menuEnabled('logs');
+  const canSeeFeedback = !isAdminDev && (userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support') && menuEnabled('feedback');
+  const canSeeSystem = !isAdminDev && (userRole === 'admin' || userRole === 'support') && menuEnabled('system');
+  const canSeeKnowledge = !isAdminDev && menuEnabled('knowledge');
+  const canSeeManual = !isAdminDev && menuEnabled('manual');
+  const canSeeSupportPanel = !isAdminDev && menuEnabled('supportPanel');
+
+  if (isAdminDev) {
+    return (
+      <>
+        <aside
+          className={`bg-white border-r border-gray-200 flex flex-col py-6 transition-all duration-500 ease-in-out relative ${
+            isCollapsed ? 'w-16 px-2 overflow-visible' : 'w-56 px-5 overflow-visible'
+          }`}
+        >
+          <button
+            onClick={toggleSidebar}
+            className={`absolute -right-3 top-8 bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-gray-400 rounded-full p-2 z-30 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out flex items-center justify-center ${
+              isCollapsed ? 'opacity-0 pointer-events-none scale-0' : 'opacity-100 scale-100'
+            }`}
+            title="หุบ sidebar"
+          >
+            <HiChevronLeft className="text-gray-700 text-base" />
+          </button>
+          <button
+            onClick={toggleSidebar}
+            className={`absolute -right-3 top-8 bg-white hover:bg-gray-50 border-2 border-gray-300 hover:border-gray-400 rounded-full p-2 z-30 shadow-lg hover:shadow-xl transition-all duration-300 ease-in-out flex items-center justify-center ${
+              isCollapsed ? 'opacity-100 scale-100' : 'opacity-0 pointer-events-none scale-0'
+            }`}
+            title="ขยาย sidebar"
+          >
+            <HiChevronRight className="text-gray-700 text-base" />
+          </button>
+
+          <div
+            className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-200 cursor-pointer hover:opacity-80 ${
+              isCollapsed ? 'justify-center' : ''
+            }`}
+            onClick={() => navigate('/dev')}
+          >
+            <img src={bingsuLogo} alt="logo" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            {!isCollapsed && (
+              <span className="text-orange-500 font-bold text-lg leading-tight">
+                <span className="block">Enterprise AI</span>
+                <span className="block">Chatbot</span>
+              </span>
+            )}
+          </div>
+
+          <nav className="flex flex-col gap-2 flex-1 min-h-0">
+            {!isCollapsed && (
+              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wide px-2 mb-1">
+                Dev Studio
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => navigate('/dev')}
+              className={`w-full py-2 px-2.5 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
+                isUserSurface ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'
+              } ${isCollapsed ? 'justify-center' : ''}`}
+              title="User"
+            >
+              <HiOutlineUser className="text-lg flex-shrink-0" />
+              {!isCollapsed && <span>User</span>}
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/dev?surface=supportadmin')}
+              className={`w-full py-2 px-2.5 flex items-center gap-2 rounded-lg text-sm font-medium transition-colors ${
+                isSupportSurface ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100'
+              } ${isCollapsed ? 'justify-center' : ''}`}
+              title="Supportadmin"
+            >
+              <HiSupport className="text-lg flex-shrink-0" />
+              {!isCollapsed && <span>Supportadmin</span>}
+            </button>
+          </nav>
+
+          <div
+            className={`flex items-center gap-3 pt-4 border-t border-gray-200 cursor-pointer hover:bg-gray-50 rounded-lg p-2 ${
+              isCollapsed ? 'justify-center' : ''
+            }`}
+            onClick={() => setIsProfileModalOpen(true)}
+          >
+            <div className="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center flex-shrink-0 text-xl overflow-hidden">
+              {AVATAR_SRC_BY_KEY[selectedAvatar] ? (
+                <img
+                  src={AVATAR_SRC_BY_KEY[selectedAvatar]}
+                  alt="avatar"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span className="text-gray-700 font-medium">{profileInitial}</span>
+              )}
+            </div>
+            {!isCollapsed && <span className="text-gray-700 whitespace-nowrap">Profile</span>}
+          </div>
+
+          <ProfileModal
+            isOpen={isProfileModalOpen}
+            onClose={() => setIsProfileModalOpen(false)}
+            onManageAccount={handleManageAccount}
+            onSignOut={handleSignOut}
+            selectedAvatar={selectedAvatar}
+            profileInitial={profileInitial}
+          />
+        </aside>
+
+        <AccountModal
+          isOpen={isAccountModalOpen}
+          onClose={() => setIsAccountModalOpen(false)}
+          onProfileUpdated={applyProfile}
+        />
+      </>
+    );
+  }
 
   return (
     <>
@@ -115,7 +238,7 @@ function Navbar({ onCollapseChange, userRole }) {
         className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-300 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'opacity-100 justify-center' : 'opacity-100'
         }`}
-        onClick={() => navigate('/homepage')}
+        onClick={() => navigate(isAdminDev ? '/dev' : '/homepage')}
       >
         <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
         {!isCollapsed && (
@@ -139,36 +262,52 @@ function Navbar({ onCollapseChange, userRole }) {
               {!isCollapsed && <span>Dashboard</span>}
             </div>
           )}
-          <div 
-            onClick={() => navigate('/homepage')}
-            className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-          >
-            <HiHome className='text-xl flex-shrink-0' />
-            {!isCollapsed && <span>Manual</span>}
-          </div>
+          {canSeeManual && (
+            <div 
+              onClick={() => navigate('/homepage')}
+              className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiHome className='text-xl flex-shrink-0' />
+              {!isCollapsed && <span>Manual</span>}
+            </div>
+          )}
           {canSeeBots && (
             <div 
               onClick={() => navigate('/bots')}
-              className={`nav-item ${location.pathname.startsWith('/bots') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${location.pathname === '/bots' || location.pathname.startsWith('/bots/') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
             >
               <HiDesktopComputer className='text-xl flex-shrink-0' />
               {!isCollapsed && <span>Bots</span>}
             </div>
           )}
-          <div 
-            onClick={() => navigate('/knowledge')}
-            className={`nav-item ${isActive('/knowledge') || location.pathname.includes('/knowledge') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-          >
-            <HiBookOpen className='text-xl flex-shrink-0' />
-            {!isCollapsed && <span>Knowledge</span>}
-          </div>
-          <div 
-            onClick={() => navigate('/support-panel')}
-            className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
-          >
-            <HiSupport className='text-xl flex-shrink-0' />
-            {!isCollapsed && <span>Support Panel</span>}
-          </div>
+          {canSeeKnowledge && (
+            <div 
+              onClick={() => navigate('/knowledge')}
+              className={`nav-item ${location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiBookOpen className='text-xl flex-shrink-0' />
+              {!isCollapsed && <span>Knowledge</span>}
+            </div>
+          )}
+          {canSeeUserBots && (
+            <div
+              onClick={() => navigate('/user-bots')}
+              className={`nav-item ${isActive('/user-bots') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              title="User Bots"
+            >
+              <HiUsers className="text-xl flex-shrink-0" />
+              {!isCollapsed && <span>User Bots</span>}
+            </div>
+          )}
+          {canSeeSupportPanel && (
+            <div 
+              onClick={() => navigate('/support-panel')}
+              className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+            >
+              <HiSupport className='text-xl flex-shrink-0' />
+              {!isCollapsed && <span>Support Panel</span>}
+            </div>
+          )}
           {canSeeFeedback && (
             <div
               onClick={() => navigate('/feedback')}

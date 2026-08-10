@@ -387,6 +387,8 @@ authRouter.post("/login", async (req, res) => {
     res.cookie(sessionCookieName, session.token, buildSessionCookieOptions(session.expiresAt));
     res.json({
       user: sanitizeUser(user),
+      // ให้ SPA (Supportadmin) เก็บ Bearer ได้ — กันเคส cookie อย่างเดียวหลุด
+      token: session.token,
       expiresAt: session.expiresAt,
     });
   } catch (err) {

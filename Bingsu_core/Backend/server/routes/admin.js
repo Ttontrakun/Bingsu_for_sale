@@ -40,16 +40,25 @@ adminRouter.use(adminAnnouncementsRouter);
 adminRouter.use(adminManualRouter);
 
 
-adminRouter.get("/documents", authenticate, requireRole("support", "admin"), async (_req, res) => {
+adminRouter.get("/documents", authenticate, requireRole("support", "admin"), async (req, res) => {
+  // ownerRole=user → ความรู้ของผู้ใช้ทั่วไป | ค่าเริ่มต้น = ของ Support/Admin
+  const ownerRole = String(req.query?.ownerRole || "staff").toLowerCase();
+  const ownerFilter =
+    ownerRole === "user"
+      ? { role: "user" }
+      : { role: { in: ["support", "admin"] } };
+
   const documents = await prisma.document.findMany({
-    // เรียงตาม updatedAt ล่าสุด → เอกสารที่เพิ่งสร้าง/อัปเดต/แก้ไข ขึ้นบนสุด
+    where: {
+      owner: ownerFilter,
+    },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
       displayName: true,
       createdAt: true,
       updatedAt: true,
-      owner: { select: { id: true, name: true } },
+      owner: { select: { id: true, name: true, email: true } },
     },
   });
   res.json(documents);
@@ -67,8 +76,18 @@ adminRouter.get("/documents/:id", authenticate, requireRole("support", "admin"),
   res.json(document);
 });
 
-adminRouter.get("/bots", authenticate, requireRole("support", "admin"), async (_req, res) => {
+adminRouter.get("/bots", authenticate, requireRole("support", "admin"), async (req, res) => {
+  // ownerRole=user → บอทของผู้ใช้ทั่วไป | ค่าเริ่มต้น = ของ Support/Admin
+  const ownerRole = String(req.query?.ownerRole || "staff").toLowerCase();
+  const ownerFilter =
+    ownerRole === "user"
+      ? { role: "user" }
+      : { role: { in: ["support", "admin"] } };
+
   const bots = await prisma.bot.findMany({
+    where: {
+      owner: ownerFilter,
+    },
     orderBy: { createdAt: "desc" },
     include: {
       owner: { select: { id: true, name: true, email: true } },

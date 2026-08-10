@@ -20,6 +20,7 @@ enum UserRole {
   support
   admin_metrics
   admin
+  admin_dev
 }
 
 enum UserApprovalStatus {

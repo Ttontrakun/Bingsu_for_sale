@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { HiSearch, HiX, HiChat, HiLockClosed, HiChevronDown } from 'react-icons/hi';
+import { useSystemConfig } from '../context/SystemConfigContext';
 
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
@@ -23,6 +24,8 @@ const FILTERS = [
 ];
 
 function ChatSearchModal({ isOpen, onClose, chats = [], onSelectChat, onNewChat }) {
+  const { getCopy, getTextStyle } = useSystemConfig();
+  const searchTitle = getCopy('user.search.title', 'แชททั้งหมด');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   const [isFilterOpen, setIsFilterOpen] = useState(false);
@@ -77,7 +80,12 @@ function ChatSearchModal({ isOpen, onClose, chats = [], onSelectChat, onNewChat 
         aria-label='ค้นหาแชท'
       >
         <div className='px-8 pt-6 pb-3 flex items-start justify-between gap-4 flex-shrink-0'>
-          <h2 className='text-2xl font-semibold text-gray-900'>แชททั้งหมด</h2>
+          <h2
+            className='text-2xl font-semibold text-gray-900'
+            style={getTextStyle('user.search.title')}
+          >
+            {searchTitle}
+          </h2>
           <div className='flex items-center gap-2'>
             <div className='relative'>
               <button

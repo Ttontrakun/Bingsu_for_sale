@@ -1,16 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { 
   HiOutlinePaperAirplane,
   HiLockClosed,
   HiX,
   HiPlus,
+  HiChevronDown,
 } from 'react-icons/hi';
-import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import Sidebar from '../components/Sidebar';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import { showToast } from '../components/ToastNotification';
 import { chatAPI, botAPI, privateContextAPI } from '../services/api';
+import { useSystemConfig } from '../context/SystemConfigContext';
 
 const OFFICIAL_BOT_DESCRIPTION = 'ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้';
 const LEGACY_BOT_DESCRIPTION = 'บอทผู้ช่วยประจำระบบ';
@@ -68,8 +69,41 @@ const serializeRememberedItems = (items) =>
 function Homepage({ privateMode = false }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { getCopy, getTextStyle, logoSrc, appName, menuEnabled } = useSystemConfig();
+  const homepageTitle = getCopy('user.homepage.title', `Welcome to ${appName}`);
+  const homepageDescription = getCopy('user.homepage.description', OFFICIAL_BOT_DESCRIPTION);
+  const homepagePlaceholder = getCopy(
+    'user.homepage.placeholder',
+    'ถามเกี่ยวกับเอกสารในระบบ เช่น "อัตราค่าบริการ NT Corporate Internet"',
+  );
+  const homepageTitleStyle = getTextStyle('user.homepage.title');
+  const homepageDescriptionStyle = getTextStyle('user.homepage.description');
+  const homepagePlaceholderStyle = getTextStyle('user.homepage.placeholder');
+  const privateTitle = getCopy('user.private.title', 'โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง');
+  const privateBannerTitle = getCopy('user.private.bannerTitle', 'โหมดส่วนตัว');
+  const privateBannerBody = getCopy(
+    'user.private.bannerBody',
+    'ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น',
+  );
+  const privatePlaceholder = getCopy(
+    'user.private.placeholder',
+    'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI',
+  );
+  const privateTitleStyle = getTextStyle('user.private.title');
+  const privateBannerTitleStyle = getTextStyle('user.private.bannerTitle');
+  const privateBannerBodyStyle = getTextStyle('user.private.bannerBody');
+  const privatePlaceholderStyle = getTextStyle('user.private.placeholder');
+
+  useEffect(() => {
+    if (privateMode && !menuEnabled('private')) {
+      navigate('/homepage', { replace: true });
+    }
+  }, [privateMode, menuEnabled, navigate]);
+
   const [selectedBot, setSelectedBot] = useState(null); // This is the dropdown value (string)
   const [selectedBotObject, setSelectedBotObject] = useState(null); // This is the full bot object
+  const [isBotsDropdownOpen, setIsBotsDropdownOpen] = useState(false);
+  const botsDropdownRef = useRef(null);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [chatInput, setChatInput] = useState('');
   const [botOptions, setBotOptions] = useState([]);
@@ -381,11 +415,12 @@ function Homepage({ privateMode = false }) {
     loadBots();
   }, []);
 
-  // user มีบอทเดียว: เลือกให้โดยอัตโนมัติ
+  // เลือกบอทอัตโนมัติเมื่อยังไม่ได้เลือก — ถ้ามีหลายตัว เลือกบอทระบบก่อน
   useEffect(() => {
-    if (!selectedBot && botOptions.length > 0) {
-      setSelectedBot(String(botOptions[0].value));
-    }
+    if (selectedBot || botOptions.length === 0) return;
+    const defaultOpt =
+      botOptions.find((o) => o.label === 'Enterprise AI Chatbot Assistant') || botOptions[0];
+    setSelectedBot(String(defaultOpt.value));
   }, [botOptions, selectedBot]);
 
   // Update selectedBotObject when selectedBot (dropdown value) changes
@@ -410,6 +445,18 @@ function Homepage({ privateMode = false }) {
     }
   }, [selectedBot, botsList]);
 
+  useEffect(() => {
+    if (!isBotsDropdownOpen) return undefined;
+    const handleClickOutside = (event) => {
+      if (botsDropdownRef.current && !botsDropdownRef.current.contains(event.target)) {
+        setIsBotsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isBotsDropdownOpen]);
+
+  const canSwitchBot = botOptions.length > 1;
   const typedPrivateCommand = composerPrivateCommand;
 
   return (
@@ -428,21 +475,67 @@ function Homepage({ privateMode = false }) {
         <AnnouncementBanner />
       </div>
       {/* Top Bar */}
-      <div className='flex justify-between items-center mb-8'>
-        <span className='text-sm text-gray-500'>
-          {selectedBotObject ? (
-            <span className='font-medium text-gray-700'>{selectedBotObject.name}</span>
+      <div className='flex justify-end items-center mb-8'>
+        {selectedBotObject ? (
+          canSwitchBot ? (
+            <div className='relative' ref={botsDropdownRef}>
+              <button
+                type='button'
+                onClick={() => setIsBotsDropdownOpen((open) => !open)}
+                className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 min-w-0 max-w-[min(100vw-4rem,22rem)]'
+                title='เลือกบอท'
+              >
+                <span className='font-medium truncate'>{selectedBotObject.name}</span>
+                <HiChevronDown
+                  className={`text-base text-gray-500 shrink-0 transition-transform ${
+                    isBotsDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+              {isBotsDropdownOpen && (
+                <div className='absolute right-0 mt-1 w-72 max-w-[min(100vw-2rem,22rem)] rounded-lg border border-gray-200 bg-white shadow-lg z-40 py-1 max-h-64 overflow-y-auto'>
+                  {botsList
+                    .filter((b) => b.enabled !== false)
+                    .map((bot) => {
+                      const active = String(selectedBot) === String(bot.id);
+                      return (
+                        <button
+                          key={bot.id}
+                          type='button'
+                          onClick={() => {
+                            setSelectedBot(String(bot.id));
+                            setIsBotsDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-yellow-50 ${
+                            active ? 'bg-yellow-50 text-gray-900 font-semibold' : 'text-gray-700'
+                          }`}
+                        >
+                          <div className='truncate'>{bot.name}</div>
+                          {bot.isOwned ? (
+                            <div className='text-[11px] text-gray-500 mt-0.5'>บอทของฉัน</div>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
           ) : (
-            <span className='italic text-gray-400'>กำลังโหลดบอท...</span>
-          )}
-        </span>
+            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0'>
+              <span className='font-medium whitespace-nowrap'>{selectedBotObject.name}</span>
+              <span className='text-xs text-gray-500 shrink-0'>(ไม่สามารถเปลี่ยนได้)</span>
+            </div>
+          )
+        ) : (
+          <span className='text-sm italic text-gray-400'>กำลังโหลดบอท...</span>
+        )}
       </div>
 
       {/* Welcome Section - Centered */}
       <div className='flex flex-col items-center justify-center flex-1'>
         {/* Mascot */}
         <div className='mb-6'>
-          <img src={bingsuLogo} alt="mascot" className='w-32 h-32 object-cover' />
+          <img src={logoSrc} alt="mascot" className='w-32 h-32 object-cover' />
         </div>
 
         {/* Title — Welcome to + ชื่อบอทที่เลือก */}
@@ -452,14 +545,33 @@ function Homepage({ privateMode = false }) {
             โหมดส่วนตัว
           </div>
         )}
-        <h1 className='text-2xl font-semibold text-gray-800 mb-4'>
+        <h1
+          className='text-2xl font-semibold text-gray-800 mb-4'
+          style={
+            privateMode
+              ? privateTitleStyle
+              : !selectedBotObject?.name
+                ? homepageTitleStyle
+                : undefined
+          }
+        >
           {privateMode
-            ? 'โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง'
-            : `Welcome to ${selectedBotObject?.name || 'Enterprise AI Chatbot LLM'}`}
+            ? privateTitle
+            : (selectedBotObject?.name
+              ? `Welcome to ${selectedBotObject.name}`
+              : homepageTitle)}
         </h1>
 
-        {/* Description — ใช้คำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท) หรือข้อความเริ่มต้น */}
-        <p className='text-gray-600 text-center max-w-2xl leading-relaxed mb-10'>
+        {/* Description — ใช้คำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท) หรือข้อความจาก Dev Studio */}
+        <p
+          className='text-gray-600 text-center max-w-2xl leading-relaxed mb-10'
+          style={
+            isDefaultBotDescription(selectedBotObject?.description) ||
+            isCorruptedText(selectedBotObject?.description)
+              ? homepageDescriptionStyle
+              : undefined
+          }
+        >
           {!isDefaultBotDescription(selectedBotObject?.description) &&
            !isCorruptedText(selectedBotObject?.description)
             ? selectedBotObject.description.split('\n').map((line, i) => (
@@ -469,16 +581,21 @@ function Homepage({ privateMode = false }) {
                 </span>
               ))
             : (
-              <span>{OFFICIAL_BOT_DESCRIPTION}</span>
+              <span>{homepageDescription}</span>
             )}
         </p>
 
         {privateMode && (
           <div className='w-full max-w-4xl mb-4'>
             <div className='px-4 py-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-white'>
-              <p className='text-sm font-semibold text-gray-900'>โหมดส่วนตัว</p>
-              <p className='text-xs text-gray-600 mt-1 leading-relaxed'>
-                ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น
+              <p className='text-sm font-semibold text-gray-900' style={privateBannerTitleStyle}>
+                {privateBannerTitle}
+              </p>
+              <p
+                className='text-xs text-gray-600 mt-1 leading-relaxed whitespace-pre-line'
+                style={privateBannerBodyStyle}
+              >
+                {privateBannerBody}
               </p>
               <div className='mt-2 space-y-1.5 text-xs text-gray-700'>
                 <p className='flex items-center gap-2'>
@@ -636,10 +753,11 @@ function Homepage({ privateMode = false }) {
                 privateMode
                   ? (composerPrivateCommand
                     ? (composerPrivateCommand === 'remember' ? 'พิมพ์ข้อมูลที่ต้องการให้ระบบจำ...' : 'พิมพ์คำสั่งการตอบของ AI...')
-                    : 'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI')
-                  : 'ถามเกี่ยวกับเอกสารในระบบ เช่น "อัตราค่าบริการ NT Corporate Internet"'
+                    : privatePlaceholder)
+                  : homepagePlaceholder
               }
               rows={1}
+              style={privateMode ? privatePlaceholderStyle : homepagePlaceholderStyle}
               className='flex-1 outline-none text-gray-700 text-base placeholder-gray-400 bg-transparent resize-none overflow-y-auto min-h-[1.5rem] max-h-32'
             />
             <button

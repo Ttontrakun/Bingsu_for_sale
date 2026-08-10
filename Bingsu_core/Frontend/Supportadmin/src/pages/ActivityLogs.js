@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { HiRefresh, HiClipboardList, HiFilter, HiChevronDown, HiChevronUp } from 'react-icons/hi';
 import { api } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 const EVENT_LABEL_TH = {
   'auth.login': 'เข้าสู่ระบบ',
@@ -646,6 +647,7 @@ const EVENT_FILTER_GROUPS = [
 ];
 
 function ActivityLogs({ userRole }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -747,20 +749,22 @@ function ActivityLogs({ userRole }) {
             <HiClipboardList className="text-white text-2xl" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">กิจกรรมระบบ (Logs)</h1>
-            <p className="text-sm text-gray-600">
-              เรียลไทม์ — อัปเดตอัตโนมัติทุก {POLL_MS / 1000} วินาที (เมื่อแท็บนี้เปิดอยู่)
-              {lastSynced ? (
-                <span className="text-gray-500">
-                  {' '}
-                  · ล่าสุด{' '}
-                  {lastSynced.toLocaleTimeString('th-TH', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
-                </span>
-              ) : null}
+            <h1 className="text-2xl font-bold text-gray-800" style={getTextStyle('admin.logs.title')}>
+              {getCopy('admin.logs.title', 'กิจกรรมระบบ (Logs)')}
+            </h1>
+            <p className="text-sm text-gray-600" style={getTextStyle('admin.logs.subtitle')}>
+              {getCopy('admin.logs.subtitle', 'ติดตามเหตุการณ์และการทำงานของระบบ')}
+              <span className="text-gray-500">
+                {' '}
+                · อัปเดตทุก {POLL_MS / 1000} วินาที
+                {lastSynced
+                  ? ` · ล่าสุด ${lastSynced.toLocaleTimeString('th-TH', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    })}`
+                  : ''}
+              </span>
             </p>
           </div>
         </div>

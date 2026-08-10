@@ -2,8 +2,10 @@ import { useNavigate } from 'react-router-dom';
 import { HiSearch, HiTrash, HiPlus, HiPencil, HiBookOpen } from 'react-icons/hi';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { api, mapDocumentToDisplay } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 function Knowledge({ userRole = 'support' }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -125,10 +127,13 @@ function Knowledge({ userRole = 'support' }) {
             <HiBookOpen className='text-white text-2xl' />
           </div>
           <div>
-            <h1 className='text-2xl font-bold text-gray-800'>
-              Knowledge <span className='text-gray-600 font-normal'>{filteredKnowledgeList.length}</span>
+            <h1 className='text-2xl font-bold text-gray-800' style={getTextStyle('admin.knowledge.title')}>
+              {getCopy('admin.knowledge.title', 'Knowledge')}{' '}
+              <span className='text-gray-600 font-normal'>{filteredKnowledgeList.length}</span>
             </h1>
-            <p className='text-sm text-gray-600'>จัดการฐานความรู้และเอกสาร</p>
+            <p className='text-sm text-gray-600' style={getTextStyle('admin.knowledge.subtitle')}>
+              {getCopy('admin.knowledge.subtitle', 'จัดการฐานความรู้และเอกสาร')}
+            </p>
           </div>
         </div>
         <button

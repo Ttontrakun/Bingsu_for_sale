@@ -107,25 +107,56 @@ const sendMail = async ({ to, subject, text, html }) => {
   throw lastError || new Error("Email send failed");
 };
 
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const applyTemplate = (template, vars = {}) =>
+  String(template || "").replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? ""));
+
 export const sendVerificationEmail = async ({ email, name, token }) => {
   if (!email || !token) return { skipped: true };
+  const { getSystemConfig } = await import("../lib/systemConfig.js");
+  const { DEFAULT_COPY } = await import("../lib/featureCatalog.js");
+  let cfg;
+  try {
+    cfg = await getSystemConfig();
+  } catch {
+    cfg = null;
+  }
+  const copy = { ...DEFAULT_COPY, ...(cfg?.copy || {}) };
+  const appName = cfg?.branding?.appName || "Enterprise AI Chatbot";
   const verifyLink = `${appBaseUrl()}/verifying?token=${encodeURIComponent(token)}`;
   const refCode = buildEmailRef("REG");
-  const subject = "[Enterprise AI Chatbot] กรุณายืนยันอีเมลเพื่อเปิดใช้งานบัญชี";
+  const subject =
+    String(copy["user.emailVerify.subject"] || DEFAULT_COPY["user.emailVerify.subject"]).trim() ||
+    DEFAULT_COPY["user.emailVerify.subject"];
+  const body1 = applyTemplate(
+    copy["user.emailVerify.body1"] || DEFAULT_COPY["user.emailVerify.body1"],
+    { appName },
+  );
+  const body2 = String(copy["user.emailVerify.body2"] || DEFAULT_COPY["user.emailVerify.body2"]);
+  const buttonLabel = String(copy["user.emailVerify.button"] || DEFAULT_COPY["user.emailVerify.button"]);
+  const ignoreText = String(copy["user.emailVerify.ignore"] || DEFAULT_COPY["user.emailVerify.ignore"]);
+  const displayName = name || "ผู้ใช้งาน";
   const text = [
-    `เรียน คุณ${name || "ผู้ใช้งาน"}`,
+    `เรียน คุณ${displayName}`,
     "",
     "โทรคมนาคมแห่งชาติ (จำกัด)",
     supportLabel,
     `เลขอ้างอิง: ${refCode}`,
     "",
-    "ระบบได้รับคำขอสมัครใช้งานบัญชี Enterprise AI Chatbot ของท่านแล้ว",
-    "กรุณาคลิกลิงก์ด้านล่างเพื่อยืนยันอีเมลและดำเนินการตั้งรหัสผ่าน:",
+    body1,
+    body2,
     verifyLink,
     "",
     "หมายเหตุ:",
     "- ลิงก์นี้ใช้ได้ชั่วคราวและสำหรับบัญชีนี้เท่านั้น",
-    "- หากท่านไม่ได้เป็นผู้สมัครใช้งาน กรุณาเพิกเฉยอีเมลฉบับนี้",
+    `- ${ignoreText}`,
     "",
     "อีเมลฉบับนี้เป็นการแจ้งเตือนอัตโนมัติ กรุณาอย่าตอบกลับ (Do not reply)",
     "หากต้องการความช่วยเหลือ กรุณาติดต่อทีมผู้ดูแลระบบ",
@@ -137,19 +168,19 @@ export const sendVerificationEmail = async ({ email, name, token }) => {
     <div style="font-family:Arial,sans-serif;line-height:1.6;color:#111;background:#f8fafc;padding:20px">
       <div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px">
         <p style="margin:0 0 6px;font-size:12px;color:#6b7280">โทรคมนาคมแห่งชาติ (จำกัด)</p>
-        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${supportLabel}</p>
-        <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${refCode}</strong></p>
-        <p style="margin:0 0 12px">เรียน คุณ${name || "ผู้ใช้งาน"}</p>
-        <p style="margin:0 0 12px">ระบบได้รับคำขอสมัครใช้งานบัญชี <strong>Enterprise AI Chatbot</strong> ของท่านแล้ว</p>
-        <p style="margin:0 0 16px">กรุณาคลิกปุ่มด้านล่างเพื่อยืนยันอีเมลและดำเนินการตั้งรหัสผ่าน</p>
+        <p style="margin:0 0 6px;font-size:12px;color:#6b7280">${escapeHtml(supportLabel)}</p>
+        <p style="margin:0 0 14px;font-size:12px;color:#6b7280">เลขอ้างอิง: <strong>${escapeHtml(refCode)}</strong></p>
+        <p style="margin:0 0 12px">เรียน คุณ${escapeHtml(displayName)}</p>
+        <p style="margin:0 0 12px">${escapeHtml(body1)}</p>
+        <p style="margin:0 0 16px">${escapeHtml(body2)}</p>
         <p style="margin:0 0 18px">
-          <a href="${verifyLink}" style="display:inline-block;background:#f59e0b;color:#111;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:8px">ยืนยันอีเมล</a>
+          <a href="${escapeHtml(verifyLink)}" style="display:inline-block;background:#f59e0b;color:#111;text-decoration:none;font-weight:700;padding:10px 16px;border-radius:8px">${escapeHtml(buttonLabel)}</a>
         </p>
         <p style="margin:0 0 8px;font-size:12px;color:#4b5563">หากปุ่มไม่ทำงาน กรุณาคัดลอกลิงก์นี้ไปเปิดในเบราว์เซอร์:</p>
-        <p style="margin:0 0 14px;word-break:break-all;font-size:12px"><a href="${verifyLink}">${verifyLink}</a></p>
-        <p style="margin:0;font-size:12px;color:#6b7280">หากท่านไม่ได้เป็นผู้สมัครใช้งาน กรุณาเพิกเฉยอีเมลฉบับนี้</p>
+        <p style="margin:0 0 14px;word-break:break-all;font-size:12px"><a href="${escapeHtml(verifyLink)}">${escapeHtml(verifyLink)}</a></p>
+        <p style="margin:0;font-size:12px;color:#6b7280">${escapeHtml(ignoreText)}</p>
         <p style="margin:8px 0 0;font-size:12px;color:#6b7280">อีเมลฉบับนี้เป็นการแจ้งเตือนอัตโนมัติ กรุณาอย่าตอบกลับ (Do not reply)</p>
-        <p style="margin:14px 0 0;font-size:12px;color:#6b7280">ขอแสดงความนับถือ<br/>${supportLabel}</p>
+        <p style="margin:14px 0 0;font-size:12px;color:#6b7280">ขอแสดงความนับถือ<br/>${escapeHtml(supportLabel)}</p>
       </div>
     </div>
   `;

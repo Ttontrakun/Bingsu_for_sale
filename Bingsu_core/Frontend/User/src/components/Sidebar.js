@@ -11,11 +11,12 @@ import {
   HiLockClosed,
   HiPlus,
   HiSearch,
-  HiAdjustments
+  HiAdjustments,
+  HiDesktopComputer,
+  HiBookOpen
 } from 'react-icons/hi';
 import { HiOutlineUser } from 'react-icons/hi2';
 import { BsPinAngleFill } from 'react-icons/bs';
-import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
 import ChatMenuModal from './ChatMenuModal';
@@ -23,6 +24,7 @@ import ChatSearchModal from './ChatSearchModal';
 import ConfirmModal from './ConfirmModal';
 import { showToast } from './ToastNotification';
 import { authAPI, chatAPI, userAPI } from '../services/api';
+import { useSystemConfig } from '../context/SystemConfigContext';
 import avatarMale from '../assets/avatars/user_male.png';
 import avatarFemale from '../assets/avatars/user_female.png';
 
@@ -86,8 +88,12 @@ function Sidebar({
   const [isCollapsed, setIsCollapsed] = useState(() =>
     typeof window !== 'undefined' && window.innerWidth < 768
   );
+  const { logoSrc, appName, menuEnabled } = useSystemConfig();
+  const appNameLines = String(appName || 'Enterprise AI Chatbot').trim().split(/\s+/);
+  const appNameLine1 = appNameLines.slice(0, Math.ceil(appNameLines.length / 2)).join(' ') || 'Enterprise AI';
+  const appNameLine2 = appNameLines.slice(Math.ceil(appNameLines.length / 2)).join(' ');
   // ปลายทาง "หน้าหลัก/New Chat" ขึ้นกับว่าอยู่ในโหมดส่วนตัวหรือไม่
-  const homePath = privateWorkspace ? '/private' : '/homepage';
+  const homePath = privateWorkspace && menuEnabled('private') ? '/private' : '/homepage';
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -445,13 +451,13 @@ function Sidebar({
           isCollapsed ? 'justify-center' : ''
         }`}
         onClick={() => navigate(homePath)}
-        title="Enterprise AI Chatbot"
+        title={appName}
       >
-        <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
+        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
         {!isCollapsed && (
           <span className='text-orange-500 font-bold text-lg leading-tight'>
-            <span className='block'>Enterprise AI</span>
-            <span className='block'>Chatbot</span>
+            <span className='block'>{appNameLine1}</span>
+            {appNameLine2 ? <span className='block'>{appNameLine2}</span> : null}
           </span>
         )}
       </div>
@@ -461,6 +467,7 @@ function Sidebar({
         {/* Fixed Navigation Items */}
         <div className='flex flex-col gap-3 flex-shrink-0'>
         {/* แชทใหม่ */}
+        {menuEnabled('home') && (
         <button
           type='button'
           onClick={() => navigate(homePath)}
@@ -470,8 +477,10 @@ function Sidebar({
           <HiPlus className='text-lg flex-shrink-0' />
           {!isCollapsed && <span className='whitespace-nowrap'>New Chat</span>}
         </button>
+        )}
 
         {/* ค้นหาแชท */}
+        {menuEnabled('history') && (
         <button
           type='button'
           onClick={() => setIsChatSearchOpen(true)}
@@ -481,8 +490,10 @@ function Sidebar({
           <HiSearch className='text-lg flex-shrink-0' />
           {!isCollapsed && <span className='whitespace-nowrap'>Chats</span>}
         </button>
+        )}
 
         {/* สวิตช์เปิด/ปิดโหมดส่วนตัว — เปิด = เข้าโหมดส่วนตัว, ปิด = กลับโหมดปกติ */}
+        {menuEnabled('private') && (
         <button
           type='button'
           role='switch'
@@ -503,6 +514,31 @@ function Sidebar({
             </>
           )}
         </button>
+        )}
+
+        {menuEnabled('createBot') && (
+          <button
+            type='button'
+            onClick={() => navigate('/my-bots')}
+            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100 ${location.pathname.startsWith('/my-bots') ? 'bg-gray-100' : ''}`}
+            title='Bots'
+          >
+            <HiDesktopComputer className='text-lg flex-shrink-0' />
+            {!isCollapsed && <span className='whitespace-nowrap'>Bots</span>}
+          </button>
+        )}
+
+        {menuEnabled('uploadDocs') && (
+          <button
+            type='button'
+            onClick={() => navigate('/my-knowledge')}
+            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100 ${location.pathname.startsWith('/my-knowledge') ? 'bg-gray-100' : ''}`}
+            title='Knowledge'
+          >
+            <HiBookOpen className='text-lg flex-shrink-0' />
+            {!isCollapsed && <span className='whitespace-nowrap'>Knowledge</span>}
+          </button>
+        )}
 
         {/* Memory (แสดงเมื่ออยู่โหมด Private) */}
         {shouldShowMemoryControl && (
@@ -526,10 +562,10 @@ function Sidebar({
         </div>
         
         {/* Divider */}
-        {!isCollapsed && <div className='border-t border-gray-100 mt-1 mb-1 flex-shrink-0'></div>}
+        {!isCollapsed && menuEnabled('history') && <div className='border-t border-gray-100 mt-1 mb-1 flex-shrink-0'></div>}
 
         {/* Scrollable Chat Section */}
-        {!isCollapsed && (
+        {!isCollapsed && menuEnabled('history') && (
           <div className='flex flex-col gap-2 flex-1 min-h-0'>
             {/* หัวข้อ "ประวัติสนทนา" + เมนูจัดกลุ่ม */}
             {visibleChats.length > 0 && (

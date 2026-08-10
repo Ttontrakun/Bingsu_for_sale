@@ -103,7 +103,7 @@ adminUsersRouter.get("/users", authenticate, requireAdminMetrics, async (_req, r
   );
 });
 
-const ALLOWED_ROLES = ["user", "support", "admin_metrics", "admin"];
+const ALLOWED_ROLES = ["user", "support", "admin_metrics", "admin", "admin_dev"];
 const GROUP_CHAT_KIND = "group";
 
 adminUsersRouter.patch("/users/:id", authenticate, requireRole("support", "admin", "admin_metrics"), async (req, res) => {

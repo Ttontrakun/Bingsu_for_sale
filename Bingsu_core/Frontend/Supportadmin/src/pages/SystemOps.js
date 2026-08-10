@@ -11,6 +11,7 @@ import {
   HiUserGroup,
 } from 'react-icons/hi';
 import { api } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 import { SynonymsPanel } from './Synonyms';
 import { ServiceRatesPanel } from './ServiceRates';
 import { ApprovalAuthorityPanel } from './ApprovalAuthority';
@@ -29,20 +30,31 @@ function SystemOps({ userRole }) {
   const canView = userRole === 'admin' || userRole === 'support';
   const canManage = userRole === 'admin' || userRole === 'support';
   const isAdmin = userRole === 'admin';
+  const { systemTabEnabled, getCopy, getTextStyle } = useAdminSystemConfig();
 
   const [searchParams, setSearchParams] = useSearchParams();
 
   const tabs = useMemo(() => {
     const list = [];
-    if (canManage) list.push({ id: 'announce', label: 'ประกาศ', icon: HiSpeakerphone });
+    if (canManage && systemTabEnabled('announce')) {
+      list.push({ id: 'announce', label: 'ประกาศ', icon: HiSpeakerphone });
+    }
     if (isAdmin) {
-      list.push({ id: 'synonyms', label: 'Synonyms', icon: HiTranslate });
-      list.push({ id: 'rates', label: 'Service Rates', icon: HiCurrencyDollar });
-      list.push({ id: 'authority', label: 'อำนาจอนุมัติ', icon: HiBadgeCheck });
-      list.push({ id: 'pm', label: 'Super PM / PM', icon: HiUserGroup });
+      if (systemTabEnabled('synonyms')) {
+        list.push({ id: 'synonyms', label: 'Synonyms', icon: HiTranslate });
+      }
+      if (systemTabEnabled('rates')) {
+        list.push({ id: 'rates', label: 'Service Rates', icon: HiCurrencyDollar });
+      }
+      if (systemTabEnabled('authority')) {
+        list.push({ id: 'authority', label: 'อำนาจอนุมัติ', icon: HiBadgeCheck });
+      }
+      if (systemTabEnabled('pm')) {
+        list.push({ id: 'pm', label: 'Super PM / PM', icon: HiUserGroup });
+      }
     }
     return list;
-  }, [canManage, isAdmin]);
+  }, [canManage, isAdmin, systemTabEnabled]);
 
   const tabFromUrl = searchParams.get('tab');
   // ลิงก์เก่า ?tab=uploads → ไปแท็บแรก
@@ -128,10 +140,16 @@ function SystemOps({ userRole }) {
             <HiCog className="text-white text-2xl" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">System</h1>
-            <p className="text-sm text-gray-600">
-              จัดการประกาศ
-              {isAdmin ? ' คำพ้อง อัตราค่าบริการ และโครงสร้างบริการ' : ''}
+            <h1 className="text-2xl font-bold text-gray-800" style={getTextStyle('admin.system.title')}>
+              {getCopy('admin.system.title', 'System')}
+            </h1>
+            <p className="text-sm text-gray-600" style={getTextStyle('admin.system.subtitle')}>
+              {getCopy(
+                'admin.system.subtitle',
+                isAdmin
+                  ? 'จัดการประกาศ คำพ้อง อัตราค่าบริการ และโครงสร้างบริการ'
+                  : 'จัดการประกาศ',
+              )}
             </p>
           </div>
         </div>

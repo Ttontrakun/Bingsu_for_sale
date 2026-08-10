@@ -12,6 +12,7 @@ enum UserRole {
   support
   admin_metrics
   admin
+  admin_dev
 }
 
 enum UserApprovalStatus {
@@ -474,6 +475,19 @@ model ProductManagerEntry {
 model ManualPage {
   id        String   @id @default("default")
   payload   Json
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+/** ค่าปรับแต่งผลิตภัณฑ์ต่อเครื่อง (single-tenant) — Admin Dev Studio */
+model SystemConfig {
+  id        String   @id @default("default")
+  packageId String   @default("pro")
+  features  Json
+  menus     Json
+  copy      Json
+  styles    Json     @default("{}")
+  branding  Json
   updatedAt DateTime @updatedAt
   updatedBy String?
 }

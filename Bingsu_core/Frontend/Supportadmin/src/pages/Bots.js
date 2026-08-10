@@ -2,8 +2,10 @@ import { HiSearch, HiTrash, HiDesktopComputer, HiPlus } from 'react-icons/hi';
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, mapBotToDisplay } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 function Bots({ userRole = 'support' }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -127,10 +129,13 @@ function Bots({ userRole = 'support' }) {
             <HiDesktopComputer className='text-white text-2xl' />
           </div>
           <div>
-            <h1 className='text-2xl font-bold text-gray-800'>
-              Bots <span className='text-gray-600 font-normal'>{filteredBots.length}</span>
+            <h1 className='text-2xl font-bold text-gray-800' style={getTextStyle('admin.bots.title')}>
+              {getCopy('admin.bots.title', 'Bots')}{' '}
+              <span className='text-gray-600 font-normal'>{filteredBots.length}</span>
             </h1>
-            <p className='text-sm text-gray-600'>จัดการบอทและการตั้งค่า</p>
+            <p className='text-sm text-gray-600' style={getTextStyle('admin.bots.subtitle')}>
+              {getCopy('admin.bots.subtitle', 'จัดการบอทและการตั้งค่า')}
+            </p>
           </div>
         </div>
         {userRole === 'admin' && (

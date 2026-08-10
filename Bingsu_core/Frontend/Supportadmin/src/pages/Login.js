@@ -43,13 +43,13 @@ function Login() {
     try {
       const data = await api.login(signInEmail.trim(), signInPassword);
       const role = data.user?.role;
-      const allowed = ['support', 'admin', 'admin_metrics'].includes(role);
+      const allowed = ['support', 'admin', 'admin_metrics', 'admin_dev'].includes(role);
       if (!allowed) {
         api.logout();
         setSignInError(role === 'user' ? 'บัญชีนี้เป็นผู้ใช้งานทั่วไป ไม่สามารถเข้า Support Admin ได้' : 'ไม่มีสิทธิ์เข้า Support Admin');
         return;
       }
-      navigate('/dashboard');
+      navigate(role === 'admin_dev' ? '/dev' : '/dashboard');
     } catch (err) {
       setSignInError(err.message || 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {

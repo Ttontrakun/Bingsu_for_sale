@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { HiRefresh, HiThumbDown, HiThumbUp, HiExclamationCircle, HiCheckCircle, HiChatAlt2, HiChevronDown, HiChevronUp, HiDocumentSearch } from 'react-icons/hi';
 import { api } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 const fmtDate = (v) => {
   if (!v) return '';
@@ -13,6 +14,7 @@ const fmtDate = (v) => {
 };
 
 function FeedbackReview({ userRole }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const canSee = userRole === 'admin' || userRole === 'admin_metrics' || userRole === 'support';
 
   // view: 'nodata' (ค่าเริ่มต้น) | 'up' | 'down'
@@ -97,17 +99,12 @@ function FeedbackReview({ userRole }) {
             <HiChatAlt2 className="text-white text-2xl" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Feedback จากผู้ใช้</h1>
-            <p className="text-sm text-gray-600 flex items-center gap-1.5 flex-wrap">
-              <span>คลิกการ์ด</span>
-              <span className="inline-flex items-center justify-center bg-green-100 text-green-600 rounded-md p-1">
-                <HiThumbUp className="text-sm" />
-              </span>
-              <span>หรือ</span>
-              <span className="inline-flex items-center justify-center bg-red-100 text-red-600 rounded-md p-1">
-                <HiThumbDown className="text-sm" />
-              </span>
-              <span>เพื่อดูคำถามและคำตอบที่ผู้ใช้ให้ feedback ({days} วันล่าสุด)</span>
+            <h1 className="text-2xl font-bold text-gray-800" style={getTextStyle('admin.feedback.title')}>
+              {getCopy('admin.feedback.title', 'Feedback จากผู้ใช้')}
+            </h1>
+            <p className="text-sm text-gray-600" style={getTextStyle('admin.feedback.subtitle')}>
+              {getCopy('admin.feedback.subtitle', 'รีวิวคำถาม-คำตอบที่ผู้ใช้ให้คะแนน')}
+              <span className="text-gray-500"> ({days} วันล่าสุด)</span>
             </p>
           </div>
         </div>

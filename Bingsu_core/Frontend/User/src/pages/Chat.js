@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import AnnouncementBanner from '../components/AnnouncementBanner';
@@ -321,8 +321,14 @@ function Chat() {
   // Bot states
   const [bots, setBots] = useState([]);
   const [isBotsDropdownOpen, setIsBotsDropdownOpen] = useState(false);
+  const [switchingBot, setSwitchingBot] = useState(false);
   const botsDropdownRef = useRef(null);
   const [selectedBot, setSelectedBot] = useState(null);
+  const selectableBots = useMemo(
+    () => (Array.isArray(bots) ? bots.filter((b) => b && b.enabled !== false) : []),
+    [bots],
+  );
+  const canSwitchBot = selectableBots.length > 1;
   const isHelpChat =
     (helpBotId && chatBotId && String(helpBotId) === String(chatBotId)) ||
     (helpBotId && location.state?.selectedBot?.id && String(helpBotId) === String(location.state.selectedBot.id)) ||
@@ -486,6 +492,33 @@ function Chat() {
       clearInterval(t);
     };
   }, []);
+
+  const handleSelectBot = useCallback(async (bot) => {
+    if (!bot?.id || switchingBot) return;
+    if (selectedBot?.id && String(selectedBot.id) === String(bot.id)) {
+      setIsBotsDropdownOpen(false);
+      return;
+    }
+    if (bot.enabled === false) {
+      showToast('บอทนี้ถูกปิดใช้งานแล้ว', 'warning');
+      return;
+    }
+    setSwitchingBot(true);
+    try {
+      const documentId = bot.documentIds?.[0]
+        || bot.documents?.[0]?.id
+        || null;
+      await chatAPI.setChatBot(chatId, bot.id, documentId);
+      setSelectedBot(bot);
+      setChatBotId(bot.id);
+      setIsBotsDropdownOpen(false);
+      showToast(`เปลี่ยนเป็น ${bot.name} แล้ว`, 'success');
+    } catch (error) {
+      showToast(getErrorMessage(error) || 'เปลี่ยนบอทไม่สำเร็จ', 'error');
+    } finally {
+      setSwitchingBot(false);
+    }
+  }, [chatId, selectedBot, switchingBot]);
 
   // Close bots dropdown when clicking outside
   useEffect(() => {
@@ -1926,15 +1959,61 @@ function Chat() {
             ) : null}
 
           {selectedBot ? (
-            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0'>
-              <span
-                className='font-medium whitespace-nowrap'
-                title={typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
-              >
-                {typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
-              </span>
-              <span className='text-xs text-gray-500 shrink-0'>(ไม่สามารถเปลี่ยนได้)</span>
-            </div>
+            canSwitchBot ? (
+              <div className='relative min-w-0' ref={botsDropdownRef}>
+                <button
+                  type='button'
+                  onClick={() => !switchingBot && setIsBotsDropdownOpen((open) => !open)}
+                  disabled={switchingBot || isTyping}
+                  className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 min-w-0 max-w-[min(100vw-12rem,22rem)] disabled:opacity-60'
+                  title='เลือกบอท'
+                >
+                  <span
+                    className='font-medium truncate'
+                    title={typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+                  >
+                    {typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+                  </span>
+                  <HiChevronDown
+                    className={`text-base text-gray-500 shrink-0 transition-transform ${
+                      isBotsDropdownOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+                {isBotsDropdownOpen && (
+                  <div className='absolute right-0 mt-1 w-72 max-w-[min(100vw-2rem,22rem)] rounded-lg border border-gray-200 bg-white shadow-lg z-40 py-1 max-h-64 overflow-y-auto'>
+                    {selectableBots.map((bot) => {
+                      const active = selectedBot?.id && String(selectedBot.id) === String(bot.id);
+                      return (
+                        <button
+                          key={bot.id}
+                          type='button'
+                          onClick={() => handleSelectBot(bot)}
+                          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-yellow-50 ${
+                            active ? 'bg-yellow-50 text-gray-900 font-semibold' : 'text-gray-700'
+                          }`}
+                        >
+                          <div className='truncate'>{bot.name}</div>
+                          {bot.isOwned ? (
+                            <div className='text-[11px] text-gray-500 mt-0.5'>บอทของฉัน</div>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0'>
+                <span
+                  className='font-medium whitespace-nowrap'
+                  title={typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+                >
+                  {typeof selectedBot === 'object' ? selectedBot.name : String(selectedBot)}
+                </span>
+                <span className='text-xs text-gray-500 shrink-0'>(ไม่สามารถเปลี่ยนได้)</span>
+              </div>
+            )
           ) : null}
           </div>
         </div>

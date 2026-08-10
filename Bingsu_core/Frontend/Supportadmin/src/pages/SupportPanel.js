@@ -20,6 +20,7 @@ import {
   HiRefresh,
 } from 'react-icons/hi';
 import { api, mapAdminUserToDisplay, getStoredUser, normalizeDashboardRole } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 const THAI_MONTH_SHORT = [
   'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
@@ -31,6 +32,7 @@ const THAI_MONTH_SHORT_INDEX = THAI_MONTH_SHORT.reduce((acc, label, index) => {
 }, {});
 
 function SupportPanel({ users, setUsers, groups = [], setGroups = () => {}, onRefreshPending }) {
+  const { getCopy, getTextStyle } = useAdminSystemConfig();
   const isEnabledFlag = (value) => value === true;
   const normalizeGroup = (group) => {
     const name = String(group?.name || 'กลุ่ม').trim() || 'กลุ่ม';
@@ -843,8 +845,12 @@ function SupportPanel({ users, setUsers, groups = [], setGroups = () => {}, onRe
             <HiSupport className="text-white text-2xl" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Support Panel</h1>
-            <p className="text-sm text-gray-600">จัดการผู้ใช้และอนุมัติบัญชี</p>
+            <h1 className="text-2xl font-bold text-gray-800" style={getTextStyle('admin.supportPanel.title')}>
+              {getCopy('admin.supportPanel.title', 'Support Panel')}
+            </h1>
+            <p className="text-sm text-gray-600" style={getTextStyle('admin.supportPanel.subtitle')}>
+              {getCopy('admin.supportPanel.subtitle', 'จัดการผู้ใช้และอนุมัติบัญชี')}
+            </p>
           </div>
         </div>
         {typeof onRefreshPending === 'function' && (

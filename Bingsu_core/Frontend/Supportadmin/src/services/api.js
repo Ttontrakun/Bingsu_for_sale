@@ -14,7 +14,7 @@ const normalizeSessionRole = (role) => {
   if (normalized === 'ผู้ดูแล') return 'support';
   if (normalized === 'แอดมิน') return 'admin';
   if (normalized === 'แอดมิน (รายงาน)') return 'admin_metrics';
-  if (['user', 'support', 'admin', 'admin_metrics', 'pending'].includes(normalized)) return normalized;
+  if (['user', 'support', 'admin', 'admin_metrics', 'admin_dev', 'pending'].includes(normalized)) return normalized;
   return normalized;
 };
 export const getStoredUser = () => {
@@ -39,7 +39,7 @@ const setSession = (token, user) => {
   else localStorage.removeItem(USER_KEY);
 };
 
-const getApiBaseURL = () => {
+export const getApiBaseURL = () => {
   const envBase = String(process.env.REACT_APP_API_BASE_URL || '').trim();
   const browserOrigin =
     (typeof window !== 'undefined' && window.location?.origin) || '';
@@ -146,6 +146,18 @@ export const api = {
     setSession(null, null);
   },
   getMe: () => request('/api/auth/me'),
+  getPublicConfig: () => request('/api/config/public'),
+  getDevConfig: () => request('/api/dev/config'),
+  patchDevConfig: (patch) =>
+    request('/api/dev/config', {
+      method: 'PATCH',
+      body: JSON.stringify(patch || {}),
+    }),
+  uploadDevLogo: (logoBase64) =>
+    request('/api/dev/branding/logo', {
+      method: 'POST',
+      body: JSON.stringify({ logoBase64 }),
+    }),
   getReport: () => request('/api/support/report'),
   getFeedback: (rating = 'down', limit = 50, offset = 0, days = 30) =>
     request(`/api/support/feedback?rating=${encodeURIComponent(rating)}&limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}&days=${encodeURIComponent(days)}`),
@@ -207,10 +219,20 @@ export const api = {
     }),
   deleteAnnouncement: (id) =>
     request(`/api/admin/announcements/${encodeURIComponent(String(id || ''))}`, { method: 'DELETE' }),
-  getAdminBots: () => request('/api/admin/bots'),
+  getAdminBots: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.ownerRole) qs.set('ownerRole', params.ownerRole);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/api/admin/bots${suffix}`);
+  },
   createAdminBot: (payload) =>
     request('/api/admin/bots', { method: 'POST', body: JSON.stringify(payload || {}) }),
-  getAdminDocuments: () => request('/api/admin/documents'),
+  getAdminDocuments: (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.ownerRole) qs.set('ownerRole', params.ownerRole);
+    const suffix = qs.toString() ? `?${qs.toString()}` : '';
+    return request(`/api/admin/documents${suffix}`);
+  },
   getAdminDocument: (id) => request(`/api/admin/documents/${id}`),
   updateAdminBot: (id, payload) =>
     request(`/api/admin/bots/${id}`, { method: 'PATCH', body: JSON.stringify(payload || {}) }),
@@ -386,13 +408,14 @@ const ROLE_LABELS = {
   support: 'ผู้ดูแล',
   admin: 'แอดมิน',
   admin_metrics: 'แอดมิน (รายงาน)',
+  admin_dev: 'Admin Dev',
 };
 
 /** แปลง role จาก DB / ค่าเก่า ให้ตรงคีย์ใน UI (ป้ายสี, filter) */
 export function normalizeDashboardRole(role) {
   const s = String(role ?? '').toLowerCase().trim();
   if (s === 'moderator' || s === 'staff' || s === 'csr') return 'support';
-  if (['user', 'support', 'admin', 'admin_metrics', 'pending'].includes(s)) return s;
+  if (['user', 'support', 'admin', 'admin_metrics', 'admin_dev', 'pending'].includes(s)) return s;
   return s || 'user';
 }
 
@@ -503,6 +526,7 @@ const DEFAULT_AVATAR_COLORS = [
  */
 export function mapBotToDisplay(backendBot, index = 0, avatarColors = DEFAULT_AVATAR_COLORS) {
   const username = backendBot.owner?.name || backendBot.owner?.email || '-';
+  const ownerEmail = backendBot.owner?.email || '';
   const knowledge = (backendBot.documents || []).map((d) => d.displayName || d.name || '-');
   const color = avatarColors[index % avatarColors.length] || 'bg-blue-400';
   return {
@@ -511,6 +535,9 @@ export function mapBotToDisplay(backendBot, index = 0, avatarColors = DEFAULT_AV
     description: backendBot.description || '',
     prompt: backendBot.prompt || '',
     username,
+    ownerEmail,
+    ownerId: backendBot.owner?.id || null,
+    documents: backendBot.documents || [],
     enabled: backendBot?.enabled !== false,
     knowledge,
     groups: [],
@@ -528,6 +555,10 @@ export function mapDocumentToDisplay(backendDoc) {
     name: backendDoc.displayName || backendDoc.name || '-',
     description: backendDoc.displayName || '',
     username,
+    ownerEmail: backendDoc.owner?.email || '',
+    ownerId: backendDoc.owner?.id || null,
+    createdAt: backendDoc.createdAt || null,
+    updatedAt: backendDoc.updatedAt || null,
     groups: [],
   };
 }

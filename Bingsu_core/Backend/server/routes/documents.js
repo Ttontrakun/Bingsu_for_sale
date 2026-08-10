@@ -8,6 +8,7 @@ import { authenticate } from "../lib/auth.js";
 import { getRequestContext } from "../lib/requestContext.js";
 import { logEvent } from "../lib/logging.js";
 import { invalidateUserCaches } from "../lib/cache.js";
+import { isFeatureEnabled } from "../lib/systemConfig.js";
 import {
   allowedUploadExtensions,
   allowedUploadMimeTypes,
@@ -182,13 +183,17 @@ async function linkDocumentToSystemBots(documentId) {
 
 documentsRouter.get("/", authenticate, async (req, res) => {
   const summary = ["1", "true", "yes"].includes(String(req.query.summary || "").toLowerCase());
+  // ผู้ใช้ทั่วไปเห็นเฉพาะ Knowledge ที่ตัวเองเป็นเจ้าของ — ไม่โชว์เอกสารที่ Support/Admin แชร์เข้ามา
+  const isEndUser = req.user?.role === "user";
   const documents = await prisma.document.findMany({
-    where: {
-      OR: [
-        { ownerId: req.user.id },
-        { shares: { some: { userId: req.user.id } } },
-      ],
-    },
+    where: isEndUser
+      ? { ownerId: req.user.id }
+      : {
+          OR: [
+            { ownerId: req.user.id },
+            { shares: { some: { userId: req.user.id } } },
+          ],
+        },
     orderBy: { createdAt: "desc" },
     ...(summary
       ? {
@@ -238,6 +243,15 @@ documentsRouter.get("/", authenticate, async (req, res) => {
 
 documentsRouter.post("/", authenticate, async (req, res) => {
   const { displayName, sourceFiles, tags, link } = req.body ?? {};
+
+  // ผู้ใช้ทั่วไปอัปโหลดความรู้ได้เมื่อ Admin Dev เปิดเมนู/feature นี้เท่านั้น
+  if (req.user?.role === "user") {
+    const allowed = await isFeatureEnabled("user.uploadDocuments");
+    if (!allowed) {
+      res.status(403).json({ error: "ฟีเจอร์อัปโหลดเอกสารยังไม่ได้เปิดใช้งาน" });
+      return;
+    }
+  }
 
   if (!displayName || !sourceFiles) {
     res.status(400).json({ error: "displayName and sourceFiles are required" });

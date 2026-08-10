@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
-import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, userAPI, getErrorMessage } from '../services/api';
+import { useSystemConfig } from '../context/SystemConfigContext';
 
 function Auth() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { getCopy, getTextStyle, logoSrc, appName } = useSystemConfig();
+  const loginTitle = getCopy('user.login.title', appName);
+  const loginTitleStyle = getTextStyle('user.login.title');
   const [isSignIn, setIsSignIn] = useState(true);
 
   // Form states for Sign In
@@ -178,9 +181,17 @@ function Auth() {
         <div className="flex flex-col items-center pt-8 transition-all duration-500 ease-in-out overflow-hidden">
           {/* Logo */}
           <div className="mb-3 h-[72px] w-[72px] flex items-center justify-center rounded-full bg-yellow-100 transition-all duration-500 ease-in-out hover:scale-110 hover:rotate-6 cursor-default overflow-hidden">
-            <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="w-full h-full object-cover rounded-full" />
+            <img src={logoSrc} alt={`${loginTitle} Logo`} className="w-full h-full object-cover rounded-full" />
           </div>
-          <h2 className="mb-5 text-2xl font-bold text-zinc-800 transition-all duration-500 ease-in-out drop-shadow-lg" style={{ textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)' }}>Enterprise AI Chatbot</h2>
+          <h2
+            className="mb-5 text-2xl font-bold text-zinc-800 transition-all duration-500 ease-in-out drop-shadow-lg"
+            style={{
+              textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.06)',
+              ...loginTitleStyle,
+            }}
+          >
+            {loginTitle}
+          </h2>
 
           <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: '355px' }}>
             <div 

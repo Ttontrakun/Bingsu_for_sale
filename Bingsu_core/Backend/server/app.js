@@ -29,6 +29,8 @@ import { testOcrRouter } from "./routes/testOcr.js";
 import { webhooksRouter, handleLineWebhookPost } from "./routes/webhooks.js";
 import { bingFormatRouter } from "./routes/bingFormat.js";
 import { internalRouter } from "./routes/internal.js";
+import { configRouter } from "./routes/config.js";
+import { devConfigRouter } from "./routes/devConfig.js";
 import { logEvent } from "./lib/logging.js";
 
 const app = express();
@@ -89,6 +91,7 @@ app.use(express.json({ limit: "25mb" })); // ใหญ่ขึ้นเพื�
 app.use(cookieParser());
 app.use("/uploads/avatars", express.static(path.join(uploadsDir, "avatars"), { fallthrough: false }));
 app.use("/uploads/bot-avatars", express.static(path.join(uploadsDir, "bot-avatars"), { fallthrough: false }));
+app.use("/uploads/branding", express.static(path.join(uploadsDir, "branding"), { fallthrough: false }));
 // Manual PDFs: ไม่เปิด static สาธารณะ — ใช้ GET /api/admin/manual/file/:filename (auth)
 app.use((req, res, next) => {
   const headerValue = req.headers["x-request-id"];
@@ -145,6 +148,8 @@ app.get("/api/avatars/:filename", (req, res) => {
   res.sendFile(path.resolve(filePath));
 });
 app.use("/api/auth", authRouter);
+app.use("/api/config", configRouter);
+app.use("/api/dev", devConfigRouter);
 // alias สำหรับ frontend ที่เรียก /api/users/register แทน /api/auth/signup
 app.post("/api/users/register", (req, res, next) => {
   signupHandler(req, res).catch((err) => {

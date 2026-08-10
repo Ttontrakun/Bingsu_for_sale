@@ -880,7 +880,7 @@ conversationsRouter.get("/:id", authenticate, async (req, res) => {
 });
 
 conversationsRouter.patch("/:id", authenticate, async (req, res) => {
-  const { title, pinned } = req.body ?? {};
+  const { title, pinned, botId, documentId } = req.body ?? {};
   const conversation = await prisma.conversation.findFirst({
     where: { id: req.params.id, userId: req.user.id },
   });
@@ -888,12 +888,84 @@ conversationsRouter.patch("/:id", authenticate, async (req, res) => {
     res.status(404).json({ error: "Conversation not found" });
     return;
   }
+
+  const data = {
+    title: typeof title === "string" ? title.trim().slice(0, 255) : undefined,
+    pinned: typeof pinned === "boolean" ? pinned : undefined,
+  };
+
+  if (botId !== undefined) {
+    if (typeof botId !== "string" || !botId.trim()) {
+      res.status(400).json({ error: "botId is required" });
+      return;
+    }
+    const bot = await prisma.bot.findFirst({
+      where: {
+        id: botId,
+        enabled: { not: false },
+        OR: [
+          { ownerId: req.user.id },
+          { name: "Enterprise AI Chatbot Assistant" },
+          { name: "บอทช่วยสอน" },
+        ],
+      },
+      include: {
+        documents: { select: { documentId: true }, take: 1 },
+      },
+    });
+    if (!bot) {
+      res.status(404).json({ error: "Bot not found" });
+      return;
+    }
+    data.botId = bot.id;
+    if (documentId === undefined) {
+      const fallbackDocId = bot.documents?.[0]?.documentId;
+      if (fallbackDocId) data.documentId = fallbackDocId;
+    }
+  }
+
+  if (documentId !== undefined) {
+    if (typeof documentId !== "string" || !documentId.trim()) {
+      res.status(400).json({ error: "documentId is required" });
+      return;
+    }
+    let document = await prisma.document.findFirst({
+      where: {
+        id: documentId,
+        OR: [
+          { ownerId: req.user.id },
+          { shares: { some: { userId: req.user.id } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!document) {
+      const helpDoc = await prisma.document.findFirst({
+        where: { id: documentId, displayName: "คู่มือการใช้งาน" },
+        select: { id: true },
+      });
+      if (helpDoc) document = helpDoc;
+    }
+    if (!document) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    data.documentId = document.id;
+  }
+
+  if (
+    data.title === undefined &&
+    data.pinned === undefined &&
+    data.botId === undefined &&
+    data.documentId === undefined
+  ) {
+    res.status(400).json({ error: "Nothing to update" });
+    return;
+  }
+
   const updated = await prisma.conversation.update({
     where: { id: conversation.id },
-    data: {
-      title: typeof title === "string" ? title.trim().slice(0, 255) : undefined,
-      pinned: typeof pinned === "boolean" ? pinned : undefined,
-    },
+    data,
   });
   res.json(updated);
   await invalidateConversationCaches(conversation.id, req.user.id);

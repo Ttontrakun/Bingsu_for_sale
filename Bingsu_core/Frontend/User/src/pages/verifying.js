@@ -4,11 +4,27 @@ import { HiOutlineMail, HiCheck, HiX, HiArrowLeft } from 'react-icons/hi';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, getErrorMessage } from '../services/api';
+import { useSystemConfig } from '../context/SystemConfigContext';
 
 function Verifying() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
+  const { getCopy, getTextStyle } = useSystemConfig();
+  const verifyTitle = getCopy('user.verify.title', 'ยืนยันอีเมลของคุณ');
+  const verifyBody1 = getCopy(
+    'user.verify.body1',
+    'กรุณาเปิดกล่องจดหมายของคุณ แล้วคลิกลิงก์ในอีเมลเพื่อยืนยันอีเมลนี้',
+  );
+  const verifyBody2 = getCopy(
+    'user.verify.body2',
+    'หลังยืนยันอีเมล คำขอจะเข้าคิวรอ Support Team ตรวจสอบและอนุมัติสิทธิ์ใช้งาน',
+  );
+  const verifyResend = getCopy('user.verify.resend', 'ส่งลิงก์ใหม่');
+  const verifySpamHint = getCopy(
+    'user.verify.spamHint',
+    'ลิงก์อาจใช้เวลา 1-2 นาที และอาจอยู่ใน spam',
+  );
   const [isResending, setIsResending] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -141,15 +157,24 @@ function Verifying() {
         </button>
 
         <div className="flex flex-col items-center text-center pt-4 px-2 md:px-6">
-          <h1 className="text-2xl md:text-[1.65rem] font-bold text-zinc-800 mb-5">
-            ยืนยันอีเมลของคุณ
+          <h1
+            className="text-2xl md:text-[1.65rem] font-bold text-zinc-800 mb-5"
+            style={getTextStyle('user.verify.title')}
+          >
+            {verifyTitle}
           </h1>
 
-          <p className="text-sm text-gray-500 leading-relaxed mb-3 max-w-sm">
-            กรุณาเปิดกล่องจดหมายของคุณ แล้วคลิกลิงก์ในอีเมลเพื่อยืนยันอีเมลนี้
+          <p
+            className="text-sm text-gray-500 leading-relaxed mb-3 max-w-sm whitespace-pre-line"
+            style={getTextStyle('user.verify.body1')}
+          >
+            {verifyBody1}
           </p>
-          <p className="text-sm text-gray-500 leading-relaxed mb-8 max-w-sm">
-            หลังยืนยันอีเมล คำขอจะเข้าคิวรอ Support Team ตรวจสอบและอนุมัติสิทธิ์ใช้งาน
+          <p
+            className="text-sm text-gray-500 leading-relaxed mb-8 max-w-sm whitespace-pre-line"
+            style={getTextStyle('user.verify.body2')}
+          >
+            {verifyBody2}
           </p>
 
           <div className="relative mb-8">
@@ -195,11 +220,11 @@ function Verifying() {
                 isResending ? 'opacity-50 cursor-not-allowed' : ''
               }`}
             >
-              {isResending ? 'กำลังส่ง...' : 'ส่งลิงก์ใหม่'}
+              {isResending ? 'กำลังส่ง...' : verifyResend}
             </button>
           </p>
-          <p className="text-xs text-gray-400 mb-8">
-            ลิงก์อาจใช้เวลา 1-2 นาที และอาจอยู่ใน spam
+          <p className="text-xs text-gray-400 mb-8" style={getTextStyle('user.verify.spamHint')}>
+            {verifySpamHint}
           </p>
 
           <div className="w-full border-t border-gray-200 mb-5" />

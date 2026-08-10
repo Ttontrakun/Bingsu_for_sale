@@ -28,6 +28,6 @@ export function sanitizeAvatarUrlString(value) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   if (trimmed.startsWith("preset:")) return trimmed.slice(0, 64);
-  if (/^\/uploads\/(avatars|bot-avatars)\/[A-Za-z0-9._-]+$/i.test(trimmed)) return trimmed;
+  if (/^\/uploads\/(avatars|bot-avatars|branding)\/[A-Za-z0-9._-]+$/i.test(trimmed)) return trimmed;
   return undefined; // reject
 }

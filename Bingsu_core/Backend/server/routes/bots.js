@@ -8,6 +8,7 @@ import { logEvent } from "../lib/logging.js";
 import { invalidateUserCaches } from "../lib/cache.js";
 import { parseSafeAvatarDataUrl, sanitizeAvatarUrlString } from "../lib/avatarSafe.js";
 import { deleteBotWithCleanup } from "../services/uploadQueue.js";
+import { isFeatureEnabled } from "../lib/systemConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
@@ -33,7 +34,7 @@ function botPatchChangeLabels(body, documentIdsTouched) {
 
 const isStaff = (user) => user?.role === "admin" || user?.role === "support";
 
-const formatBot = (bot, { includePrompt = false } = {}) => ({
+const formatBot = (bot, { includePrompt = false, viewerId = null } = {}) => ({
   id: bot.id,
   name: bot.name,
   ...(includePrompt ? { prompt: bot.prompt } : {}),
@@ -41,6 +42,8 @@ const formatBot = (bot, { includePrompt = false } = {}) => ({
   model: bot.model,
   avatarUrl: bot.avatarUrl,
   enabled: bot.enabled !== false,
+  ownerId: bot.ownerId ?? null,
+  isOwned: Boolean(viewerId && bot.ownerId === viewerId),
   createdAt: bot.createdAt,
   updatedAt: bot.updatedAt,
   documents: (bot.documents || []).map((link) => link.document),
@@ -69,6 +72,7 @@ botsRouter.get("/", authenticate, async (req, res) => {
     filtered.map((bot) =>
       formatBot(bot, {
         includePrompt: isStaff(req.user) || bot.ownerId === req.user.id,
+        viewerId: req.user.id,
       }),
     ),
   );
@@ -76,6 +80,15 @@ botsRouter.get("/", authenticate, async (req, res) => {
 
 botsRouter.post("/", authenticate, async (req, res) => {
   const { name, prompt, description, model, avatarUrl, documentIds } = req.body ?? {};
+
+  // ผู้ใช้ทั่วไปสร้างบอทได้เมื่อ Admin Dev เปิดเมนู/feature นี้เท่านั้น
+  if (req.user?.role === "user") {
+    const allowed = await isFeatureEnabled("user.createBot");
+    if (!allowed) {
+      res.status(403).json({ error: "ฟีเจอร์สร้างบอทยังไม่ได้เปิดใช้งาน" });
+      return;
+    }
+  }
 
   if (!name || !prompt) {
     res.status(400).json({ error: "name and prompt are required" });
@@ -247,6 +260,7 @@ botsRouter.get("/:id", authenticate, async (req, res) => {
   res.json(
     formatBot(bot, {
       includePrompt: isStaff(req.user) || bot.ownerId === req.user.id,
+      viewerId: req.user.id,
     }),
   );
 });
