@@ -99,7 +99,7 @@ function MyKnowledge() {
   return (
     <div className="flex h-screen bg-white">
       <Sidebar />
-      <main className="flex-1 overflow-auto px-6 py-6">
+      <main className="flex-1 overflow-auto thin-scrollbar px-6 py-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <div className="flex items-center gap-3">
             <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
@@ -161,7 +161,7 @@ function MyKnowledge() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {paginated.map((knowledge) => {
                 const name = knowledge.displayName || knowledge.name || '-';
                 const fileCount = Array.isArray(knowledge.sourceFiles)
@@ -221,61 +221,36 @@ function MyKnowledge() {
             </div>
 
             {totalPages > 1 && (
-              <div className="flex justify-center items-center gap-2 mt-4 pt-3">
+              <div className="flex justify-center items-center gap-2 mt-6">
                 <button
                   type="button"
                   onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
                   disabled={currentPage === 1}
-                  className={`px-3 py-2 rounded-lg font-medium ${
-                    currentPage === 1
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  ←
+                  ก่อนหน้า
                 </button>
-                {[...Array(totalPages)].map((_, index) => {
-                  const pageNum = index + 1;
-                  if (
-                    pageNum === 1 ||
-                    pageNum === totalPages ||
-                    (pageNum >= currentPage - 1 && pageNum <= currentPage + 1)
-                  ) {
-                    return (
-                      <button
-                        key={pageNum}
-                        type="button"
-                        onClick={() => setCurrentPage(pageNum)}
-                        className={`px-4 py-2 rounded-lg font-medium ${
-                          currentPage === pageNum
-                            ? 'bg-yellow-400 text-gray-800'
-                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  }
-                  if (pageNum === currentPage - 2 || pageNum === currentPage + 2) {
-                    return (
-                      <span key={pageNum} className="px-2 text-gray-400">
-                        ...
-                      </span>
-                    );
-                  }
-                  return null;
-                })}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                  <button
+                    key={page}
+                    type="button"
+                    onClick={() => setCurrentPage(page)}
+                    className={`min-w-[2.5rem] px-3 py-2 rounded-lg text-sm font-medium ${
+                      currentPage === page
+                        ? 'bg-yellow-400 text-gray-900'
+                        : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {page}
+                  </button>
+                ))}
                 <button
                   type="button"
                   onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
                   disabled={currentPage === totalPages}
-                  className={`px-3 py-2 rounded-lg font-medium ${
-                    currentPage === totalPages
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
+                  className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  →
+                  ถัดไป
                 </button>
               </div>
             )}

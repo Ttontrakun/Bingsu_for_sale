@@ -115,6 +115,7 @@ function AppContent() {
   const canSeeLogs = isAdmin || isAdminMetrics;
   const canSeeBots = isAdmin || isSupport;
   const defaultPath = isAdminDev ? '/dev' : canSeeDashboard ? '/dashboard' : '/knowledge';
+  const isKnowledgePage = location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/');
 
   return (
     <div className="flex h-screen bg-white relative">
@@ -123,7 +124,7 @@ function AppContent() {
         userRole={userRole}
       />
       {/* Main Content */}
-      <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''}`}>
+      <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''} ${isKnowledgePage ? 'thin-scrollbar' : ''}`}>
           {!isAdminDev && (
             <div className="flex justify-end mb-3 shrink-0">
               <NotificationBell users={users} />

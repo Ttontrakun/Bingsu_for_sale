@@ -60,7 +60,7 @@ function Knowledge({ userRole = 'support' }) {
   }, [knowledgeList, pinGuideFirst, searchQuery]);
 
   // Pagination calculations
-  const totalPages = Math.ceil(filteredKnowledgeList.length / itemsPerPage);
+  const totalPages = Math.max(1, Math.ceil(filteredKnowledgeList.length / itemsPerPage) || 1);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const paginatedKnowledgeList = filteredKnowledgeList.slice(startIndex, endIndex);
@@ -182,12 +182,11 @@ function Knowledge({ userRole = 'support' }) {
         </div>
       )}
 
-      {/* Knowledge List */}
-      <div className='flex-1 flex flex-col'>
-        {filteredKnowledgeList.length > 0 ? (
-          <>
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3'>
-              {paginatedKnowledgeList.map((knowledge) => (
+      {/* Knowledge List — 12 กล่องต่อหน้า */}
+      {filteredKnowledgeList.length > 0 ? (
+        <>
+          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+            {paginatedKnowledgeList.map((knowledge) => (
               <div
                 key={knowledge.id}
                 className='bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col min-w-0 overflow-hidden'
@@ -233,77 +232,49 @@ function Knowledge({ userRole = 'support' }) {
                 </div>
               </div>
             ))}
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className='flex justify-center items-center gap-2 mt-auto pt-3'>
-                {/* Previous Button */}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className={`px-3 py-2 rounded-lg font-medium transition-colors ${
-                    currentPage === 1
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  ←
-                </button>
-
-                {/* Page Numbers */}
-                {[...Array(totalPages)].map((_, index) => {
-                  const pageNum = index + 1;
-                  // Show first page, last page, current page, and pages around current
-                  if (
-                    pageNum === 1 ||
-                    pageNum === totalPages ||
-                    (pageNum >= currentPage - 1 && pageNum <= currentPage + 1)
-                  ) {
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setCurrentPage(pageNum)}
-                        className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                          currentPage === pageNum
-                            ? 'bg-yellow-400 text-gray-800'
-                            : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  } else if (
-                    pageNum === currentPage - 2 ||
-                    pageNum === currentPage + 2
-                  ) {
-                    return <span key={pageNum} className='px-2 text-gray-400'>...</span>;
-                  }
-                  return null;
-                })}
-
-                {/* Next Button */}
-                <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className={`px-3 py-2 rounded-lg font-medium transition-colors ${
-                    currentPage === totalPages
-                      ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                      : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  →
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <div className='text-center py-16'>
-            <p className='text-gray-500 text-lg mb-4'>No knowledge found</p>
-            <p className='text-gray-400 text-sm'>Try adjusting your search query</p>
           </div>
-        )}
-      </div>
+
+          {totalPages > 1 && (
+            <div className='flex justify-center items-center gap-2 mt-6'>
+              <button
+                type='button'
+                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+              >
+                ก่อนหน้า
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                <button
+                  key={page}
+                  type='button'
+                  onClick={() => setCurrentPage(page)}
+                  className={`min-w-[2.5rem] px-3 py-2 rounded-lg text-sm font-medium ${
+                    currentPage === page
+                      ? 'bg-yellow-400 text-gray-900'
+                      : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+              <button
+                type='button'
+                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed'
+              >
+                ถัดไป
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className='text-center py-16'>
+          <p className='text-gray-500 text-lg mb-4'>No knowledge found</p>
+          <p className='text-gray-400 text-sm'>Try adjusting your search query</p>
+        </div>
+      )}
 
       {confirmDeleteId !== null && (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
