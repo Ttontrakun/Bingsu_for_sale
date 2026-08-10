@@ -141,6 +141,18 @@ export const COPY_KEYS = [
     defaultValue: "ฐานความรู้ของคุณ",
   },
   {
+    key: "admin.login.titleLine1",
+    label: "ชื่อบนหน้า Login (บรรทัด 1)",
+    page: "admin.login",
+    defaultValue: "Enterprise AI Chatbot",
+  },
+  {
+    key: "admin.login.titleLine2",
+    label: "ชื่อบนหน้า Login (บรรทัด 2)",
+    page: "admin.login",
+    defaultValue: "Support & Admin",
+  },
+  {
     key: "admin.dashboard.title",
     label: "หัวข้อหน้า Dashboard",
     page: "admin.dashboard",

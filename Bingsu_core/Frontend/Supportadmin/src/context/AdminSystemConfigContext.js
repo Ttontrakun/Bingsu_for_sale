@@ -19,6 +19,7 @@ export const AdminSystemConfigContext = createContext({
   features: {},
   copy: {},
   styles: {},
+  branding: {},
   menuEnabled: () => true,
   systemTabEnabled: () => true,
   getCopy: (_key, fallback = '') => fallback,
@@ -36,6 +37,7 @@ export function AdminSystemConfigProvider({ children }) {
   const [features, setFeatures] = useState({});
   const [copy, setCopy] = useState({});
   const [styles, setStyles] = useState({});
+  const [branding, setBranding] = useState({});
 
   const reload = useCallback(async () => {
     try {
@@ -47,11 +49,13 @@ export function AdminSystemConfigProvider({ children }) {
       setFeatures(data?.features && typeof data.features === 'object' ? data.features : {});
       setCopy(data?.copy && typeof data.copy === 'object' ? data.copy : {});
       setStyles(data?.styles && typeof data.styles === 'object' ? data.styles : {});
+      setBranding(data?.branding && typeof data.branding === 'object' ? data.branding : {});
     } catch {
       setMenus({ admin: [], systemTabs: [] });
       setFeatures({});
       setCopy({});
       setStyles({});
+      setBranding({});
     } finally {
       setReady(true);
     }
@@ -99,13 +103,14 @@ export function AdminSystemConfigProvider({ children }) {
       features,
       copy,
       styles,
+      branding,
       menuEnabled,
       systemTabEnabled,
       getCopy,
       getTextStyle,
       reload,
     }),
-    [ready, menus, features, copy, styles, menuEnabled, systemTabEnabled, getCopy, getTextStyle, reload],
+    [ready, menus, features, copy, styles, branding, menuEnabled, systemTabEnabled, getCopy, getTextStyle, reload],
   );
 
   return (

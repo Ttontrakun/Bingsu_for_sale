@@ -52,6 +52,9 @@ const EVENT_LABEL_TH = {
   'document.vectorize.failed': 'แปลงเป็น Vector (ล้มเหลว)',
   'document.ocr.structured': 'จัดเรียงข้อความด้วย AI',
   'document.deleted': 'ลบเอกสาร',
+  'user.knowledge.created': 'ผู้ใช้สร้าง Knowledge',
+  'user.knowledge.deleted': 'ผู้ใช้ลบ Knowledge',
+  'user.knowledge.upload.completed': 'ผู้ใช้อัปโหลดไฟล์ Knowledge',
   'synonym.created': 'เพิ่มคำพ้องความหมาย',
   'synonym.updated': 'แก้ไขคำพ้องความหมาย',
   'synonym.enabled': 'เปิดใช้งานคำพ้องความหมาย',
@@ -74,12 +77,15 @@ const EVENT_LABEL_TH = {
   'support.pending_approval.email.failed': 'แจ้งอีเมลรออนุมัติล้มเหลว',
   'bot.created': 'สร้างบอท',
   'bot.updated': 'แก้ไขบอท',
+  'user.bot.created': 'ผู้ใช้สร้างบอท',
   'admin.bot.created': 'สร้างบอท (แอดมิน)',
   'admin.bot.updated': 'แก้ไขบอท (แอดมิน)',
   'admin.guide.updated': 'แก้ไขคู่มือ (แอดมิน)',
   'manual.updated': 'แก้ไขหน้า Manual',
   'manual.pdf.uploaded': 'อัปโหลด PDF หน้า Manual',
   'bot.deleted': 'ลบบอท',
+  'admin_dev.config.updated': 'Admin Dev แก้ไขระบบ',
+  'admin_dev.branding.logo.updated': 'Admin Dev อัปโหลดโลโก้',
   'admin.announcement.created': 'สร้างประกาศ',
   'admin.announcement.updated': 'แก้ไขประกาศ',
   'admin.announcement.enabled': 'เปิดแสดงประกาศ',
@@ -104,7 +110,17 @@ const ROLE_TH = {
   support: 'ผู้ดูแล',
   admin: 'แอดมิน',
   admin_metrics: 'แอดมิน (รายงาน)',
+  admin_dev: 'Admin Dev',
 };
+
+function formatEditedAtTh(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+  } catch {
+    return String(iso);
+  }
+}
 
 const META_OMIT_KEYS = new Set(['ip', 'requestId']);
 
@@ -294,6 +310,34 @@ function formatAdminSummary(eventMessage, meta) {
       return know
         ? `สร้าง Knowledge ใหม่ ชื่อ ${q(know)} — ระบบนำไปจัดทำดัชนีค้นหา`
         : 'สร้าง Knowledge / เอกสารใหม่';
+    case 'user.knowledge.created': {
+      const when = formatEditedAtTh(m.createdAt);
+      const who = m.actorEmail || m.actorName || '';
+      const head = know ? `ผู้ใช้สร้าง Knowledge ชื่อ ${q(know)}` : 'ผู้ใช้สร้าง Knowledge ใหม่';
+      const by = who ? ` โดย ${who}` : '';
+      const at = when ? ` — เวลา ${when}` : '';
+      return `${head}${by}${at}`;
+    }
+    case 'user.knowledge.deleted': {
+      const when = formatEditedAtTh(m.deletedAt);
+      const who = m.actorEmail || m.actorName || '';
+      const head = know ? `ผู้ใช้ลบ Knowledge ชื่อ ${q(know)}` : 'ผู้ใช้ลบ Knowledge';
+      const by = who ? ` โดย ${who}` : '';
+      const at = when ? ` — เวลา ${when}` : '';
+      return `${head}${by}${at}`;
+    }
+    case 'user.knowledge.upload.completed': {
+      const n = m.fileCount != null ? Number(m.fileCount) : null;
+      const files = n != null && Number.isFinite(n) ? `${n} ไฟล์` : 'ชุดไฟล์';
+      const when = formatEditedAtTh(m.completedAt);
+      const who = m.actorEmail || m.actorName || '';
+      const head = know
+        ? `ผู้ใช้อัปโหลด ${files} เข้า Knowledge ${q(know)}`
+        : `ผู้ใช้อัปโหลด ${files} เข้า Knowledge`;
+      const by = who ? ` โดย ${who}` : '';
+      const at = when ? ` — เวลา ${when}` : '';
+      return `${head}${by}${at}`;
+    }
     case 'document.updated': {
       const changed = m.changed && typeof m.changed === 'object' ? m.changed : {};
       const labels = [];
@@ -333,15 +377,29 @@ function formatAdminSummary(eventMessage, meta) {
         ? `แอดมินกด Retry ประมวลผลไฟล์ชุด ${q(know)} ใหม่`
         : 'แอดมินกด Retry ประมวลผลไฟล์ชุดใหม่';
     case 'bot.created':
+    case 'user.bot.created':
     case 'admin.bot.created': {
       const byAdmin = eventMessage === 'admin.bot.created';
+      const byUser = eventMessage === 'user.bot.created';
       const n = m.knowledgeCount != null ? Number(m.knowledgeCount) : m.documentCount != null ? Number(m.documentCount) : null;
-      const head = byAdmin ? 'แอดมินสร้างบอท' : 'สร้างบอทใหม่';
-      if (!botNm) return head;
+      const head = byAdmin ? 'แอดมินสร้างบอท' : byUser ? 'ผู้ใช้สร้างบอท' : 'สร้างบอทใหม่';
+      const when = formatEditedAtTh(m.createdAt);
+      const who = byUser ? (m.actorEmail || m.actorName || '') : '';
+      const by = who ? ` โดย ${who}` : '';
+      const at = when ? ` — เวลา ${when}` : '';
+      if (!botNm) return `${head}${by}${at}`;
       if (n != null && Number.isFinite(n) && n > 0) {
-        return `${head} ชื่อ ${q(botNm)} — ผูก Knowledge ${n} ชุดตั้งแต่แรก`;
+        return `${head} ชื่อ ${q(botNm)} — ผูก Knowledge ${n} ชุดตั้งแต่แรก${by}${at}`;
       }
-      return `${head} ชื่อ ${q(botNm)} — ยังไม่ผูก Knowledge`;
+      return `${head} ชื่อ ${q(botNm)} — ยังไม่ผูก Knowledge${by}${at}`;
+    }
+    case 'admin_dev.config.updated':
+    case 'admin_dev.branding.logo.updated': {
+      const when = formatEditedAtTh(m.editedAt);
+      const who = m.actorEmail || m.actorName || 'Admin Dev';
+      const summary = m.changeSummary || (Array.isArray(m.changedAreas) ? m.changedAreas.join(' · ') : 'แก้ไขระบบ');
+      const at = when ? ` — เวลา ${when}` : '';
+      return `${who} แก้ไข Dev Studio: ${summary}${at}`;
     }
     case 'bot.updated':
       return formatBotEditSummary(m, false);
@@ -591,6 +649,9 @@ const EVENT_FILTER_GROUPS = [
       'document.ocr.structured',
       'document.vectorize.failed',
       'document.deleted',
+      'user.knowledge.created',
+      'user.knowledge.deleted',
+      'user.knowledge.upload.completed',
       'upload.batch.completed',
       'upload.batch.failed',
       'admin.upload.batch.retry',
@@ -632,6 +693,7 @@ const EVENT_FILTER_GROUPS = [
     keys: [
       'bot.created',
       'bot.updated',
+      'user.bot.created',
       'admin.bot.created',
       'admin.bot.updated',
       'bot.deleted',
@@ -642,6 +704,13 @@ const EVENT_FILTER_GROUPS = [
       'admin.restore.failed',
       'chat.retention.pruned',
       'system.log.retention.pruned',
+    ],
+  },
+  {
+    label: 'Admin Dev Studio',
+    keys: [
+      'admin_dev.config.updated',
+      'admin_dev.branding.logo.updated',
     ],
   },
 ];

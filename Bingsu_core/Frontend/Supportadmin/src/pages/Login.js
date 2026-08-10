@@ -4,10 +4,22 @@ import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeO
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
-import { api } from '../services/api';
+import { api, getApiBaseURL } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
+
+function resolveLogoUrl(logoUrl) {
+  if (!logoUrl) return bingsuLogo;
+  if (/^https?:\/\//i.test(logoUrl) || logoUrl.startsWith('data:')) return logoUrl;
+  const base = getApiBaseURL().replace(/\/$/, '');
+  return `${base}${logoUrl.startsWith('/') ? '' : '/'}${logoUrl}`;
+}
 
 function Login() {
   const navigate = useNavigate();
+  const { getCopy, getTextStyle, branding } = useAdminSystemConfig();
+  const titleLine1 = getCopy('admin.login.titleLine1', 'Enterprise AI Chatbot');
+  const titleLine2 = getCopy('admin.login.titleLine2', 'Support & Admin');
+  const logoSrc = resolveLogoUrl(branding?.logoUrl);
   const [isSignIn, setIsSignIn] = useState(true);
 
   // Form states for Sign In
@@ -107,11 +119,11 @@ function Login() {
         <div className="flex flex-col items-center pt-8 transition-all duration-500 ease-in-out overflow-hidden">
           {/* Logo */}
           <div className="mb-6 h-20 w-20 flex items-center justify-center rounded-full bg-yellow-100 transition-all duration-500 ease-in-out hover:scale-110 hover:rotate-6 cursor-default overflow-hidden">
-            <img src={bingsuLogo} alt="Enterprise AI Chatbot Logo" className="w-full h-full object-cover rounded-full" />
+            <img src={logoSrc} alt="Enterprise AI Chatbot Logo" className="w-full h-full object-cover rounded-full" />
           </div>
           <h2 className="mb-6 text-2xl font-bold text-zinc-800 text-center transition-all duration-500 ease-in-out drop-shadow-lg" style={{ textShadow: '0 4px 6px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(38, 0, 255, 0.06)' }}>
-            <span className="block">Enterprise AI Chatbot</span>
-            <span className="block">Support & Admin</span>
+            <span className="block" style={getTextStyle('admin.login.titleLine1')}>{titleLine1}</span>
+            <span className="block" style={getTextStyle('admin.login.titleLine2')}>{titleLine2}</span>
           </h2>
 
           <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: '280px' }}>

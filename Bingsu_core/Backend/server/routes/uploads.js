@@ -207,14 +207,19 @@ uploadsRouter.post("/upload-batches/:id/complete", authenticate, async (req, res
     await enqueueUploadBatch(batch.id);
   }
 
+  const isUserActor = req.user?.role === "user";
   await logEvent({
-    event: "upload.batch.completed",
+    event: isUserActor ? "user.knowledge.upload.completed" : "upload.batch.completed",
     actorId: req.user.id,
     targetType: "uploadBatch",
     targetId: batch.id,
     meta: {
       displayName: batch.displayName,
       fileCount: batch.files?.length ?? 0,
+      actorRole: req.user?.role || null,
+      actorEmail: req.user?.email || null,
+      actorName: req.user?.name || null,
+      completedAt: new Date().toISOString(),
       ...getRequestContext(req),
     },
   });

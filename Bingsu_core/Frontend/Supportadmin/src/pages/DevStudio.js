@@ -49,6 +49,7 @@ const PAGE_BY_COPY_PREFIX = [
   ['user.search.', 'homepage'],
   ['user.bots.', 'bots'],
   ['user.knowledge.', 'knowledge'],
+  ['admin.login.', 'login'],
   ['admin.dashboard.', 'dashboard'],
   ['admin.manual.', 'manual'],
   ['admin.bots.', 'bots'],
@@ -61,6 +62,7 @@ const PAGE_BY_COPY_PREFIX = [
 ];
 
 const ADMIN_PAGE_META = {
+  login: { icon: HiLockClosed, titleKey: 'admin.login.titleLine1', subtitleKey: 'admin.login.titleLine2' },
   dashboard: { icon: HiViewGrid, titleKey: 'admin.dashboard.title', subtitleKey: 'admin.dashboard.subtitle' },
   manual: { icon: HiHome, titleKey: 'admin.manual.title', subtitleKey: 'admin.manual.subtitle' },
   bots: { icon: HiDesktopComputer, titleKey: 'admin.bots.title', subtitleKey: 'admin.bots.subtitle' },
@@ -860,6 +862,84 @@ function UserLoginPreview({ copy, styles, branding, selectedKey, onSelect, onGoV
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SupportAdminLoginPreview({ copy, styles, branding, selectedKey, onSelect }) {
+  const logo = resolveAssetUrl(branding?.logoUrl);
+  const line1 = copy?.['admin.login.titleLine1'] || branding?.appName || 'Enterprise AI Chatbot';
+  const line2 = copy?.['admin.login.titleLine2'] || 'Support & Admin';
+
+  return (
+    <div className="relative min-h-[640px] rounded-2xl overflow-hidden border border-gray-200 flex flex-col bg-[#D9D9D9]">
+      <header className="relative z-10 flex h-[55px] shrink-0 items-center bg-[#FFD100] px-4 shadow-sm">
+        <img src={ntLogo} alt="nt" className="h-9 w-auto max-w-[240px] object-contain object-left" />
+      </header>
+      <div className="relative flex flex-1 items-center justify-center px-4 py-8">
+        <div
+          className="relative w-full max-w-[520px] rounded-[2rem] bg-white p-10 m-4"
+          style={{
+            border: '4px solid rgba(252,186,3,0.95)',
+            boxShadow: '0 0 20px rgba(252,186,3,0.3), 0 10px 30px rgba(0,0,0,0.08)',
+          }}
+        >
+          <div className="flex flex-col items-center pt-4">
+            <div className="mb-6 h-20 w-20 flex items-center justify-center rounded-full bg-yellow-100 overflow-hidden">
+              <img src={logo} alt="" className="w-full h-full object-cover rounded-full" />
+            </div>
+            <h2 className="mb-6 text-2xl font-bold text-zinc-800 text-center drop-shadow-lg">
+              <EditableText
+                editKey="admin.login.titleLine1"
+                value={line1}
+                textStyle={styles?.['admin.login.titleLine1']}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                as="span"
+                className="block"
+              />
+              <EditableText
+                editKey="admin.login.titleLine2"
+                value={line2}
+                textStyle={styles?.['admin.login.titleLine2']}
+                selectedKey={selectedKey}
+                onSelect={onSelect}
+                as="span"
+                className="block"
+              />
+            </h2>
+            <div className="w-full max-w-xs space-y-4">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-2">Email</label>
+                <div className="relative">
+                  <HiOutlineMail className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <div className="w-full pl-10 pr-3 py-3 rounded-lg border border-zinc-300 text-sm text-zinc-400">
+                    Enter your email
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-2">Password</label>
+                <div className="relative">
+                  <HiLockClosed className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <div className="w-full pl-10 pr-10 py-3 rounded-lg border border-zinc-300 text-sm text-zinc-400">
+                    Enter your password
+                  </div>
+                  <HiOutlineEyeOff className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 text-xl" />
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-zinc-500">Forgot password?</span>
+              </div>
+              <div className="flex justify-center pt-1">
+                <div className="w-36 h-9 rounded-lg bg-yellow-400 text-sm font-medium text-white flex items-center justify-center shadow-md opacity-50">
+                  Sign in
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1842,26 +1922,72 @@ function DevStudio() {
                 );
               })()
             ) : (
-              <p className="text-[11px] text-gray-400 pl-1">
-                คลิกเมนูใน sidebar ของพรีวิวเพื่อสลับหน้า — คลิกข้อความเพื่อแก้ไข
-              </p>
+              <div className="space-y-2">
+                <div className="inline-flex items-center gap-1 rounded-full bg-gray-100 p-1">
+                  {[
+                    { id: 'login', label: 'Login' },
+                    { id: 'app', label: 'หน้าแอป' },
+                  ].map((p) => {
+                    const active =
+                      p.id === 'login' ? adminPageId === 'login' : adminPageId !== 'login';
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          if (p.id === 'login') {
+                            setAdminPageId('login');
+                            setSelectedKey('admin.login.titleLine1');
+                            setRightTab('text');
+                          } else if (adminPageId === 'login') {
+                            setAdminPageId('dashboard');
+                            setSelectedKey('admin.dashboard.title');
+                          }
+                        }}
+                        className={`h-8 px-4 rounded-full text-xs font-medium transition ${
+                          active
+                            ? 'bg-white text-gray-900 shadow-sm'
+                            : 'text-gray-500 hover:text-gray-800'
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-gray-400 pl-1">
+                  {adminPageId === 'login'
+                    ? 'คลิกชื่อบนการ์ด Login เพื่อแก้ข้อความ — หรือใช้แผงขวา'
+                    : 'คลิกเมนูใน sidebar ของพรีวิวเพื่อสลับหน้า — คลิกข้อความเพื่อแก้ไข'}
+                </p>
+              </div>
             )}
           </div>
 
           {surface === 'supportadmin' ? (
-            <SupportAdminShellPreview
-              branding={draft.branding}
-              menus={previewAdminMenus}
-              systemTabs={previewSystemTabs}
-              pageId={adminPageId}
-              systemTabId={systemTabId}
-              onMenuClick={handleAdminMenuClick}
-              onSelectSystemTab={setSystemTabId}
-              copy={draft.copy}
-              styles={draft.styles}
-              selectedKey={selectedKey}
-              onSelect={handleSelectText}
-            />
+            adminPageId === 'login' ? (
+              <SupportAdminLoginPreview
+                branding={draft.branding}
+                copy={draft.copy}
+                styles={draft.styles}
+                selectedKey={selectedKey}
+                onSelect={handleSelectText}
+              />
+            ) : (
+              <SupportAdminShellPreview
+                branding={draft.branding}
+                menus={previewAdminMenus}
+                systemTabs={previewSystemTabs}
+                pageId={adminPageId}
+                systemTabId={systemTabId}
+                onMenuClick={handleAdminMenuClick}
+                onSelectSystemTab={setSystemTabId}
+                copy={draft.copy}
+                styles={draft.styles}
+                selectedKey={selectedKey}
+                onSelect={handleSelectText}
+              />
+            )
           ) : pageId === 'login' ? (
             <UserLoginPreview
               copy={draft.copy}
@@ -2050,6 +2176,13 @@ function DevStudio() {
                         </div>
                       );
                     })}
+                  </div>
+                ) : adminPageId === 'login' ? (
+                  <div className="rounded-xl bg-amber-50/70 border border-amber-100 px-3 py-3 space-y-1">
+                    <p className="text-[11px] font-bold text-gray-800 leading-relaxed">หน้า Login</p>
+                    <p className="text-[11px] text-gray-500 leading-relaxed">
+                      ไม่มีเมนู Sidebar — แก้ชื่อบนการ์ดได้ที่แท็บข้อความ หรือคลิกบนพรีวิวโดยตรง
+                    </p>
                   </div>
                 ) : adminPageId === 'system' ? (
                   <div className="space-y-2">

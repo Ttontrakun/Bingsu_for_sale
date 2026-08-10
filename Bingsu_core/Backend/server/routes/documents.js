@@ -307,12 +307,20 @@ documentsRouter.post("/", authenticate, async (req, res) => {
       // เฉพาะฝั่ง support/admin → เชื่อม Knowledge เข้าบอทในระบบให้อัตโนมัติ (ไม่เกี่ยวกับ user)
       await linkDocumentToSystemBots(document.id);
     }
+    const isUserActor = req.user?.role === "user";
     await logEvent({
-      event: "document.created",
+      event: isUserActor ? "user.knowledge.created" : "document.created",
       actorId: req.user.id,
       targetType: "document",
       targetId: document.id,
-      meta: { displayName: document.displayName, ...getRequestContext(req) },
+      meta: {
+        displayName: document.displayName,
+        actorRole: req.user?.role || null,
+        actorEmail: req.user?.email || null,
+        actorName: req.user?.name || null,
+        createdAt: document.createdAt?.toISOString?.() || new Date().toISOString(),
+        ...getRequestContext(req),
+      },
     });
     await invalidateUserCaches(req.user.id);
     res.status(201).json(document);
@@ -343,6 +351,21 @@ documentsRouter.delete("/:id", authenticate, async (req, res) => {
   fsPromises.rm(localDocDir, { recursive: true, force: true }).catch(() => null);
 
   await prisma.document.delete({ where: { id: document.id } });
+  const isUserActor = req.user?.role === "user";
+  await logEvent({
+    event: isUserActor ? "user.knowledge.deleted" : "document.deleted",
+    actorId: req.user.id,
+    targetType: "document",
+    targetId: document.id,
+    meta: {
+      displayName: document.displayName,
+      actorRole: req.user?.role || null,
+      actorEmail: req.user?.email || null,
+      actorName: req.user?.name || null,
+      deletedAt: new Date().toISOString(),
+      ...getRequestContext(req),
+    },
+  }).catch(() => null);
   res.json({ ok: true });
   deleteDocumentVectors(document.id).catch(() => null);
   invalidateRagCacheForDocument(document.id);

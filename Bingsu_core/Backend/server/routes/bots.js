@@ -166,14 +166,19 @@ botsRouter.post("/", authenticate, async (req, res) => {
     },
   });
 
+  const isUserActor = req.user?.role === "user";
   await logEvent({
-    event: "bot.created",
+    event: isUserActor ? "user.bot.created" : "bot.created",
     actorId: req.user.id,
     targetType: "bot",
     targetId: bot.id,
     meta: {
       botName: bot.name,
       knowledgeCount: validIds.length,
+      actorRole: req.user?.role || null,
+      actorEmail: req.user?.email || null,
+      actorName: req.user?.name || null,
+      createdAt: bot.createdAt?.toISOString?.() || new Date().toISOString(),
     },
   });
 
