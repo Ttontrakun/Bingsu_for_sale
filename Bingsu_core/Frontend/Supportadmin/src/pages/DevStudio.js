@@ -32,6 +32,7 @@ import {
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import { api, getApiBaseURL } from '../services/api';
+import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 const PAGE_BY_MENU = {
   home: 'homepage',
@@ -1540,6 +1541,7 @@ function StyleEditor({ value, onChange }) {
 }
 
 function DevStudio() {
+  const { reload: reloadPublicConfig } = useAdminSystemConfig();
   const [searchParams, setSearchParams] = useSearchParams();
   const surface = searchParams.get('surface') === 'supportadmin' ? 'supportadmin' : 'user';
   const setSurface = (next) => {
@@ -1749,6 +1751,7 @@ function DevStudio() {
         branding: { ...(saved.branding || {}) },
         features: { ...(saved.features || {}) },
       });
+      await reloadPublicConfig();
       setNotice('บันทึกแล้ว');
     } catch (err) {
       setError(err?.message || 'บันทึกไม่สำเร็จ');
@@ -1778,6 +1781,7 @@ function DevStudio() {
           ? { ...prev, branding: { ...(prev.branding || {}), ...(result.branding || {}) } }
           : prev,
       );
+      await reloadPublicConfig();
       setNotice('อัปโหลดโลโก้แล้ว');
     } catch (err) {
       setError(err?.message || 'อัปโหลดโลโก้ไม่สำเร็จ');

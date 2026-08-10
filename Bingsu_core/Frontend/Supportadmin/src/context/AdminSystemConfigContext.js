@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api } from '../services/api';
+import { api, getApiBaseURL } from '../services/api';
+import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
+
+const DEFAULT_APP_NAME = 'Enterprise AI Chatbot';
 
 const styleToCss = (style) => {
   if (!style || typeof style !== 'object') return {};
@@ -13,6 +16,15 @@ const styleToCss = (style) => {
   return css;
 };
 
+export function resolveBrandingLogoUrl(logoUrl) {
+  if (!logoUrl) return bingsuLogo;
+  if (/^https?:\/\//i.test(logoUrl) || logoUrl.startsWith('data:') || logoUrl.startsWith('blob:')) {
+    return logoUrl;
+  }
+  const base = getApiBaseURL().replace(/\/$/, '');
+  return `${base}${logoUrl.startsWith('/') ? '' : '/'}${logoUrl}`;
+}
+
 export const AdminSystemConfigContext = createContext({
   ready: false,
   menus: { admin: [], systemTabs: [] },
@@ -20,6 +32,8 @@ export const AdminSystemConfigContext = createContext({
   copy: {},
   styles: {},
   branding: {},
+  logoSrc: bingsuLogo,
+  appName: DEFAULT_APP_NAME,
   menuEnabled: () => true,
   systemTabEnabled: () => true,
   getCopy: (_key, fallback = '') => fallback,
@@ -96,6 +110,9 @@ export function AdminSystemConfigProvider({ children }) {
 
   const getTextStyle = useCallback((key) => styleToCss(styles?.[key]), [styles]);
 
+  const logoSrc = useMemo(() => resolveBrandingLogoUrl(branding?.logoUrl), [branding?.logoUrl]);
+  const appName = branding?.appName || DEFAULT_APP_NAME;
+
   const value = useMemo(
     () => ({
       ready,
@@ -104,13 +121,15 @@ export function AdminSystemConfigProvider({ children }) {
       copy,
       styles,
       branding,
+      logoSrc,
+      appName,
       menuEnabled,
       systemTabEnabled,
       getCopy,
       getTextStyle,
       reload,
     }),
-    [ready, menus, features, copy, styles, branding, menuEnabled, systemTabEnabled, getCopy, getTextStyle, reload],
+    [ready, menus, features, copy, styles, branding, logoSrc, appName, menuEnabled, systemTabEnabled, getCopy, getTextStyle, reload],
   );
 
   return (

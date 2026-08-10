@@ -1,25 +1,16 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
-import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
-import { api, getApiBaseURL } from '../services/api';
+import { api } from '../services/api';
 import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
-
-function resolveLogoUrl(logoUrl) {
-  if (!logoUrl) return bingsuLogo;
-  if (/^https?:\/\//i.test(logoUrl) || logoUrl.startsWith('data:')) return logoUrl;
-  const base = getApiBaseURL().replace(/\/$/, '');
-  return `${base}${logoUrl.startsWith('/') ? '' : '/'}${logoUrl}`;
-}
 
 function Login() {
   const navigate = useNavigate();
-  const { getCopy, getTextStyle, branding } = useAdminSystemConfig();
+  const { getCopy, getTextStyle, logoSrc } = useAdminSystemConfig();
   const titleLine1 = getCopy('admin.login.titleLine1', 'Enterprise AI Chatbot');
   const titleLine2 = getCopy('admin.login.titleLine2', 'Support & Admin');
-  const logoSrc = resolveLogoUrl(branding?.logoUrl);
   const [isSignIn, setIsSignIn] = useState(true);
 
   // Form states for Sign In

@@ -14,7 +14,6 @@ import {
   HiUsers,
   HiOutlineUser,
 } from 'react-icons/hi';
-import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
 import ProfileModal from './ProfileModal';
 import AccountModal from './AccountModal';
 import { api, userAPI } from '../services/api';
@@ -27,6 +26,15 @@ const AVATAR_SRC_BY_KEY = {
   'preset:user_female': avatarFemale,
 };
 
+function splitAppName(appName) {
+  const parts = String(appName || 'Enterprise AI Chatbot').trim().split(/\s+/);
+  const mid = Math.ceil(parts.length / 2);
+  return {
+    line1: parts.slice(0, mid).join(' ') || 'Enterprise AI',
+    line2: parts.slice(mid).join(' '),
+  };
+}
+
 function Navbar({ onCollapseChange, userRole }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -35,7 +43,8 @@ function Navbar({ onCollapseChange, userRole }) {
   const [profileName, setProfileName] = useState('Profile');
   const navigate = useNavigate();
   const location = useLocation();
-  const { menuEnabled } = useAdminSystemConfig();
+  const { menuEnabled, logoSrc, appName } = useAdminSystemConfig();
+  const { line1: brandLine1, line2: brandLine2 } = splitAppName(appName);
   const profileInitial = (profileName?.trim()?.charAt(0) || 'P').toUpperCase();
   const surface = new URLSearchParams(location.search).get('surface');
   const isUserSurface = location.pathname.startsWith('/dev') && surface !== 'supportadmin';
@@ -128,11 +137,11 @@ function Navbar({ onCollapseChange, userRole }) {
             }`}
             onClick={() => navigate('/dev')}
           >
-            <img src={bingsuLogo} alt="logo" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            <img src={logoSrc} alt="logo" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
             {!isCollapsed && (
               <span className="text-orange-500 font-bold text-lg leading-tight">
-                <span className="block">Enterprise AI</span>
-                <span className="block">Chatbot</span>
+                <span className="block">{brandLine1}</span>
+                {brandLine2 ? <span className="block">{brandLine2}</span> : null}
               </span>
             )}
           </div>
@@ -240,11 +249,11 @@ function Navbar({ onCollapseChange, userRole }) {
         }`}
         onClick={() => navigate(isAdminDev ? '/dev' : '/homepage')}
       >
-        <img src={bingsuLogo} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
+        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
         {!isCollapsed && (
           <span className='text-orange-500 font-bold text-lg leading-tight'>
-            <span className='block'>Enterprise AI</span>
-            <span className='block'>Chatbot</span>
+            <span className='block'>{brandLine1}</span>
+            {brandLine2 ? <span className='block'>{brandLine2}</span> : null}
           </span>
         )}
       </div>
