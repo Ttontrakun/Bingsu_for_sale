@@ -32,19 +32,25 @@ function BotDetail() {
     name: bot?.name || '',
     description: bot?.description || '',
     prompt: bot?.prompt ?? '',
+    model: bot?.model || '',
     documentIds: Array.isArray(bot?.documents) ? bot.documents.map((d) => d?.id).filter(Boolean) : [],
   });
   const [initialForm, setInitialForm] = useState({
     name: bot?.name || '',
     description: bot?.description || '',
     prompt: bot?.prompt ?? '',
+    model: bot?.model || '',
     documentIds: Array.isArray(bot?.documents) ? bot.documents.map((d) => d?.id).filter(Boolean) : [],
   });
+  const [modelOptions, setModelOptions] = useState([
+    { id: '', label: 'ใช้ค่าเริ่มต้นระบบ', model: null, available: true },
+  ]);
 
   const normalizeFormValue = (value) => ({
     name: String(value?.name || '').trim(),
     description: String(value?.description || '').trim(),
     prompt: String(value?.prompt || '').trim(),
+    model: String(value?.model || '').trim(),
     documentIds: Array.isArray(value?.documentIds)
       ? [...new Set(value.documentIds.map((id) => String(id)).filter(Boolean))].sort()
       : [],
@@ -55,11 +61,26 @@ function BotDetail() {
       name: bot?.name || '',
       description: bot?.description || '',
       prompt: bot?.prompt ?? '',
+      model: bot?.model || '',
       documentIds: Array.isArray(bot?.documents) ? bot.documents.map((d) => d?.id).filter(Boolean) : [],
     };
     setForm(next);
     setInitialForm(next);
-  }, [bot?.name, bot?.description, bot?.prompt, bot?.documents]);
+  }, [bot?.name, bot?.description, bot?.prompt, bot?.model, bot?.documents]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await api.getBotModelOptions();
+        const items = Array.isArray(data?.items) ? data.items : [];
+        if (!cancelled && items.length) setModelOptions(items);
+      } catch {
+        // keep default option
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const hasUnsavedChanges = useMemo(() => {
     const current = normalizeFormValue(form);
@@ -138,11 +159,15 @@ function BotDetail() {
   }, [isCreateMode, routeBotId]);
 
   // ใช้ข้อมูลจากบอทที่ผู้ใช้สร้าง (prompt จริงจาก backend)
+  const selectedModelId = isEditing || isCreateMode ? form.model : (bot?.model || '');
+  const selectedModelOption =
+    modelOptions.find((o) => o.id === selectedModelId || o.model === selectedModelId)
+    || modelOptions[0];
   const botData = {
     name: bot?.name || form.name || 'Bot Name',
     supportId: bot?.id ? `Support${bot.id.toString().padStart(3, '0')}` : 'Support001',
     avatar: bot?.color || 'bg-gray-300',
-    basicInfo: bot?.name || form.name || '',
+    modelLabel: selectedModelOption?.label || 'ใช้ค่าเริ่มต้นระบบ',
     description: bot?.description || form.description || '',
     systemPrompt: bot?.prompt ?? form.prompt ?? '',
     knowledge: Array.isArray(bot?.documents) ? bot.documents : [],
@@ -165,6 +190,7 @@ function BotDetail() {
         name: form.name,
         description: form.description,
         prompt: form.prompt,
+        model: form.model ? form.model : null,
         documentIds: form.documentIds,
       };
       if (isCreateMode && isAdmin) await api.createAdminBot(payload);
@@ -310,18 +336,35 @@ function BotDetail() {
           {(isEditing || isCreateMode) && <p className='text-xs text-gray-500 mt-1'>ไม่เกิน 120 ตัวอักษร</p>}
         </div>
 
-        {/* Basic Info */}
+        {/* Chat model */}
         <div>
           <label className='block text-sm font-medium text-gray-700 mb-2'>
             โมเดลพื้นฐาน (จาก)
           </label>
-          <input
-            type='text'
-            value={botData.basicInfo}
-            readOnly
-            className='w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 cursor-default text-gray-700'
-            placeholder='Enterprise AI Chatbot & Timsum'
-          />
+          {isEditing || isCreateMode ? (
+            <select
+              value={form.model || ''}
+              onChange={(e) => setForm((s) => ({ ...s, model: e.target.value }))}
+              disabled={!canEdit}
+              className='w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-white text-gray-700'
+            >
+              {modelOptions.map((opt) => (
+                <option key={opt.id || 'default'} value={opt.id || ''} disabled={opt.available === false}>
+                  {opt.label}{opt.available === false ? ' (ยังไม่พร้อม)' : ''}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type='text'
+              value={botData.modelLabel}
+              readOnly
+              className='w-full px-4 py-2.5 border border-gray-300 rounded-lg bg-gray-50 cursor-default text-gray-700'
+            />
+          )}
+          <p className='text-xs text-gray-500 mt-1'>
+            เลือกโมเดลที่ใช้ตอบจริงเมื่อแชทด้วยบอทนี้ — ค่าว่าง = ตามค่าเริ่มต้นระบบในเซิร์ฟเวอร์
+          </p>
         </div>
 
         {/* Description */}

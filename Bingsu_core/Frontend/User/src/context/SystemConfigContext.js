@@ -21,8 +21,8 @@ const DEFAULT_COPY = {
     'ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้',
   'user.homepage.placeholder':
     'ถามเกี่ยวกับเอกสารในระบบ เช่น "อัตราค่าบริการ NT Corporate Internet"',
-  'user.private.title': 'โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง',
-  'user.private.bannerTitle': 'โหมดส่วนตัว',
+  'user.private.title': 'Personal — ถามจากเนื้อหาของคุณเอง',
+  'user.private.bannerTitle': 'Personal',
   'user.private.bannerBody': 'ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น',
   'user.private.placeholder': 'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI',
   'user.search.title': 'แชททั้งหมด',

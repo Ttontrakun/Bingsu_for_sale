@@ -79,8 +79,8 @@ function Homepage({ privateMode = false }) {
   const homepageTitleStyle = getTextStyle('user.homepage.title');
   const homepageDescriptionStyle = getTextStyle('user.homepage.description');
   const homepagePlaceholderStyle = getTextStyle('user.homepage.placeholder');
-  const privateTitle = getCopy('user.private.title', 'โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง');
-  const privateBannerTitle = getCopy('user.private.bannerTitle', 'โหมดส่วนตัว');
+  const privateTitle = getCopy('user.private.title', 'Personal — ถามจากเนื้อหาของคุณเอง');
+  const privateBannerTitle = getCopy('user.private.bannerTitle', 'Personal');
   const privateBannerBody = getCopy(
     'user.private.bannerBody',
     'ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น',
@@ -542,7 +542,7 @@ function Homepage({ privateMode = false }) {
         {privateMode && (
           <div className='mb-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-yellow-100 border border-yellow-300 text-gray-800 text-sm font-semibold'>
             <HiLockClosed className='text-base' />
-            โหมดส่วนตัว
+            Personal
           </div>
         )}
         <h1

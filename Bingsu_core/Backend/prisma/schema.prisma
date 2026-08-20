@@ -100,6 +100,8 @@ model Message {
   groundingChunks Json?
   /** การ์ดแหล่งที่มา (ชื่อไฟล์/docId/ตำแหน่ง) ที่ส่งให้ frontend — เซฟเพื่อหลังโหลดจาก API แล้วยังเห็นการ์ดได้ */
   references      Json?
+  /** คำถามต่อเนื่อง (ชิปใต้คำตอบ) — เซฟเพื่อเปิดแชทเก่าแล้วยังตรงคำถามเดิม */
+  suggestions     Json?
   platform        String   @default("website")
   createdAt       DateTime @default(now())
 

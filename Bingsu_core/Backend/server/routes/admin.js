@@ -13,20 +13,41 @@ import { adminUsersRouter } from "./adminUsers.js";
 import { adminUploadsRouter } from "./adminUploads.js";
 import { adminAnnouncementsRouter } from "./announcements.js";
 import { adminManualRouter } from "./adminManual.js";
+import {
+  getChatModelOptions,
+  getChatModelLabel,
+  getChatModelLogDetail,
+  getChatModelGatewayKey,
+  isAllowedChatModel,
+} from "../config.js";
 
 export const adminRouter = express.Router();
 
 const HELP_DOC_DISPLAY_NAME = "คู่มือการใช้งาน";
 
+const normalizeBotModel = (model) => {
+  if (model == null) return null;
+  if (typeof model !== "string") return undefined;
+  const trimmed = model.trim();
+  return trimmed === "" ? null : trimmed;
+};
 
-const adminBotPatchChangeLabels = (body) => {
+const adminBotPatchChangeLabels = (body, { modelBefore, modelAfter } = {}) => {
   const { name, prompt, description, enabled, model, avatarUrl, documentIds } = body ?? {};
   const labels = [];
   if (name !== undefined) labels.push("ชื่อบอท");
   if (prompt !== undefined) labels.push("Prompt / คำสั่งระบบ");
   if (description !== undefined) labels.push("คำอธิบาย");
   if (enabled !== undefined) labels.push("เปิด/ปิดการใช้งาน");
-  if (model !== undefined) labels.push("โมเดล");
+  if (model !== undefined) {
+    const from = getChatModelLogDetail(modelBefore);
+    const to = getChatModelLogDetail(modelAfter);
+    labels.push(
+      from === to
+        ? `โมเดลแชท: ${to}`
+        : `เปลี่ยนโมเดลแชท จาก「${from}」เป็น「${to}」`,
+    );
+  }
   if (avatarUrl !== undefined) labels.push("รูปโปรไฟล์");
   if (Array.isArray(documentIds)) labels.push("ชุดความรู้ (Knowledge)");
   return labels;
@@ -76,6 +97,10 @@ adminRouter.get("/documents/:id", authenticate, requireRole("support", "admin"),
   res.json(document);
 });
 
+adminRouter.get("/bots/model-options", authenticate, requireRole("support", "admin"), async (_req, res) => {
+  res.json({ items: getChatModelOptions() });
+});
+
 adminRouter.get("/bots", authenticate, requireRole("support", "admin"), async (req, res) => {
   // ownerRole=user → บอทของผู้ใช้ทั่วไป | ค่าเริ่มต้น = ของ Support/Admin
   const ownerRole = String(req.query?.ownerRole || "staff").toLowerCase();
@@ -119,6 +144,15 @@ adminRouter.post("/bots", authenticate, requireAdmin, async (req, res) => {
     res.status(400).json({ error: "name and prompt are required" });
     return;
   }
+  const normalizedModel = normalizeBotModel(model);
+  if (normalizedModel === undefined) {
+    res.status(400).json({ error: "model ต้องเป็น string หรือ null" });
+    return;
+  }
+  if (normalizedModel && !isAllowedChatModel(normalizedModel)) {
+    res.status(400).json({ error: "โมเดลที่เลือกไม่รองรับ" });
+    return;
+  }
 
   const duplicate = await prisma.bot.findFirst({
     where: {
@@ -141,7 +175,7 @@ adminRouter.post("/bots", authenticate, requireAdmin, async (req, res) => {
       name: normalizedName,
       prompt: normalizedPrompt,
       description: description === null ? null : typeof description === "string" ? description : null,
-      model: model === null ? null : typeof model === "string" ? model : null,
+      model: normalizedModel,
       avatarUrl: avatarUrl === null ? null : typeof avatarUrl === "string" ? avatarUrl : null,
       ownerId: req.user.id,
       enabled: true,
@@ -162,7 +196,14 @@ adminRouter.post("/bots", authenticate, requireAdmin, async (req, res) => {
     actorId: req.user.id,
     targetType: "bot",
     targetId: created.id,
-    meta: { botName: created.name, knowledgeCount: created.documents.length },
+    meta: {
+      botName: created.name,
+      knowledgeCount: created.documents.length,
+      model: created.model || null,
+      modelLabel: getChatModelLabel(created.model),
+      modelDetail: getChatModelLogDetail(created.model),
+      modelGateway: getChatModelGatewayKey(created.model),
+    },
   });
 
   res.status(201).json({
@@ -204,6 +245,19 @@ adminRouter.patch("/bots/:id", authenticate, requireAdmin, async (req, res) => {
     return;
   }
 
+  let nextModel;
+  if (model !== undefined) {
+    nextModel = normalizeBotModel(model);
+    if (nextModel === undefined) {
+      res.status(400).json({ error: "model ต้องเป็น string หรือ null" });
+      return;
+    }
+    if (nextModel && !isAllowedChatModel(nextModel)) {
+      res.status(400).json({ error: "โมเดลที่เลือกไม่รองรับ" });
+      return;
+    }
+  }
+
   const updated = await prisma.$transaction(async (tx) => {
     const updatedBot = await tx.bot.update({
       where: { id: bot.id },
@@ -212,7 +266,7 @@ adminRouter.patch("/bots/:id", authenticate, requireAdmin, async (req, res) => {
         prompt: typeof prompt === "string" ? prompt : undefined,
         description: description === null ? null : typeof description === "string" ? description : undefined,
         enabled: typeof enabled === "boolean" ? enabled : undefined,
-        model: model === null ? null : typeof model === "string" ? model : undefined,
+        model: nextModel !== undefined ? nextModel : undefined,
         avatarUrl: avatarUrl === null ? null : typeof avatarUrl === "string" ? avatarUrl : undefined,
       },
     });
@@ -245,8 +299,23 @@ adminRouter.patch("/bots/:id", authenticate, requireAdmin, async (req, res) => {
     targetId: bot.id,
     meta: {
       botName: updated.name,
-      changeLabels: adminBotPatchChangeLabels(req.body ?? {}),
+      changeLabels: adminBotPatchChangeLabels(req.body ?? {}, {
+        modelBefore: bot.model,
+        modelAfter: updated.model,
+      }),
       knowledgeCount: updated.documents.length,
+      ...(model !== undefined
+        ? {
+            modelBefore: bot.model || null,
+            modelAfter: updated.model || null,
+            modelBeforeLabel: getChatModelLabel(bot.model),
+            modelAfterLabel: getChatModelLabel(updated.model),
+            modelBeforeDetail: getChatModelLogDetail(bot.model),
+            modelAfterDetail: getChatModelLogDetail(updated.model),
+            modelBeforeGateway: getChatModelGatewayKey(bot.model),
+            modelAfterGateway: getChatModelGatewayKey(updated.model),
+          }
+        : {}),
     },
   });
 

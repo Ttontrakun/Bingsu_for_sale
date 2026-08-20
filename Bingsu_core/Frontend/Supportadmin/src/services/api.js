@@ -225,6 +225,7 @@ export const api = {
     const suffix = qs.toString() ? `?${qs.toString()}` : '';
     return request(`/api/admin/bots${suffix}`);
   },
+  getBotModelOptions: () => request('/api/admin/bots/model-options'),
   createAdminBot: (payload) =>
     request('/api/admin/bots', { method: 'POST', body: JSON.stringify(payload || {}) }),
   getAdminDocuments: (params = {}) => {

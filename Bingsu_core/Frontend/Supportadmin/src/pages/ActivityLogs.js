@@ -147,17 +147,38 @@ function formatBotEditSummary(meta, byAdmin) {
   const botNm = m.botName || m.name;
   const labels = Array.isArray(m.changeLabels) ? m.changeLabels.filter(Boolean) : [];
   const kc = m.knowledgeCount != null ? m.knowledgeCount : m.documentCount;
-  const head = byAdmin ? 'แอดมินแก้ไขบอท' : 'แก้ไขบอท';
   const nameStr = botNm ? ` ชื่อ ${q(botNm)}` : '';
-  const changes =
-    labels.length > 0
-      ? ` — สิ่งที่ปรับ: ${labels.join(' · ')}`
-      : ' — ปรับการตั้งค่าบอท (บันทึกเก่าอาจไม่ระบุรายการ)';
+  const fromDetail = m.modelBeforeDetail || m.modelBeforeLabel;
+  const toDetail = m.modelAfterDetail || m.modelAfterLabel;
+  const modelChanged = Boolean(fromDetail && toDetail && fromDetail !== toDetail)
+    || (m.modelBefore !== undefined && m.modelAfter !== undefined && String(m.modelBefore || '') !== String(m.modelAfter || ''));
+  const modelOnlyLabelIdx = labels.findIndex((l) => /โมเดลแชท|เปลี่ยนโมเดล/.test(String(l)));
+  const otherLabels = labels.filter((_, i) => i !== modelOnlyLabelIdx);
+
+  let head;
+  let modelPart = '';
+  if (modelChanged && fromDetail && toDetail) {
+    head = byAdmin ? 'แอดมินเปลี่ยนโมเดลแชทของบอท' : 'เปลี่ยนโมเดลแชทของบอท';
+    modelPart = ` จาก「${fromDetail}」เป็น「${toDetail}」`;
+  } else if (modelOnlyLabelIdx >= 0 && labels[modelOnlyLabelIdx]) {
+    head = byAdmin ? 'แอดมินแก้ไขบอท' : 'แก้ไขบอท';
+    modelPart = ` — ${labels[modelOnlyLabelIdx]}`;
+  } else {
+    head = byAdmin ? 'แอดมินแก้ไขบอท' : 'แก้ไขบอท';
+  }
+
+  const otherPart =
+    otherLabels.length > 0
+      ? ` — ${modelChanged || modelOnlyLabelIdx >= 0 ? 'สิ่งอื่นที่ปรับ' : 'สิ่งที่ปรับ'}: ${otherLabels.join(' · ')}`
+      : !modelChanged && modelOnlyLabelIdx < 0
+        ? ' — ปรับการตั้งค่าบอท (บันทึกเก่าอาจไม่ระบุรายการ)'
+        : '';
+
   const tail =
     kc != null && Number.isFinite(Number(kc))
       ? ` — หลังบันทึก ผูก Knowledge ${Number(kc)} ชุด`
       : '';
-  return `${head}${nameStr}${changes}${tail}`;
+  return `${head}${nameStr}${modelPart}${otherPart}${tail}`;
 }
 
 /** สรุปเป็นประโยคภาษาไทยให้แอดมินเข้าใจว่าเกิดอะไรขึ้น */
@@ -387,11 +408,18 @@ function formatAdminSummary(eventMessage, meta) {
       const who = byUser ? (m.actorEmail || m.actorName || '') : '';
       const by = who ? ` โดย ${who}` : '';
       const at = when ? ` — เวลา ${when}` : '';
-      if (!botNm) return `${head}${by}${at}`;
+      const modelPart = m.modelDetail
+        ? ` — โมเดลแชท: ${m.modelDetail}`
+        : m.modelLabel
+          ? ` — โมเดลแชท: ${m.modelLabel}`
+          : m.model
+            ? ` — โมเดลแชท: ${m.model}`
+            : '';
+      if (!botNm) return `${head}${modelPart}${by}${at}`;
       if (n != null && Number.isFinite(n) && n > 0) {
-        return `${head} ชื่อ ${q(botNm)} — ผูก Knowledge ${n} ชุดตั้งแต่แรก${by}${at}`;
+        return `${head} ชื่อ ${q(botNm)}${modelPart} — ผูก Knowledge ${n} ชุดตั้งแต่แรก${by}${at}`;
       }
-      return `${head} ชื่อ ${q(botNm)} — ยังไม่ผูก Knowledge${by}${at}`;
+      return `${head} ชื่อ ${q(botNm)}${modelPart} — ยังไม่ผูก Knowledge${by}${at}`;
     }
     case 'admin_dev.config.updated':
     case 'admin_dev.branding.logo.updated': {

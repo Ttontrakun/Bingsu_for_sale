@@ -492,7 +492,7 @@ function Sidebar({
         </button>
         )}
 
-        {/* สวิตช์เปิด/ปิดโหมดส่วนตัว — เปิด = เข้าโหมดส่วนตัว, ปิด = กลับโหมดปกติ */}
+        {/* สวิตช์เปิด/ปิด Personal — เปิด = เข้า Personal, ปิด = กลับโหมดปกติ */}
         {menuEnabled('private') && (
         <button
           type='button'
@@ -500,14 +500,15 @@ function Sidebar({
           aria-checked={privateWorkspace}
           onClick={() => navigate(privateWorkspace ? '/homepage' : '/private')}
           className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
-          title={privateWorkspace ? 'ปิดเพื่อกลับโหมดปกติ' : 'เปิดเพื่อเข้าโหมดส่วนตัว'}
+          title={privateWorkspace ? 'ปิดเพื่อกลับโหมดปกติ' : 'เปิดเพื่อเข้า Personal'}
+          aria-label='Personal'
         >
           {isCollapsed ? (
             <HiLockClosed className={`text-lg flex-shrink-0 ${privateWorkspace ? 'text-green-600' : 'text-gray-500'}`} />
           ) : (
             <>
               <HiLockClosed className={`text-lg flex-shrink-0 ${privateWorkspace ? 'text-green-600' : 'text-gray-500'}`} />
-              <span className='whitespace-nowrap text-gray-900'>Private</span>
+              <span className='whitespace-nowrap text-gray-900'>Personal</span>
               <span className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${privateWorkspace ? 'bg-green-500' : 'bg-gray-400'}`}>
                 <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${privateWorkspace ? 'translate-x-4' : 'translate-x-0.5'}`} />
               </span>

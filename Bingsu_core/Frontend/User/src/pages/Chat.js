@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import AnnouncementBanner from '../components/AnnouncementBanner';
 import BotMarkdown from '../components/chat/BotMarkdown';
+import { normalizeMarkdownTable } from '../utils/normalizeMarkdownTable';
 import TypingIndicator from '../components/chat/TypingIndicator';
 import ReferenceChips from '../components/chat/ReferenceChips';
 import { 
@@ -295,13 +296,19 @@ function Chat() {
   const [feedbackByMessageId, setFeedbackByMessageId] = useState({});
   const [isSourceModalOpen, setIsSourceModalOpen] = useState(false);
   const [sourceModalData, setSourceModalData] = useState(null);
-  // คำถามต่อเนื่องจาก AI (สไตล์ Cursor) — แสดงใต้คำตอบบอทล่าสุด ถ้าว่างจะ fallback เป็นปุ่ม rule-based เดิม
+  // คำถามต่อเนื่องจาก AI — รอให้โหลดเสร็จก่อนโชว์ (กันชิปกระพริบสลับคำ)
   const [aiFollowUps, setAiFollowUps] = useState([]);
+  const [followUpsLoading, setFollowUpsLoading] = useState(false);
+  const [followUpsReady, setFollowUpsReady] = useState(false);
   const followUpRequestIdRef = useRef(0);
+  const restoredFollowUpsForRef = useRef(null);
 
   useEffect(() => {
     setAiFollowUps([]);
+    setFollowUpsLoading(false);
+    setFollowUpsReady(false);
     followUpRequestIdRef.current += 1;
+    restoredFollowUpsForRef.current = null;
   }, [chatId]);
   const [isSelectingText, setIsSelectingText] = useState(false);
   const messagesEndRef = useRef(null);
@@ -679,6 +686,7 @@ function Chat() {
         const timestamp = new Date(msg.createdAt || 0);
         const groundingNorm = parseStoredJsonArray(msg.groundingChunks);
         const storedRefs = parseStoredJsonArray(msg.references);
+        const storedSuggestions = parseStoredJsonArray(msg.suggestions);
         const references = isBot
           ? storedRefs.length > 0
             ? storedRefs
@@ -691,6 +699,7 @@ function Chat() {
           timestamp,
           ...(references?.length ? { references } : {}),
           ...(groundingNorm.length ? { groundingChunks: groundingNorm } : {}),
+          ...(isBot && storedSuggestions.length ? { suggestions: storedSuggestions } : {}),
           ...(msg.feedback ? { feedback: msg.feedback } : {}),
         });
       });
@@ -895,10 +904,14 @@ function Chat() {
               }
               streamBotIdRef.current = null;
               streamAbortControllerRef.current = null;
-              loadMessages();
-              // ให้ sidebar โหลดรายการแชทใหม่ — backend เพิ่งตั้งชื่อแชทจากข้อความแรก
-              window.dispatchEvent(new CustomEvent('chatsUpdated'));
-              fetchFollowUpSuggestions(firstMessage, (data?.reply ?? streamTextRef.current ?? '').trim());
+              loadMessages().then(() => {
+                window.dispatchEvent(new CustomEvent('chatsUpdated'));
+                fetchFollowUpSuggestions(
+                  firstMessage,
+                  (data?.reply ?? streamTextRef.current ?? '').trim(),
+                  data?.messageId || null,
+                );
+              });
             },
           });
         } catch (botError) {
@@ -1161,6 +1174,9 @@ function Chat() {
     if (isTyping) return;
     // ล้างคำถามต่อเนื่องชุดเดิม + ยกเลิกผลของคำขอที่ยังค้างอยู่
     setAiFollowUps([]);
+    setFollowUpsLoading(false);
+    setFollowUpsReady(false);
+    restoredFollowUpsForRef.current = null;
     followUpRequestIdRef.current += 1;
     const { outboundText } = buildStyledPrompt(finalText);
     const shouldRestoreInputOnError = overrideMessage == null;
@@ -1368,10 +1384,15 @@ function Chat() {
               // ignore storage errors
             }
           }
-          loadMessages();
-          // ให้ sidebar อัปเดตชื่อ/ลำดับแชท (ชื่อถูกตั้งจากข้อความแรกฝั่ง backend)
-          window.dispatchEvent(new CustomEvent('chatsUpdated'));
-          fetchFollowUpSuggestions(outboundText, (data?.reply ?? streamTextRef.current ?? '').trim());
+          loadMessages().then(() => {
+            // ให้ sidebar อัปเดตชื่อ/ลำดับแชท (ชื่อถูกตั้งจากข้อความแรกฝั่ง backend)
+            window.dispatchEvent(new CustomEvent('chatsUpdated'));
+            fetchFollowUpSuggestions(
+              outboundText,
+              (data?.reply ?? streamTextRef.current ?? '').trim(),
+              data?.messageId || null,
+            );
+          });
         },
       });
     } catch (botError) {
@@ -1482,54 +1503,6 @@ function Chat() {
       // เมื่อเต็ม max-height ให้เลื่อนในช่องพิมพ์ได้ด้วยเมาส์/ทัชแพด
       textareaRef.current.style.overflowY = textareaRef.current.scrollHeight > 200 ? 'auto' : 'hidden';
     }
-  };
-
-  /** แก้ตาราง Markdown ที่มี | อยู่ในเนื้อหาเซลล์ (ทำให้คอลัมน์แตก) — รวมส่วนที่เกินกลับเป็นเซลล์กลาง คั่นด้วยขึ้นบรรทัดใหม่ */
-  const normalizeMarkdownTable = (text) => {
-    const lines = String(text).split(/\r?\n/);
-    const out = [];
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i];
-      if (!/^\s*\|.+\|\s*$/.test(line)) {
-        out.push(line);
-        i++;
-        continue;
-      }
-      const headerLine = line;
-      const headerParts = headerLine.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
-      const numCols = headerParts.length;
-      if (numCols < 2) {
-        out.push(line);
-        i++;
-        continue;
-      }
-      out.push(headerLine);
-      i++;
-      if (i < lines.length && /^\s*\|[\s\-:]+\|\s*$/.test(lines[i])) {
-        out.push(lines[i]);
-        i++;
-      } else if (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
-        // มีแถวข้อมูลตามมาแต่ AI ลืมใส่บรรทัดคั่นหัวตาราง (|---|---|)
-        // → เติมให้เอง เพื่อให้เรนเดอร์เป็นตารางจริง ไม่ใช่ markdown ดิบ
-        out.push(`|${' --- |'.repeat(numCols)}`);
-      }
-      while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
-        const row = lines[i];
-        const parts = row.split(/\s*\|\s*/).map(s => s.trim()).filter(Boolean);
-        if (parts.length <= numCols) {
-          out.push(row);
-        } else {
-          const first = parts[0] ?? '';
-          const last = parts[parts.length - 1] ?? '';
-          const middle = parts.slice(1, parts.length - 1).join('<br>');
-          const fixedRow = `| ${first} | ${middle} | ${last} |`;
-          out.push(fixedRow);
-        }
-        i++;
-      }
-    }
-    return out.join('\n');
   };
 
   /** หาส่วนที่เปลี่ยนระหว่างข้อความเก่าและใหม่ (prefix/suffix ร่วม แล้วคืน from/to ของส่วนกลาง) */
@@ -1775,32 +1748,105 @@ function Chat() {
     );
 
   /** ขอคำถามต่อเนื่องจาก AI หลังบอทตอบเสร็จ — ถ้าคำขอเก่ากว่าล่าสุดจะทิ้งผลไป (กัน race) */
-  const fetchFollowUpSuggestions = async (question, answer) => {
+  const fetchFollowUpSuggestions = async (question, answer, messageId = null) => {
     const replyText = String(answer || '').trim();
     const questionText = String(question || '').trim();
-    if (!replyText || questionText.startsWith('/')) return;
+    if (!replyText || questionText.startsWith('/')) {
+      setFollowUpsLoading(false);
+      setFollowUpsReady(true);
+      return;
+    }
     const requestId = ++followUpRequestIdRef.current;
+    setFollowUpsLoading(true);
+    setFollowUpsReady(false);
+    const finish = (items, botMessageId) => {
+      if (followUpRequestIdRef.current !== requestId) return;
+      const list = mergePrivateOrderStarters(items || [], {
+        privateMode: privateModeRef.current,
+        hasInstructions: hasPrivateInstructions,
+      });
+      setAiFollowUps(list);
+      if (botMessageId && list.length > 0) {
+        setMessages((prev) => prev.map((m) => (
+          m.id === botMessageId ? { ...m, suggestions: list } : m
+        )));
+      }
+      setFollowUpsLoading(false);
+      setFollowUpsReady(true);
+    };
     // นอกขอบเขต: ไม่ต่อยอดจากคำถามนอกกรอบ — เสนอให้ถามในเอกสารแทน
     if (isOutOfDocumentScopeReply(replyText)) {
-      if (followUpRequestIdRef.current === requestId) {
-        setAiFollowUps(DOCUMENT_SCOPE_FOLLOWUPS);
+      try {
+        const saved = await chatMessageAPI.getFollowUpSuggestions(
+          chatId,
+          questionText,
+          replyText,
+          messageId,
+        );
+        finish(
+          Array.isArray(saved) && saved.length > 0 ? saved : DOCUMENT_SCOPE_FOLLOWUPS,
+          messageId,
+        );
+      } catch {
+        finish(DOCUMENT_SCOPE_FOLLOWUPS, messageId);
       }
       return;
     }
     try {
-      const items = await chatMessageAPI.getFollowUpSuggestions(chatId, questionText, replyText);
-      if (followUpRequestIdRef.current === requestId && Array.isArray(items) && items.length > 0) {
-        setAiFollowUps(mergePrivateOrderStarters(items, {
-          privateMode: privateModeRef.current,
-          hasInstructions: hasPrivateInstructions,
-        }));
-      } else if (followUpRequestIdRef.current === requestId && privateModeRef.current && !hasPrivateInstructions) {
-        setAiFollowUps(PRIVATE_ORDER_STARTERS.slice(0, 2));
+      const items = await chatMessageAPI.getFollowUpSuggestions(
+        chatId,
+        questionText,
+        replyText,
+        messageId,
+      );
+      if (Array.isArray(items) && items.length > 0) {
+        finish(items, messageId);
+      } else if (privateModeRef.current && !hasPrivateInstructions) {
+        finish(PRIVATE_ORDER_STARTERS.slice(0, 2), messageId);
+      } else {
+        finish([], messageId);
       }
     } catch {
-      // เงียบไว้ — ปุ่ม rule-based เดิมยังแสดงเป็น fallback
+      finish([], messageId);
     }
   };
+
+  // เปิดแชทเก่า: ใช้ชิปที่บันทึกไว้ — ถ้ายังไม่มีให้สร้างใหม่แล้วบันทึก
+  useEffect(() => {
+    if (!hasInitialized || isTyping || !chatId) return;
+    let lastBotIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i]?.sender === 'bot') {
+        lastBotIdx = i;
+        break;
+      }
+    }
+    if (lastBotIdx < 0) return;
+    const lastBot = messages[lastBotIdx];
+    if (!lastBot?.id || String(lastBot.id).startsWith('temp-')) return;
+    if (restoredFollowUpsForRef.current === lastBot.id) return;
+    restoredFollowUpsForRef.current = lastBot.id;
+
+    const stored = Array.isArray(lastBot.suggestions)
+      ? lastBot.suggestions.map((s) => String(s || '').trim()).filter(Boolean)
+      : [];
+    if (stored.length > 0) {
+      setAiFollowUps(stored);
+      setFollowUpsLoading(false);
+      setFollowUpsReady(true);
+      return;
+    }
+
+    let prevUserText = '';
+    for (let i = lastBotIdx - 1; i >= 0; i -= 1) {
+      if (messages[i]?.sender === 'user') {
+        prevUserText = String(messages[i].text || '').trim();
+        break;
+      }
+    }
+    fetchFollowUpSuggestions(prevUserText, lastBot.text, lastBot.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- เรียกครั้งเดียวต่อข้อความบอทล่าสุด
+  }, [hasInitialized, chatId, messages, isTyping]);
 
   const handleEditFollowUp = (question) => {
     setChatInput(String(question || ''));
@@ -2178,8 +2224,9 @@ function Chat() {
                                         );
                                       }
                                       if (message.sender === 'bot' && displayText) {
-                                        const textWithNewlines = String(displayText).replace(/<br\s*\/?>/gi, '\n');
-                                        const textNormalized = normalizeMarkdownTable(textWithNewlines);
+                                        // normalize ตารางก่อน (กู้ <br> ในเซลล์) แล้วค่อยแปลง <br> ที่เหลือเป็นขึ้นบรรทัดใหม่
+                                        const textNormalized = normalizeMarkdownTable(displayText)
+                                          .replace(/<br\s*\/?>/gi, '\n');
                                         return (
                                           <BotMarkdown
                                             text={textNormalized}
@@ -2224,7 +2271,7 @@ function Chat() {
                               )}
                             </div>
 
-                            {/* แหล่งอ้างอิง — ชิปเลขกำกับใต้คำตอบ เลขตรงกับ [n] ในเนื้อความ */}
+                            {/* แหล่งอ้างอิง — การ์ดเอกสารใต้คำตอบ */}
                             {ENABLE_SOURCE_REFERENCES && !isUser && message.sender === 'bot' && (
                               <ReferenceChips
                                 references={message.references}
@@ -2328,13 +2375,32 @@ function Chat() {
                                 const isLastBot = index === lastBotIdx && !(isTyping && index === messages.length - 1);
                                 if (!isLastBot) return null;
                                 const previousQuestion = getPreviousUserQuestion(index);
-                                const usingAiFollowUps = aiFollowUps.length > 0;
+                                const storedSuggestions = Array.isArray(message.suggestions)
+                                  ? message.suggestions.filter(Boolean)
+                                  : [];
+                                const resolved = storedSuggestions.length > 0
+                                  ? storedSuggestions
+                                  : (aiFollowUps.length > 0 ? aiFollowUps : null);
+                                // รอ AI เสร็จก่อน — ไม่โชว์ปุ่มกลางๆ แล้วสลับคำ (กระพริบ)
+                                if (!resolved && (followUpsLoading || !followUpsReady)) {
+                                  return (
+                                    <div className='flex flex-col items-start gap-1.5 mt-2' aria-hidden>
+                                      {[0, 1].map((i) => (
+                                        <div
+                                          key={`fu-skel-${i}`}
+                                          className='h-8 rounded-full bg-gray-100 animate-pulse'
+                                          style={{ width: i === 0 ? 168 : 132 }}
+                                        />
+                                      ))}
+                                    </div>
+                                  );
+                                }
                                 const suggestions = mergePrivateOrderStarters(
-                                  usingAiFollowUps
-                                    ? aiFollowUps
-                                    : getSuggestedFollowUps(message.text, previousQuestion),
+                                  resolved || getSuggestedFollowUps(message.text, previousQuestion),
                                   { privateMode, hasInstructions: hasPrivateInstructions },
                                 );
+                                if (!suggestions.length) return null;
+                                const usingAiFollowUps = Boolean(resolved);
                                 const suggestDisabled = isTyping || (selectedBot && selectedBot.enabled === false);
                                 return (
                                   <div className='flex flex-col items-start gap-1.5 mt-2'>
@@ -2750,7 +2816,9 @@ function Chat() {
                 </div>
               ) : Array.isArray(sourceModalData.chunks) && sourceModalData.chunks.length > 0 ? (
                 sourceModalData.chunks.map((chunk, idx) => {
-                  const displayText = stripAiHelperSections(String(chunk.text || '').replace(/<br\s*\/?>/gi, '\n'));
+                  const displayText = stripAiHelperSections(
+                    normalizeMarkdownTable(String(chunk.text || '')).replace(/<br\s*\/?>/gi, '\n')
+                  );
                   const helperOnly = !displayText;
                   return (
                   <div key={chunk.id || idx} className='rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5'>
@@ -2762,7 +2830,7 @@ function Chat() {
                     ) : null}
                     <div className='text-sm text-gray-800 leading-relaxed'>
                       {displayText ? (
-                        <BotMarkdown text={normalizeMarkdownTable(displayText)} />
+                        <BotMarkdown text={displayText} />
                       ) : (
                         <p className='text-xs text-gray-500 italic'>อ้างอิงจากเอกสารนี้ — ดูเอกสารฉบับเต็มสำหรับรายละเอียด</p>
                       )}

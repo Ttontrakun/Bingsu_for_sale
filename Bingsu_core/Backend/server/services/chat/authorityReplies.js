@@ -23,6 +23,21 @@ export const NO_GROUNDING_REPLY = "ขออภัยครับ ยังไ�
 export const OUT_OF_SCOPE_REPLY =
   "คำถามนี้อยู่นอกขอบเขตเอกสารที่เลือกครับ ผมตอบได้เฉพาะข้อมูลในเอกสาร/ชุดความรู้เท่านั้น เช่น ราคา ค่าบริการ ส่วนลด อำนาจอนุมัติ หรือขั้นตอนตามเอกสาร";
 
+/** ส่งข้อเท็จจริงให้โมเดลเรียบเรียง — ห้ามตัดจบด้วยประโยคสำเร็จรูปตรงๆ */
+export const buildAuthoritativeFactPrompt = (facts) => {
+  const body = String(facts || "").trim();
+  if (!body) return "";
+  return [
+    "ข้อมูลที่ยืนยันแล้ว (ต้องใช้ตอบ):",
+    body,
+    "",
+    "เรียบเรียงคำตอบภาษาไทยให้อ่านลื่น เป็นมิตร เหมือนผู้ช่วยคุยปกติ",
+    "เก็บความหมาย ตัวเลข ชื่อตำแหน่ง และข้อสรุปให้ถูกต้องครบ",
+    "ห้ามเปลี่ยนข้อเท็จจริง ห้ามแต่งตัวเลขหรือเงื่อนไขเพิ่ม",
+    "หากถามหลายประเด็นให้ตอบครบทุกข้อ",
+  ].join("\n");
+};
+
 /** คำตอบปฏิเสธ/นอกขอบเขต — ห้ามแปะการ์ดอ้างอิงเอกสาร (กัน top-k ติดมาทั้งที่ไม่ได้ใช้ตอบ) */
 export const shouldOmitReferencesForReply = (reply) => {
   const t = String(reply || "").trim();
@@ -160,7 +175,7 @@ export const buildPrivateRememberConfirmReply = (payload) => {
   const fact = String(payload || "").trim();
   return [
     "บันทึกในโหมดส่วนตัวแล้วครับ",
-    fact ? `==ข้อมูลที่จำ: ${fact}==[1]` : null,
+    fact ? `==ข้อมูลที่จำ: ${fact}==` : null,
     "",
     "หมายเหตุ: ใช้เฉพาะในโหมดส่วนตัวของคุณเท่านั้น — ไม่เปลี่ยนเอกสาร/ตารางอำนาจของโหมดปกติ และไม่กระทบผู้ใช้อื่น",
     "ถามต่อในโหมดส่วนตัวได้เลย ระบบจะยึดข้อมูลส่วนตัวของคุณก่อนเอกสารระบบ",
@@ -244,8 +259,43 @@ export const getDeterministicRuleReply = (question) => {
   ) {
     return "NT Dark Fiber ให้บริการแบบ End-to-End และไม่ใช่บริการ Last Mile";
   }
+  // การวัดระยะทาง Dark Fiber: เศษ ≤500m → 500m, เศษ >500m → 1 กม.
   if (
-    /(ค่าธรรมเนียมแรกเข้า|one time charge|otc)/.test(m)
+    /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(วัดระยะ|ระยะทาง|เศษของกิโล|เศษกิโล|เศษ\s*\d|หน่วยวัด|คิดระยะ|เศษ.*เมตร|\d+\s*เมตร)/.test(m)
+  ) {
+    if (/(ไม่เกิน\s*500|น้อยกว่าหรือเท่ากับ\s*500|≤\s*500|<=\s*500)/.test(m)) {
+      return "คิดเป็น 500 เมตรครับ";
+    }
+    if (/(เกิน\s*500|มากกว่า\s*500|>\s*500)/.test(m)) {
+      return "คิดเป็น 1 กิโลเมตรครับ";
+    }
+    const fracMatch =
+      m.match(/เศษ(?:ของกิโลเมตร|กิโลเมตร)?[^\d]{0,24}(\d{2,4})\s*เมตร/)
+      || m.match(/(?:เศษ|ระยะ|เป็น)\s*(\d{2,4})\s*เมตร/)
+      || m.match(/(\d{2,4})\s*เมตร/);
+    if (fracMatch) {
+      const meters = Number(fracMatch[1]);
+      if (Number.isFinite(meters) && meters > 500) {
+        return "คิดเป็น 1 กิโลเมตรครับ";
+      }
+      if (Number.isFinite(meters) && meters > 0 && meters <= 500) {
+        return "คิดเป็น 500 เมตรครับ";
+      }
+    }
+    if (/(วัดระยะ|ระยะทาง|หน่วยวัด|เศษ)/.test(m)) {
+      return "การวัดระยะทาง NT Dark Fiber ใช้หน่วยวัดขั้นต่ำ 1 กิโลเมตรครับ — เศษไม่เกิน 500 เมตรคิด 500 เมตร ส่วนเศษเกิน 500 เมตรคิดเป็น 1 กิโลเมตร";
+    }
+  }
+  // ★กับดัก: ค่าติดตั้ง ≠ ค่าธรรมเนียมแรกเข้า 7,000 (ต้องมาก่อนกฎ OTC)
+  if (
+    /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(ค่าติดตั้ง)/.test(m)
+  ) {
+    return "ในเอกสารยังไม่ระบุค่าติดตั้ง NT Dark Fiber เป็นจำนวนตายตัวครับ — ค่าดำเนินการสร้างเส้นใยส่วนเพิ่มจะประเมินตามพื้นที่จริง";
+  }
+  if (
+    /(ค่าธรรมเนียมแรกเข้า|one time charge|\botc\b)/.test(m)
     && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
   ) {
     return "ค่าธรรมเนียมแรกเข้า NT Dark Fiber (One Time Charge) คือ 7,000 บาท/ครั้ง";
@@ -271,6 +321,20 @@ export const getDeterministicRuleReply = (question) => {
     && /(กี่|กี่\s*%|เปอร์เซ็นต์|%)/.test(m)
   ) {
     return "ผจก.ฝ่าย ให้ส่วนลดค่าบริการ NT Corporate Internet ได้ไม่เกิน 30% จากอัตราปกติ";
+  }
+  // ★กับดัก: อย่าเอาเพดาน 30% ของ Corporate มาตอบ Dark Fiber
+  if (
+    /(ผจก\.?|ผู้จัดการฝ่าย|ระดับฝ่าย)/.test(m)
+    && /(nt\s*dark\s*fiber|เส้นใยแก้วนำแสง|dark fiber)/.test(m)
+    && /(ส่วนลด|ไม่เกิน|กี่\s*%|กี่%|เปอร์เซ็นต์|%)/.test(m)
+  ) {
+    return "สำหรับ NT Dark Fiber เอกสารไม่ได้กำหนดเพดานส่วนลดเฉพาะของ ผจก.ฝ่ายครับ อำนาจอนุมัติส่วนลดเริ่มที่ระดับ ชจญ. สำหรับส่วนลดไม่เกิน 50% ของ Price List (เกณฑ์ 30% เป็นของ NT Corporate Internet)";
+  }
+  if (
+    /(call\s*center|คอล\s*เซ็นเตอร์|คอลเซ็นเตอร์|เบอร์โทร|เบอร์ติดต่อ)/.test(m)
+    && /(ลูกค้าทั่วไป|call\s*center|คอลเซ็นเตอร์)/.test(m)
+  ) {
+    return "ในเอกสารที่เลือกยังไม่พบเบอร์ Call Center สำหรับลูกค้าทั่วไปครับ (อาจมีเฉพาะเบอร์ติดต่อภายในฝ่ายผลิตภัณฑ์)";
   }
   if (
     /(ลักลอบใช้|ลักลอบ)/.test(m)
@@ -350,10 +414,14 @@ export const getAuthorityOverrideFromReply = (reply) => {
   return null;
 };
 
-export const toCompactAuthorityReply = (question, reply) => {
+export const toCompactAuthorityReply = (question, reply, options = {}) => {
+  const respectPrivate = options.respectPrivate === true;
   const rawReply = String(reply || "").trim();
   if (!rawReply) return rawReply;
   if (!isAuthorityDecisionQuery(question)) return rawReply;
+  // โหมดส่วนตัวที่มี Private Knowledge: ห้าม post-process ทับคำตอบด้วยกติกาเอกสาร
+  // (ไม่งั้นตอนสตรีมจบ ผู้ใช้จะเห็นคำตอบเปลี่ยนจาก /จำ กลับไปเป็นเอกสาร)
+  if (respectPrivate) return rawReply;
   // ถามหลายข้อ: ห้ามย่อเหลือ 2 บรรทัด ไม่งั้นคำตอบข้ออื่นจะหายไป
   if (hasMultipleQuestions(question)) return rawReply;
   // ถ้าโมเดลตอบมาแบบละเอียดอยู่แล้ว (เช่น bullet/ลำดับขั้น) ไม่ต้องย่อ
@@ -435,6 +503,58 @@ export const stripDocumentLeadIn = (reply) => {
     text = text.replace(pattern, "").trim();
   }
   return text;
+};
+
+/** แปลงเศษ LaTeX ในคำตอบให้เป็นข้อความธรรมดา (UI ไม่เรนเดอร์ math) */
+const latexInnerToPlain = (inner) => {
+  let t = String(inner || "");
+  t = t.replace(/\\text\s*\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\mathrm\s*\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\mathbf\s*\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\textbf\s*\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\textit\s*\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, "($1)/($2)");
+  t = t.replace(/\\times/g, "×");
+  t = t.replace(/\\cdot/g, "·");
+  t = t.replace(/\\div/g, "÷");
+  t = t.replace(/\\approx/g, "≈");
+  t = t.replace(/\\leq|\\le\b/g, "≤");
+  t = t.replace(/\\geq|\\ge\b/g, "≥");
+  t = t.replace(/\\neq|\\ne\b/g, "≠");
+  t = t.replace(/\\%/g, "%");
+  t = t.replace(/\\,/g, " ");
+  t = t.replace(/\\;/g, " ");
+  t = t.replace(/\\quad/g, " ");
+  t = t.replace(/\\qquad/g, " ");
+  t = t.replace(/~/g, " ");
+  t = t.replace(/\\\\/g, "\n");
+  t = t.replace(/\{([^{}]*)\}/g, "$1");
+  t = t.replace(/\\([a-zA-Z]+)/g, "");
+  t = t.replace(/[ \t]{2,}/g, " ");
+  return t.trim();
+};
+
+/**
+ * ตัด/แปลง LaTeX ที่โมเดลมักแปะมา (เช่น \text{...}, \[...\], [...\text...])
+ * ให้เหลือข้อความไทย/ตัวเลขอ่านง่าย
+ */
+export const stripLatexToPlainText = (reply) => {
+  let text = String(reply || "");
+  if (!text || !/\\[a-zA-Z]|\$\$|\\\[|\\\(/.test(text)) return text;
+
+  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => latexInnerToPlain(inner));
+  text = text.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => latexInnerToPlain(inner));
+  text = text.replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => latexInnerToPlain(inner));
+  text = text.replace(/\$([^$\n]+)\$/g, (_, inner) => latexInnerToPlain(inner));
+  // บล็อก [ ... \text ... ] แบบที่โมเดลชอบห่อสูตร
+  text = text.replace(/\[\s*((?:[^\]]|\\\])*\\(?:text|times|frac|cdot)[\s\S]*?)\]/g, (_, inner) => (
+    latexInnerToPlain(inner)
+  ));
+  // เศษคำสั่งที่หลุดค้างนอกบล็อก
+  if (/\\[a-zA-Z]/.test(text)) {
+    text = latexInnerToPlain(text);
+  }
+  return text.replace(/\n{3,}/g, "\n\n").trim();
 };
 
 export const getNoDataReply = (message) => {

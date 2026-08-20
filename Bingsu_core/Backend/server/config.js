@@ -35,6 +35,170 @@ export const openaiFallbackBaseUrl = (process.env.OPENAI_FALLBACK_BASE_URL || ""
 export const openaiFallbackKey = (process.env.OPENAI_FALLBACK_API_KEY || "").trim() || openaiKey;
 export const openaiDeploymentRetryAttempts = Math.max(0, Math.min(5, Number(process.env.OPENAI_DEPLOYMENT_RETRY_ATTEMPTS || 2)));
 export const openaiDeploymentRetryBaseDelayMs = Math.max(500, Number(process.env.OPENAI_DEPLOYMENT_RETRY_BASE_DELAY_MS || 2500));
+
+const normalizeGatewayUrl = (url) => String(url || "").trim().replace(/\/+$/, "");
+const isNtGatewayUrl = (url) => /aigateway\.ntictsolution\.com/i.test(String(url || ""));
+const isH100GatewayUrl = (url) =>
+  /118\.174\.9\.226/i.test(String(url || "")) || /:11435\b/i.test(String(url || ""));
+
+/** Named gateways สำหรับเลือกโมเดลต่อบอท (derive จาก primary/fallback + override env) */
+export function getNamedChatGateways() {
+  const primary = {
+    baseUrl: normalizeGatewayUrl(gatewayBaseUrl),
+    apiKey: openaiKey,
+    label: "primary",
+  };
+  const fallback = {
+    baseUrl: normalizeGatewayUrl(openaiFallbackBaseUrl),
+    apiKey: openaiFallbackKey,
+    label: "fallback",
+  };
+  const ntOverrideUrl = normalizeGatewayUrl(process.env.CHAT_NT_GATEWAY_URL || "https://aigateway.ntictsolution.com/v1");
+  const h100OverrideUrl = normalizeGatewayUrl(process.env.CHAT_H100_GATEWAY_URL || "http://118.174.9.226:11435/v1");
+  const ntOverrideKey = (process.env.CHAT_NT_API_KEY || "").trim();
+  const h100OverrideKey = (process.env.CHAT_H100_API_KEY || "").trim();
+
+  const pickFromEnv = (predicate) => {
+    if (predicate(primary.baseUrl) && primary.apiKey) return { ...primary, label: primary.label };
+    if (predicate(fallback.baseUrl) && fallback.apiKey) return { ...fallback, label: fallback.label };
+    return null;
+  };
+
+  const ntFromEnv = pickFromEnv(isNtGatewayUrl);
+  const h100FromEnv = pickFromEnv(isH100GatewayUrl);
+
+  return {
+    primary,
+    fallback,
+    nt: {
+      baseUrl: ntFromEnv?.baseUrl || ntOverrideUrl,
+      apiKey: ntOverrideKey || ntFromEnv?.apiKey || openaiKey,
+      label: "nt",
+    },
+    h100: {
+      baseUrl: h100FromEnv?.baseUrl || h100OverrideUrl,
+      apiKey: h100OverrideKey || h100FromEnv?.apiKey || openaiKey,
+      label: "h100",
+    },
+  };
+}
+
+/**
+ * Catalog โมเดลที่แอดมินเลือกได้ต่อบอท
+ * gateway: null = ใช้ primary จาก .env | "nt" | "h100"
+ * apiKeyEnv: env เฉพาะโมเดล (ถ้ามี) — ใช้แทน key ของ gateway
+ */
+export const CHAT_MODEL_CATALOG = [
+  {
+    id: "",
+    label: "ใช้ค่าเริ่มต้นระบบ",
+    model: null,
+    gateway: null,
+    description: "ตาม OPENAI_MODEL ใน .env",
+  },
+  {
+    id: "Qwen3.8-27B",
+    label: "Qwen3.8-27B (NT Gateway)",
+    model: "Qwen3.8-27B",
+    gateway: "nt",
+    apiKeyEnv: "CHAT_NT_QWEN_API_KEY",
+    description: "ผ่าน aigateway.ntictsolution.com",
+  },
+  {
+    id: "rnd/openai/gpt-oss-120b",
+    label: "GPT-OSS 120B (NT Gateway)",
+    model: "rnd/openai/gpt-oss-120b",
+    gateway: "nt",
+    apiKeyEnv: "CHAT_NT_120B_API_KEY",
+    description: "ผ่าน aigateway.ntictsolution.com",
+  },
+];
+
+export function getChatModelOptions() {
+  const gateways = getNamedChatGateways();
+  return CHAT_MODEL_CATALOG.map((entry) => {
+    const gw = entry.gateway ? gateways[entry.gateway] : gateways.primary;
+    const entryKey = entry.apiKeyEnv
+      ? String(process.env[entry.apiKeyEnv] || "").trim()
+      : "";
+    const apiKey = entryKey || gw?.apiKey || "";
+    return {
+      id: entry.id,
+      label: entry.label,
+      model: entry.model,
+      gateway: entry.gateway,
+      description: entry.description,
+      available: entry.gateway == null
+        ? Boolean(gateways.primary.baseUrl && gateways.primary.apiKey)
+        : Boolean(gw?.baseUrl && apiKey),
+    };
+  });
+}
+
+/** คืน { model, baseUrl, apiKey, label } หรือ null ถ้าใช้ค่าเริ่มต้นระบบ */
+export function resolveChatTargetForModel(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) return null;
+  const entry = CHAT_MODEL_CATALOG.find((e) => e.id === raw || e.model === raw);
+  if (!entry || !entry.model) return null;
+  const gateways = getNamedChatGateways();
+  const gw = entry.gateway ? gateways[entry.gateway] : gateways.primary;
+  const entryKey = entry.apiKeyEnv
+    ? String(process.env[entry.apiKeyEnv] || "").trim()
+    : "";
+  const apiKey = entryKey || gw?.apiKey || "";
+  if (!gw?.baseUrl || !apiKey) return null;
+  return {
+    model: entry.model,
+    baseUrl: gw.baseUrl,
+    apiKey,
+    label: `${entry.gateway || "primary"}:${entry.model}`,
+  };
+}
+
+export function isAllowedChatModel(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) return true;
+  return CHAT_MODEL_CATALOG.some((e) => e.id === raw || e.model === raw);
+}
+
+/** ชื่อโมเดลสำหรับแสดงใน log / UI */
+export function getChatModelLabel(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) return "ใช้ค่าเริ่มต้นระบบ";
+  const entry = CHAT_MODEL_CATALOG.find((e) => e.id === raw || e.model === raw);
+  return entry?.label || raw;
+}
+
+/** รายละเอียดโมเดลแบบเจาะจงสำหรับ Activity Logs */
+export function getChatModelLogDetail(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) {
+    const envModel = String(process.env.OPENAI_MODEL || "").trim();
+    return envModel
+      ? `ใช้ค่าเริ่มต้นระบบ (OPENAI_MODEL=${envModel})`
+      : "ใช้ค่าเริ่มต้นระบบ (ตาม OPENAI_MODEL ใน .env)";
+  }
+  const entry = CHAT_MODEL_CATALOG.find((e) => e.id === raw || e.model === raw);
+  if (!entry) return `โมเดลกำหนดเอง (${raw})`;
+  if (!entry.model) {
+    return getChatModelLogDetail("");
+  }
+  const gatewayTh =
+    entry.gateway === "h100"
+      ? "เครื่อง H100"
+      : entry.gateway === "nt"
+        ? "NT AI Gateway"
+        : "gateway หลักของระบบ";
+  return `${entry.label} — ส่งคำขอผ่าน ${gatewayTh} · รหัสโมเดล ${entry.model}`;
+}
+
+export function getChatModelGatewayKey(modelId) {
+  const raw = String(modelId || "").trim();
+  if (!raw) return "default";
+  const entry = CHAT_MODEL_CATALOG.find((e) => e.id === raw || e.model === raw);
+  return entry?.gateway || (entry ? "default" : "custom");
+}
 export const redisUrl = process.env.REDIS_URL;
 export const cacheTtlSeconds = Number(process.env.CACHE_TTL_SECONDS || 30);
 export const rateLimitRedisPrefix = process.env.RATE_LIMIT_REDIS_PREFIX || "rate";

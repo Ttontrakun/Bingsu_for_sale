@@ -88,25 +88,25 @@ export const COPY_KEYS = [
   },
   {
     key: "user.private.title",
-    label: "หัวข้อหน้า Private",
+    label: "หัวข้อหน้า Personal",
     page: "private",
-    defaultValue: "โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง",
+    defaultValue: "Personal — ถามจากเนื้อหาของคุณเอง",
   },
   {
     key: "user.private.bannerTitle",
-    label: "หัวข้อแบนเนอร์ Private",
+    label: "หัวข้อแบนเนอร์ Personal",
     page: "private",
-    defaultValue: "โหมดส่วนตัว",
+    defaultValue: "Personal",
   },
   {
     key: "user.private.bannerBody",
-    label: "คำอธิบายแบนเนอร์ Private",
+    label: "คำอธิบายแบนเนอร์ Personal",
     page: "private",
     defaultValue: "ใช้ข้อมูลของท่านเองได้ โดยไม่กระทบเอกสารระบบหรือผู้ใช้อื่น",
   },
   {
     key: "user.private.placeholder",
-    label: "Placeholder ช่องพิมพ์ (Private)",
+    label: "Placeholder ช่องพิมพ์ (Personal)",
     page: "private",
     defaultValue: "พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI",
   },
@@ -264,7 +264,7 @@ export const COPY_KEYS = [
 
 export const USER_MENU_CATALOG = [
   { id: "home", label: "หน้าหลัก / New Chat", feature: null },
-  { id: "private", label: "โหมดส่วนตัว", feature: null },
+  { id: "private", label: "Personal", feature: null },
   { id: "history", label: "ค้นหาแชท (Chats)", feature: null },
   { id: "createBot", label: "Bots", feature: "user.createBot" },
   { id: "uploadDocs", label: "Knowledge", feature: "user.uploadDocuments" },

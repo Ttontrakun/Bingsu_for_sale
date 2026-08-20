@@ -19,6 +19,7 @@ import {
   ocrLlmProvider,
   ollamaBaseUrl,
   ollamaOcrModel,
+  resolveChatTargetForModel,
   strictPrivacyMode,
 } from "../config.js";
 import { Agent } from "undici";
@@ -176,22 +177,59 @@ const isDeploymentUnavailable429 = (status, errorText) =>
   status === 429 && /No deployments available|cooldown_list|selected model/i.test(String(errorText || ""));
 
 const buildChatTargets = (modelOverride, mode) => {
-  const primaryModel = modelOverride || openaiModel;
-  const targets = [{ baseUrl: gatewayBaseUrl, apiKey: openaiKey, model: primaryModel, label: "primary" }];
-  if (openaiFallbackModel) {
-    const duplicateTarget =
-      openaiFallbackBaseUrl === gatewayBaseUrl
-      && openaiFallbackKey === openaiKey
-      && openaiFallbackModel === primaryModel;
-    if (!duplicateTarget) {
-      targets.push({
-        baseUrl: openaiFallbackBaseUrl,
-        apiKey: openaiFallbackKey,
-        model: openaiFallbackModel,
-        label: "fallback",
-      });
-    }
+  const resolved = resolveChatTargetForModel(modelOverride);
+  const primaryModel = resolved?.model || modelOverride || openaiModel;
+  const targets = [];
+
+  if (resolved?.baseUrl && resolved?.apiKey) {
+    targets.push({
+      baseUrl: resolved.baseUrl,
+      apiKey: resolved.apiKey,
+      model: resolved.model,
+      label: resolved.label || "bot-model",
+    });
+  } else {
+    targets.push({
+      baseUrl: gatewayBaseUrl,
+      apiKey: openaiKey,
+      model: primaryModel,
+      label: "primary",
+    });
   }
+
+  if (openaiFallbackModel) {
+    const fallbackTarget = {
+      baseUrl: openaiFallbackBaseUrl,
+      apiKey: openaiFallbackKey,
+      model: openaiFallbackModel,
+      label: "fallback",
+    };
+    const duplicateTarget = targets.some(
+      (t) =>
+        t.baseUrl === fallbackTarget.baseUrl
+        && t.apiKey === fallbackTarget.apiKey
+        && t.model === fallbackTarget.model,
+    );
+    if (!duplicateTarget) targets.push(fallbackTarget);
+  }
+
+  // ถ้าเลือกโมเดลเฉพาะแล้ว primary จาก .env ต่างจากที่เลือก ให้ใส่เป็นสำรองเพิ่ม (กัน gateway ล่ม)
+  if (resolved) {
+    const envPrimary = {
+      baseUrl: gatewayBaseUrl,
+      apiKey: openaiKey,
+      model: openaiModel,
+      label: "env-primary",
+    };
+    const duplicateEnv = targets.some(
+      (t) =>
+        t.baseUrl === envPrimary.baseUrl
+        && t.apiKey === envPrimary.apiKey
+        && t.model === envPrimary.model,
+    );
+    if (envPrimary.baseUrl && envPrimary.apiKey && !duplicateEnv) targets.push(envPrimary);
+  }
+
   const valid = targets.filter((target) => target.baseUrl && target.apiKey);
   // โหมด "fast" = ใช้ fallback (โมเดลเล็ก/เร็ว เช่น Qwen) เป็นตัวหลัก แล้วให้ primary (ใหญ่/ช้า เช่น 120B) เป็นตัวสำรอง
   if (mode === "fast" && valid.length > 1) {
@@ -200,12 +238,18 @@ const buildChatTargets = (modelOverride, mode) => {
   return valid;
 };
 
-const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride, mode }) => {
+const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverride, mode, thinkingMode }) => {
   const providerMessages = sanitizeMessagesForProvider(messages);
   const targets = buildChatTargets(modelOverride, mode);
   if (targets.length === 0) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
+
+  const enableThinking = String(thinkingMode || "fast").toLowerCase() === "think";
+  const fastMaxTokens = Math.max(256, Math.floor(Number(process.env.CHAT_FAST_MAX_TOKENS || 1200)));
+  const maxTokens = enableThinking
+    ? CHAT_MAX_TOKENS
+    : Math.min(CHAT_MAX_TOKENS, fastMaxTokens);
 
   let lastError = null;
   const retries = Math.max(0, openaiDeploymentRetryAttempts);
@@ -213,6 +257,7 @@ const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverr
   for (let targetIndex = 0; targetIndex < targets.length; targetIndex += 1) {
     const target = targets[targetIndex];
     const hasAnotherTarget = targetIndex < targets.length - 1;
+    const isQwenModel = /qwen/i.test(String(target.model || ""));
 
     for (let attempt = 0; attempt <= retries; attempt += 1) {
       try {
@@ -227,8 +272,15 @@ const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverr
             model: target.model,
             messages: providerMessages,
             temperature: CHAT_TEMPERATURE,
-            max_tokens: CHAT_MAX_TOKENS,
+            max_tokens: maxTokens,
             ...(stream ? { stream: true, stream_options: { include_usage: true } } : {}),
+            // Qwen3 hybrid thinking: ส่งทั้งสองรูปแบบ (gateway/vLLM อ่านคนละแบบ)
+            ...(isQwenModel
+              ? {
+                  enable_thinking: enableThinking,
+                  chat_template_kwargs: { enable_thinking: enableThinking },
+                }
+              : {}),
           }),
           signal,
         });
@@ -236,6 +288,9 @@ const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverr
         if (response.ok) {
           if (targetIndex > 0) {
             console.warn(`[chat] using fallback LLM (${target.model} @ ${target.baseUrl}) after primary failed`);
+          }
+          if (isQwenModel) {
+            console.info(`[chat] thinkingMode=${enableThinking ? "think" : "fast"} model=${target.model} max_tokens=${maxTokens}`);
           }
           return response;
         }
@@ -266,7 +321,7 @@ const requestGatewayWithFallback = async ({ messages, stream, signal, modelOverr
   throw lastError || new Error("Chat request failed");
 };
 
-export const callOpenAiGateway = async (messages, modelOverride, mode) => {
+export const callOpenAiGateway = async (messages, modelOverride, mode, thinkingMode = "fast") => {
   if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
@@ -281,6 +336,7 @@ export const callOpenAiGateway = async (messages, modelOverride, mode) => {
       signal: controller.signal,
       modelOverride,
       mode,
+      thinkingMode,
     });
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -300,7 +356,7 @@ export const callOpenAiGateway = async (messages, modelOverride, mode) => {
 };
 
 /** เรียก gateway แบบ streaming — คืนค่า ReadableStream ของ response body (สำหรับ SSE) */
-export const callOpenAiGatewayStream = async (messages, modelOverride, mode) => {
+export const callOpenAiGatewayStream = async (messages, modelOverride, mode, thinkingMode = "fast") => {
   if (!openaiKey && !openaiFallbackKey) {
     throw new Error("Configure OPENAI_API_KEY (or gateway key) in .env.local for chat.");
   }
@@ -315,6 +371,7 @@ export const callOpenAiGatewayStream = async (messages, modelOverride, mode) => 
       signal: controller.signal,
       modelOverride,
       mode,
+      thinkingMode,
     });
   } catch (error) {
     if (error?.name === "AbortError") {

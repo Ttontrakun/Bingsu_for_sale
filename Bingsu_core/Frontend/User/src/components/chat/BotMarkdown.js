@@ -7,7 +7,8 @@ import remarkGfm from 'remark-gfm';
 // เพราะการ re-render ReactMarkdown ระหว่างลากเมาส์จะทำให้ selection หลุด
 // ต้องกดค้างตลอด — memo ช่วยให้ DOM คงเดิม เลือก/คัดลอกได้เหมือนข้อความผู้ใช้
 //
-// ไม่ใช้ rehype-raw (XSS) — เลขอ้างอิง + ไฮไลต์ข้อมูลส่วนตัวเรนเดอร์เป็น React nodes
+// ไม่ใช้ rehype-raw (XSS) — ไฮไลต์ข้อมูลส่วนตัวเรนเดอร์เป็น React nodes
+// เลขอ้างอิง [n] ตัดทิ้ง (แหล่งที่มาอยู่ที่การ์ดใต้คำตอบ)
 
 const BOT_MARKDOWN_COMPONENTS = {
   h1: ({ node, children, ...props }) => <h1 className='text-lg font-semibold mt-3 mb-2 text-gray-900' {...props}>{children}</h1>,
@@ -57,31 +58,60 @@ const BOT_MARKDOWN_COMPONENTS = {
     ),
 };
 
-const CiteBadge = ({ n, isPrivate = false }) => (
-  <sup
-    className={`inline-flex items-center justify-center align-super mx-0.5 min-w-[15px] h-[15px] px-[3px] rounded-full text-[10px] font-semibold leading-none select-none ${
-      isPrivate
-        ? 'bg-violet-500 text-white'
-        : 'bg-amber-400 text-gray-900'
-    }`}
-    title={isPrivate ? `อ้างอิงจากข้อมูลส่วนตัว [${n}]` : `อ้างอิงจากเอกสาร [${n}]`}
-  >
-    {n}
-  </sup>
-);
-
 const PrivateHighlight = ({ children }) => (
   <mark
-    className='bg-violet-100 text-gray-900 font-semibold rounded px-1 py-0.5 box-decoration-clone'
+    className='bg-violet-200 text-violet-950 font-semibold rounded px-1 py-0.5 box-decoration-clone border border-violet-300/80'
     title='จากข้อมูลส่วนตัวของคุณ'
   >
     {children}
   </mark>
 );
 
+/** ตัดเลขอ้างอิง [n] / 【n】 และแปลงเศษ LaTeX ให้เป็นข้อความอ่านง่าย */
+const stripCitationMarkers = (text) =>
+  String(text || '')
+    .replace(/【\d{1,2}】/g, '')
+    .replace(/\[(\d{1,2})\](?!\()/g, '')
+    .replace(/[ \t]{2,}/g, ' ');
+
+const latexInnerToPlain = (inner) => {
+  let t = String(inner || '');
+  t = t.replace(/\\text\s*\{([^{}]*)\}/g, '$1');
+  t = t.replace(/\\mathrm\s*\{([^{}]*)\}/g, '$1');
+  t = t.replace(/\\mathbf\s*\{([^{}]*)\}/g, '$1');
+  t = t.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)');
+  t = t.replace(/\\times/g, '×');
+  t = t.replace(/\\cdot/g, '·');
+  t = t.replace(/\\div/g, '÷');
+  t = t.replace(/\\approx/g, '≈');
+  t = t.replace(/\\%/g, '%');
+  t = t.replace(/\\,/g, ' ');
+  t = t.replace(/\\;/g, ' ');
+  t = t.replace(/\\quad/g, ' ');
+  t = t.replace(/~/g, ' ');
+  t = t.replace(/\\\\/g, '\n');
+  t = t.replace(/\{([^{}]*)\}/g, '$1');
+  t = t.replace(/\\([a-zA-Z]+)/g, '');
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+};
+
+const stripLatexToPlainText = (text) => {
+  let s = String(text || '');
+  if (!s || !/\\[a-zA-Z]|\$\$|\\\[|\\\(/.test(s)) return s;
+  s = s.replace(/\$\$([\s\S]*?)\$\$/g, (_, inner) => latexInnerToPlain(inner));
+  s = s.replace(/\\\[([\s\S]*?)\\\]/g, (_, inner) => latexInnerToPlain(inner));
+  s = s.replace(/\\\(([\s\S]*?)\\\)/g, (_, inner) => latexInnerToPlain(inner));
+  s = s.replace(/\$([^$\n]+)\$/g, (_, inner) => latexInnerToPlain(inner));
+  s = s.replace(/\[\s*((?:[^\]]|\\\])*\\(?:text|times|frac|cdot)[\s\S]*?)\]/g, (_, inner) => latexInnerToPlain(inner));
+  if (/\\[a-zA-Z]/.test(s)) s = latexInnerToPlain(s);
+  return s;
+};
+
+const sanitizeBotDisplayText = (text) => stripLatexToPlainText(stripCitationMarkers(text));
+
 /** แยก ==ข้อความจากข้อมูลส่วนตัว== ภายในชิ้น Markdown */
 const splitPrivateMarkParts = (text) => {
-  const raw = String(text || '');
+  const raw = sanitizeBotDisplayText(text);
   if (!raw.includes('==')) return [{ type: 'md', text: raw }];
   const parts = [];
   const re = /==([\s\S]+?)==/g;
@@ -97,42 +127,6 @@ const splitPrivateMarkParts = (text) => {
   return parts.length ? parts : [{ type: 'md', text: raw }];
 };
 
-/** แยกเลขอ้างอิง [n] / 【n】 และไฮไลต์ประโยคก่อน cite ส่วนตัวถ้ายังไม่มี == */
-const splitCitationParts = (text, citationCount, privateCiteSet) => {
-  const raw = String(text || '');
-  if (!Number.isFinite(citationCount) || citationCount <= 0) {
-    return splitPrivateMarkParts(raw);
-  }
-  const parts = [];
-  const re = /(?:【(\d{1,2})】|\[(\d{1,2})\])(?!\()/g;
-  let last = 0;
-  let m;
-  while ((m = re.exec(raw))) {
-    const n = Number(m[1] || m[2]);
-    if (n >= 1 && n <= citationCount) {
-      let before = raw.slice(last, m.index);
-      const isPrivateCite = privateCiteSet.has(n);
-      // ถ้า cite เป็นส่วนตัวและข้อความก่อนหน้ายังไม่มี == ให้ไฮไลต์บรรทัดท้าย
-      if (isPrivateCite && before && !before.includes('==')) {
-        const trimmedEnd = before.replace(/\s+$/, '');
-        const ws = before.slice(trimmedEnd.length);
-        const nl = trimmedEnd.lastIndexOf('\n');
-        const head = nl >= 0 ? trimmedEnd.slice(0, nl + 1) : '';
-        const tail = nl >= 0 ? trimmedEnd.slice(nl + 1) : trimmedEnd;
-        if (head) parts.push(...splitPrivateMarkParts(head));
-        if (tail.trim()) parts.push({ type: 'private', text: tail.trim() });
-        if (ws) parts.push({ type: 'md', text: ws });
-      } else if (before) {
-        parts.push(...splitPrivateMarkParts(before));
-      }
-      parts.push({ type: 'cite', n, isPrivate: isPrivateCite });
-      last = m.index + m[0].length;
-    }
-  }
-  if (last < raw.length) parts.push(...splitPrivateMarkParts(raw.slice(last)));
-  return parts.length ? parts : splitPrivateMarkParts(raw);
-};
-
 const MdChunk = ({ text }) => (
   <ReactMarkdown remarkPlugins={[remarkGfm]} components={BOT_MARKDOWN_COMPONENTS}>
     {text}
@@ -140,30 +134,14 @@ const MdChunk = ({ text }) => (
 );
 
 const BotMarkdown = memo(function BotMarkdown({ text, citationCount = 0, references = null }) {
-  const privateCiteSet = useMemo(() => {
-    const s = new Set();
-    if (!Array.isArray(references)) return s;
-    references.forEach((ref, i) => {
-      if (String(ref?.docId) === '__private__') s.add(i + 1);
-    });
-    return s;
-  }, [references]);
+  void citationCount;
+  void references;
 
-  const parts = splitCitationParts(text, citationCount, privateCiteSet);
-  const hasPrivateVisual = parts.some((p) => p.type === 'private' || p.isPrivate);
+  const parts = useMemo(() => splitPrivateMarkParts(text), [text]);
 
   return (
     <div className='gemini-markdown max-w-full min-w-0 overflow-x-auto select-text [&_*]:select-text [&_ol_li>p]:inline [&_ol_li>p]:my-0 [&_ul_li>p]:inline [&_ul_li>p]:my-0'>
-      {hasPrivateVisual && (
-        <p className='mb-2 text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded-md px-2 py-1 inline-flex items-center gap-1.5'>
-          <span className='inline-block w-2 h-2 rounded-sm bg-violet-400' aria-hidden />
-          ข้อความไฮไลต์ / เลขม่วง = จากข้อมูลส่วนตัว · เลขส้ม = จากเอกสารระบบ
-        </p>
-      )}
       {parts.map((part, i) => {
-        if (part.type === 'cite') {
-          return <CiteBadge key={`c-${i}-${part.n}`} n={part.n} isPrivate={Boolean(part.isPrivate)} />;
-        }
         if (part.type === 'private' && part.text) {
           return (
             <PrivateHighlight key={`p-${i}`}>

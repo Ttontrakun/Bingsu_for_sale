@@ -114,7 +114,23 @@ export const isDarkFiberOver50ToFloorQuery = (m) =>
 export const isTrial45DaysApprovalQuery = (m) =>
   /(ทดลองใช้|ทดลองบริการ|ทดลองใช้บริการ)/.test(m)
   && /(45\s*วัน|สี่สิบห้า\s*วัน)/.test(m)
-  && /(อำนาจ|ระดับ|อนุมัติ|ใคร)/.test(m);
+  && /(อำนาจ|ระดับ|อนุมัติ|ใคร|ฝ่าย|ผจก)/.test(m);
+
+/** ดึงจำนวนวันจากคำถามทดลองใช้ เช่น 45 วัน */
+export const extractTrialDays = (message) => {
+  const raw = String(message || "");
+  const m1 = raw.match(/(\d+)\s*วัน/);
+  if (m1) return Number(m1[1]);
+  return null;
+};
+
+/** ดึงมูลค่าสัญญาเป็นล้านบาท/ปี */
+export const extractContractMillionPerYear = (message) => {
+  const raw = String(message || "");
+  const mil = raw.match(/([\d]+(?:\.\d+)?)\s*ล้าน/);
+  if (mil) return Number(mil[1]);
+  return null;
+};
 
 /**
  * ตรวจว่าข้อความน่าจะมี "หลายคำถาม/หลายส่วน" หรือไม่ (เช่น ถามคำถามฟิก + พ่วงอีกคำถาม)
@@ -462,4 +478,31 @@ export const hasSufficientGroundingEvidence = (message, groundingChunks) => {
     return matchedNumeric >= 1 && matchedText >= 1;
   }
   return matchedText >= 2;
+};
+
+/**
+ * เลือกโหมดคิดของโมเดลอัตโนมัติ (ผู้ใช้ไม่ต้องสลับเอง)
+ * - fast  = ปิด thinking / ตอบเร็ว (ค่าเริ่มต้น)
+ * - think = เปิด reasoning สำหรับคำถามซับซ้อน
+ */
+export const resolveChatThinkingMode = (message, { forceFast = false, forceThink = false } = {}) => {
+  if (forceThink) return "think";
+  if (forceFast) return "fast";
+  const m = normalizeText(message);
+  if (!m) return "fast";
+
+  // คำสั่งชัดในข้อความ
+  if (/(^|\s)\/think\b|คิดละเอียด|วิเคราะห์เชิงลึก|ขอเหตุผลละเอียด/.test(m)) return "think";
+  if (/(^|\s)\/no_?think\b|ตอบเร็ว|ไม่ต้องคิด|ตอบสั้น/.test(m)) return "fast";
+
+  // คำถามซับซ้อน → think
+  if (hasMultipleQuestions(message)) return "think";
+  if (isComparativeAuthorityQuery(message)) return "think";
+  if (/(เปรียบเทียบ|ต่างกันอย่างไร|วิเคราะห์|หลายกรณี|ข้อดีข้อเสีย|ทำไมถึง|เพราะอะไร|เหตุผลที่)/.test(m)) {
+    return "think";
+  }
+  if (/(ถ้า|กรณี).{0,48}(และ|หรือ|,).{0,48}(ถ้า|กรณี)/.test(m)) return "think";
+
+  // ค่าเริ่มต้น: ไม่คิด (ราคา / ใครอนุมัติ / ทักทาย / ถามตรง)
+  return "fast";
 };

@@ -20,7 +20,7 @@ const formatChatTime = (value) => {
 const FILTERS = [
   { id: 'all', label: 'ทั้งหมด' },
   { id: 'normal', label: 'ปกติ' },
-  { id: 'private', label: 'ส่วนตัว' },
+  { id: 'private', label: 'Personal' },
 ];
 
 function ChatSearchModal({ isOpen, onClose, chats = [], onSelectChat, onNewChat }) {

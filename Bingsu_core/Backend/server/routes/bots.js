@@ -9,6 +9,13 @@ import { invalidateUserCaches } from "../lib/cache.js";
 import { parseSafeAvatarDataUrl, sanitizeAvatarUrlString } from "../lib/avatarSafe.js";
 import { deleteBotWithCleanup } from "../services/uploadQueue.js";
 import { isFeatureEnabled } from "../lib/systemConfig.js";
+import {
+  getChatModelOptions,
+  getChatModelLabel,
+  getChatModelLogDetail,
+  getChatModelGatewayKey,
+  isAllowedChatModel,
+} from "../config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..", "..");
@@ -19,13 +26,21 @@ const DEFAULT_BOT_NAME = "Enterprise AI Chatbot Assistant";
 const normalizeName = (value) => String(value || "").trim();
 
 /** รายการที่เปลี่ยนในฟอร์มแก้ไขบอท — ใช้ใน log ให้แอดมินอ่านง่าย */
-function botPatchChangeLabels(body, documentIdsTouched) {
+function botPatchChangeLabels(body, documentIdsTouched, { modelBefore, modelAfter } = {}) {
   const { name, prompt, description, model, avatarUrl, enabled } = body ?? {};
   const labels = [];
   if (name !== undefined) labels.push("ชื่อบอท");
   if (prompt !== undefined) labels.push("Prompt / คำสั่งระบบ");
   if (description !== undefined) labels.push("คำอธิบาย");
-  if (model !== undefined) labels.push("โมเดล");
+  if (model !== undefined) {
+    const from = getChatModelLogDetail(modelBefore);
+    const to = getChatModelLogDetail(modelAfter);
+    labels.push(
+      from === to
+        ? `โมเดลแชท: ${to}`
+        : `เปลี่ยนโมเดลแชท จาก「${from}」เป็น「${to}」`,
+    );
+  }
   if (avatarUrl !== undefined) labels.push("รูปโปรไฟล์");
   if (enabled !== undefined) labels.push("เปิด/ปิดการใช้งาน");
   if (documentIdsTouched) labels.push("ชุดความรู้ (Knowledge)");
@@ -47,6 +62,10 @@ const formatBot = (bot, { includePrompt = false, viewerId = null } = {}) => ({
   createdAt: bot.createdAt,
   updatedAt: bot.updatedAt,
   documents: (bot.documents || []).map((link) => link.document),
+});
+
+botsRouter.get("/model-options", authenticate, async (_req, res) => {
+  res.json({ items: getChatModelOptions() });
 });
 
 botsRouter.get("/", authenticate, async (req, res) => {
@@ -92,6 +111,12 @@ botsRouter.post("/", authenticate, async (req, res) => {
 
   if (!name || !prompt) {
     res.status(400).json({ error: "name and prompt are required" });
+    return;
+  }
+  const normalizedModel =
+    model == null || String(model).trim() === "" ? null : String(model).trim();
+  if (normalizedModel && !isAllowedChatModel(normalizedModel)) {
+    res.status(400).json({ error: "โมเดลที่เลือกไม่รองรับ" });
     return;
   }
   const normalizedName = normalizeName(name);
@@ -149,7 +174,7 @@ botsRouter.post("/", authenticate, async (req, res) => {
       name: normalizedName,
       prompt,
       description: description ?? null,
-      model: model ?? null,
+      model: normalizedModel,
       avatarUrl: avatarUrl ?? null,
       ownerId: req.user.id,
       enabled: true,
@@ -179,6 +204,10 @@ botsRouter.post("/", authenticate, async (req, res) => {
       actorEmail: req.user?.email || null,
       actorName: req.user?.name || null,
       createdAt: bot.createdAt?.toISOString?.() || new Date().toISOString(),
+      model: bot.model || null,
+      modelLabel: getChatModelLabel(bot.model),
+      modelDetail: getChatModelLogDetail(bot.model),
+      modelGateway: getChatModelGatewayKey(bot.model),
     },
   });
 
@@ -337,7 +366,15 @@ botsRouter.patch("/:id", authenticate, async (req, res) => {
     }
     if (prompt !== undefined) updateData.prompt = prompt;
     if (description !== undefined) updateData.description = description;
-    if (model !== undefined) updateData.model = model;
+    if (model !== undefined) {
+      const normalizedModel =
+        model == null || String(model).trim() === "" ? null : String(model).trim();
+      if (normalizedModel && !isAllowedChatModel(normalizedModel)) {
+        res.status(400).json({ error: "โมเดลที่เลือกไม่รองรับ" });
+        return;
+      }
+      updateData.model = normalizedModel;
+    }
     let avatarUrl = avatarUrlInput;
     if (typeof avatarBase64 === "string" && avatarBase64.startsWith("data:image/")) {
       const parsed = parseSafeAvatarDataUrl(avatarBase64);
@@ -369,6 +406,7 @@ botsRouter.patch("/:id", authenticate, async (req, res) => {
     const before = {
       name: bot.name,
       avatarUrl: bot.avatarUrl ?? null,
+      model: bot.model ?? null,
     };
 
     const updated = await prisma.$transaction(async (tx) => {
@@ -403,11 +441,26 @@ botsRouter.patch("/:id", authenticate, async (req, res) => {
       targetId: withDocs.id,
       meta: {
         botName: withDocs.name,
-        changeLabels: botPatchChangeLabels(req.body ?? {}, rawIds !== null),
+        changeLabels: botPatchChangeLabels(req.body ?? {}, rawIds !== null, {
+          modelBefore: before.model,
+          modelAfter: withDocs.model,
+        }),
         knowledgeCount: withDocs.documents.length,
         avatar: avatarUrl !== undefined
           ? { from: before.avatarUrl, to: withDocs.avatarUrl ?? null }
           : undefined,
+        ...(model !== undefined
+          ? {
+              modelBefore: before.model,
+              modelAfter: withDocs.model || null,
+              modelBeforeLabel: getChatModelLabel(before.model),
+              modelAfterLabel: getChatModelLabel(withDocs.model),
+              modelBeforeDetail: getChatModelLogDetail(before.model),
+              modelAfterDetail: getChatModelLogDetail(withDocs.model),
+              modelBeforeGateway: getChatModelGatewayKey(before.model),
+              modelAfterGateway: getChatModelGatewayKey(withDocs.model),
+            }
+          : {}),
       },
     });
 

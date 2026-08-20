@@ -47,6 +47,7 @@
 | Synonyms | เชื่อมภาษาพูด ↔ คำทางการ (แอดมินแก้ได้) |
 | หลายคำถามในข้อความเดียว | แยกค้น ตอบครบ |
 | อ้างอิงแหล่งที่มา | การ์ดอ้างอิง + กรองแหล่งที่ไม่ตรง |
+| Thinking router | ระบบเลือก `fast`/`think` อัตโนมัติ (Qwen) — ผู้ใช้ไม่ต้องสลับ |
 | โหมดส่วนตัว | `/สั่ง` วิธีตอบ · `/จำ` ข้อมูล |
 | ปิด PII | เซ็นเซอร์บัตร ปชช. / เบอร์ / อีเมล (ไม่โดนเลขราคา) |
 
@@ -59,7 +60,9 @@
 ```text
 ผู้ใช้ถาม
    │
-   ├─ (1) Deterministic ──► ราคา / อำนาจอนุมัติ / Super PM  → สูตร + DB
+   ├─ (0) Thinking router ──► fast (ปิดคิด) / think (เปิด reasoning) ตามประเภทคำถาม
+   │
+   ├─ (1) Deterministic ──► ราคา / อำนาจอนุมัติ / กฎกับดัก → ส่งเป็นข้อเท็จจริงให้ LLM เรียบเรียง
    │
    └─ (2) RAG pipeline
           ├─ Query expansion   (synonyms · multi-hop · แยกหลายคำถาม)
@@ -87,7 +90,8 @@
 | Backend | Node.js 20 · Express |
 | ORM / DB | Prisma · PostgreSQL |
 | Queue / Vector | Redis · Qdrant |
-| Embedding / Rerank | `text-embedding-3-small` · `bge-reranker-v2-m3` |
+| Embedding / Rerank | `Qwen3-Embedding-4B` · `bge-reranker-v2-m3` (ตั้งใน `.env`) |
+| Chat LLM | เช่น `Qwen3.8-27B` + fallback (NT Gateway) — มีโหมด fast/think อัตโนมัติ |
 | OCR | Typhoon (ภายนอก) หรือ self-host ผ่าน `OCR_API_URL` |
 | Frontend | React · Tailwind |
 
@@ -180,8 +184,12 @@ npm install && npm start
 
 | ตัวแปร | ความหมาย |
 |:---|:---|
-| `OPENAI_API_KEY` / `GEMINI_API_KEY` | คีย์โมเดลแชท |
+| `OPENAI_API_KEY` · `OPENAI_MODEL` · `GATEWAY_BASE_URL` | คีย์/โมเดลแชทหลัก (เช่น Qwen) |
+| `CHAT_FAST_MAX_TOKENS` | จำกัดความยาวตอนโหมด fast (ค่าเริ่ม 1200) |
+| `DETERMINISTIC_RULES_ENABLED` | เปิดกฎราคา/อำนาจ/กับดัก (`true` แนะนำ) |
 | `EMBEDDING_API_KEY` · `EMBEDDING_BASE_URL` · `EMBEDDING_MODEL` | embedding |
+| `RAG_EXTERNAL_RERANK_*` | rerank ภายนอก (bge-reranker) |
+| `CHAT_NT_*` · `CHAT_H100_*` | named gateways เลือกโมเดลต่อบอท |
 | `DATABASE_URL` | Postgres (Docker compose จะชี้ host `postgres`) |
 | `REDIS_URL` · `REDIS_PASSWORD` | Redis — ค่าต้องตรงกัน |
 | `QDRANT_URL` · `QDRANT_API_KEY` · `QDRANT__SERVICE__API_KEY` | Qdrant — key สองตัวควรตรงกัน |

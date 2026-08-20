@@ -53,8 +53,17 @@ const detectServiceKey = (m) => {
   return null;
 };
 
-const isPmDirectoryQuery = (m) =>
-  /(super\s*pm|super\s*product\s*manager|product\s*manager|\bpm\b|ผจก\.|ชจญ\.|ใครเป็น\s*(pm|super)|pm\s*(ของ|คือ)|super\s*pm\s*(ของ|คือ)|รายชื่อ\s*(pm|super))/i.test(m);
+const isPmDirectoryQuery = (m) => {
+  // กันคำถามเพดานส่วนลด/อำนาจของตำแหน่ง (เช่น "ผจก.ฝ่าย ให้ส่วนลดได้ไม่เกินกี่ %")
+  // ไม่ใช่คำถามหารายชื่อ PM
+  const asksDiscountCeiling =
+    /(ส่วนลด)/.test(m)
+    && /(ไม่เกิน|ได้ไม่เกิน|สูงสุด|กี่\s*%|กี่%|เปอร์เซ็นต์|%)/.test(m);
+  if (asksDiscountCeiling) return false;
+  if (/(ใครอนุมัติ|ผู้อนุมัติ|อำนาจอนุมัติ|ใช้อำนาจระดับ)/.test(m)) return false;
+
+  return /(super\s*pm|super\s*product\s*manager|product\s*manager|\bpm\b|ใครเป็น\s*(pm|super)|pm\s*(ของ|คือ)|super\s*pm\s*(ของ|คือ)|รายชื่อ\s*(pm|super)|ใคร(?:เป็น|ดูแล|รับผิดชอบ).{0,20}(pm|product\s*manager)|(?:ผจก\.|ชจญ\.).{0,12}(?:ของบริการ|ของ\s*nt|ดูแล|รับผิดชอบ|คือใคร|ชื่อ))/i.test(m);
+};
 
 const wantsSuperPm = (m) =>
   /(super\s*pm|super\s*product\s*manager|ชจญ\.|ผู้ช่วยกรรมการ)/i.test(m)

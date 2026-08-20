@@ -107,75 +107,68 @@ export function buildReferences(groundingChunks, contextDocuments, primaryDocume
 
 export const PRIVATE_REFERENCE = { docId: "__private__", displayName: "เนื้อหาส่วนตัวของคุณ", positions: [] };
 
-/** จำนวนเลขอ้างอิงสูงสุดต่อคำตอบ — กันแถบชิปยาวเกินและ prompt บวม */
+/** จำนวนแหล่งอ้างอิงสูงสุดต่อคำตอบ — กันแถบชิปยาวเกิน */
 export const MAX_CITATION_SOURCES = 8;
 
 /**
- * แตก references (จัดกลุ่มต่อเอกสาร, มีได้หลายตำแหน่ง) เป็นรายการเรียงเลข 1 ชิป = 1 ตำแหน่ง
- * เพื่อให้เลข [n] ในเนื้อความชี้ตำแหน่ง (เอกสาร+หน้า) ได้ตรงตัว
+ * รายการอ้างอิงสำหรับแสดงใต้คำตอบ — 1 ชิปต่อเอกสาร (ไม่แตกตามตำแหน่ง/เลข [n])
  */
 export function flattenReferencesForCitations(refs) {
   const out = [];
   for (const ref of refs || []) {
     if (out.length >= MAX_CITATION_SOURCES) break;
-    if (String(ref?.docId) === "__private__") {
-      out.push({ docId: ref.docId, displayName: ref.displayName, positions: [] });
-      continue;
-    }
-    const positions = Array.isArray(ref?.positions) && ref.positions.length > 0 ? ref.positions : [null];
-    for (const pos of positions) {
-      if (out.length >= MAX_CITATION_SOURCES) break;
-      out.push({ docId: ref.docId, displayName: ref.displayName, positions: pos ? [pos] : [] });
-    }
+    if (!ref?.docId) continue;
+    out.push({
+      docId: ref.docId,
+      displayName: ref.displayName || "เอกสาร",
+      positions: Array.isArray(ref.positions) ? ref.positions.slice(0, 3) : [],
+    });
   }
   return out;
 }
 
-/** system message บอกรายการแหล่งอ้างอิงพร้อมเลข ให้โมเดลแปะ [n] ท้ายประโยคที่ใช้ข้อมูลนั้น */
+/**
+ * system message บอกแหล่งที่ใช้ตอบ — ไม่ให้โมเดลแปะเลข [n] ในเนื้อความ
+ * (UI แสดงการ์ดแหล่งอ้างอิงด้านล่างแยกต่างหาก)
+ */
 export function buildCitationSystemMessage(flatRefs) {
   if (!Array.isArray(flatRefs) || flatRefs.length === 0) return null;
-  const lines = flatRefs.map((ref, i) => {
+  const lines = flatRefs.map((ref) => {
     const pos = Array.isArray(ref.positions) ? ref.positions[0] : null;
     const where = pos?.lineHint || (Number.isFinite(pos?.page) ? `หน้า ${pos.page}` : "");
-    const quote = pos?.quote ? ` — "${String(pos.quote).slice(0, 140)}"` : "";
     const privateTag = String(ref.docId) === "__private__" ? " [PRIVATE]" : "";
-    return `[${i + 1}] ${ref.displayName}${where ? ` (${where})` : ""}${quote}${privateTag}`;
+    return `- ${ref.displayName}${where ? ` (${where})` : ""}${privateTag}`;
   });
-  const privateIndexes = flatRefs
-    .map((ref, i) => (String(ref.docId) === "__private__" ? i + 1 : null))
-    .filter(Boolean);
-  const privateRule = privateIndexes.length > 0
+  const hasPrivate = flatRefs.some((ref) => String(ref.docId) === "__private__");
+  const privateRule = hasPrivate
     ? (
-      `\nกติกาข้อมูลส่วนตัว (สำคัญ): แหล่งเลข [${privateIndexes.join("],[")}] เป็นเนื้อหาส่วนตัวของผู้ใช้ — ` +
-      "ทุกประโยค/ข้อสรุปที่ใช้ข้อมูลส่วนตัว ต้อง (1) ห่อด้วย ==...== เช่น ==ผู้อนุมัติคือ กจญ.== " +
-      `และ (2) ใส่เลขอ้างอิงส่วนตัวท้ายประโยค เช่น ==ผู้อนุมัติคือ กจญ.==[${privateIndexes[0]}] ` +
-      "ห้ามห่อข้อความที่มาจากเอกสารระบบด้วย ==...== — ใช้ == เฉพาะข้อมูลส่วนตัวเท่านั้น"
+      "\nกติกาข้อมูลส่วนตัว (สำคัญ): ช่วงข้อความใดที่สรุปหรืออ้างจากข้อมูลส่วนตัวของผู้ใช้ " +
+      "ต้องห่อด้วย ==...== เช่น ==ผู้อนุมัติตามที่คุณกำหนด== " +
+      "ไม่ต้องคัดลอกข้อความใน /จำ ตรงตัว — ถ้อยคำต่างกันได้ถ้าความหมายมาจากข้อมูลส่วนตัว " +
+      "ห้ามห่อข้อความจากเอกสารระบบด้วย ==...=="
     )
     : "";
   return {
     role: "system",
     content:
-      `รายการแหล่งอ้างอิง (สำหรับใส่เลขกำกับในคำตอบ):\n${lines.join("\n")}\n\n` +
-      "กติกาการอ้างอิง (ต้องทำเสมอ): ทุกประโยค หัวข้อย่อย หรือบรรทัดสรุปที่ใช้ข้อมูลจาก Context/แหล่งข้างต้น " +
-      "ต้องใส่เลขอ้างอิงต่อท้ายในรูปแบบ [n] เช่น [1] หรือ [1][3] " +
-      "ใช้ได้เฉพาะเลขที่มีในรายการเท่านั้น ห้ามสร้างเลขใหม่ ห้ามใส่เลขในหัวข้อใหญ่ (heading) " +
-      "ถ้าไม่แน่ใจว่าข้อมูลมาจากแหล่งใด ไม่ต้องใส่เลข และห้ามพิมพ์รายการแหล่งอ้างอิงซ้ำท้ายคำตอบ" +
+      `แหล่งข้อมูลที่ใช้ตอบรอบนี้ (ระบบจะแสดงการ์ดอ้างอิงด้านล่างคำตอบให้ผู้ใช้เอง):\n${lines.join("\n")}\n\n` +
+      "กติกา: ห้ามใส่เลขอ้างอิง [1]/[2]/【1】 หรือรายการ Sources/ที่มา จากเอกสารในเนื้อคำตอบ " +
+      "ห้ามพิมพ์ชื่อไฟล์หรือฟุตโน้ตท้ายคำตอบ — ตอบเนื้อหาอย่างเดียว" +
       privateRule,
   };
 }
 
 /**
- * ปรับเลขอ้างอิงจากโมเดลให้เป็นรูปแบบเดียว: 【n】/[n] → [n]
- * แล้วตัดเลขที่เกินรายการจริง (เช่น [9] ทั้งที่มี 5 แหล่ง) ออกจากคำตอบ
+ * ตัดเลขอ้างอิงแบบ inline ออกจากคำตอบทั้งหมด ([n] / 【n】)
+ * ไม่แตะ markdown link อย่าง [ข้อความ](url)
  */
-export function stripInvalidCitationMarkers(text, maxIndex) {
-  if (!Number.isFinite(maxIndex) || maxIndex <= 0) return String(text || "");
+export function stripInvalidCitationMarkers(text, _maxIndex) {
   return String(text || "")
-    .replace(/【(\d{1,2})】/g, "[$1]")
-    .replace(/\[(\d{1,2})\]/g, (match, num) => {
-      const n = Number(num);
-      return n >= 1 && n <= maxIndex ? match : "";
-    });
+    .replace(/【\d{1,2}】/g, "")
+    .replace(/\[(\d{1,2})\](?!\()/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ ?\n{3,}/g, "\n\n")
+    .trim();
 }
 
 /**

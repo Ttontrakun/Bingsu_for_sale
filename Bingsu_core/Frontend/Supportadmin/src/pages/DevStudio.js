@@ -629,7 +629,7 @@ function PreviewSidebar({ branding, menus, pageId, searchOpen, onMenuClick }) {
         <div className="flex flex-col gap-3 shrink-0">
           <NavBtn id="home" icon={HiPlus} label="New Chat" active={pageId === 'homepage' && !searchOpen} />
           <NavBtn id="history" icon={HiSearch} label="Chats" active={searchOpen} />
-          <NavBtn id="private" icon={HiLockClosed} label="Private" active={privateOn && !searchOpen} />
+          <NavBtn id="private" icon={HiLockClosed} label="Personal" active={privateOn && !searchOpen} />
           <NavBtn id="createBot" icon={HiDesktopComputer} label="Bots" active={pageId === 'bots'} />
           <NavBtn id="uploadDocs" icon={HiBookOpen} label="Knowledge" active={pageId === 'knowledge'} />
         </div>
@@ -1174,7 +1174,7 @@ function HomeMainPreview({ copy, styles, branding, privateMode, selectedKey, onS
       {privateMode ? (
         <EditableText
           editKey="user.private.title"
-          value={copy?.['user.private.title'] || 'โหมดส่วนตัว — ถามจากเนื้อหาของคุณเอง'}
+          value={copy?.['user.private.title'] || 'Personal — ถามจากเนื้อหาของคุณเอง'}
           textStyle={styles?.['user.private.title']}
           selectedKey={selectedKey}
           onSelect={onSelect}
@@ -1209,7 +1209,7 @@ function HomeMainPreview({ copy, styles, branding, privateMode, selectedKey, onS
           <div className="px-4 py-3 rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-white text-left">
             <EditableText
               editKey="user.private.bannerTitle"
-              value={copy?.['user.private.bannerTitle'] || 'โหมดส่วนตัว'}
+              value={copy?.['user.private.bannerTitle'] || 'Personal'}
               textStyle={styles?.['user.private.bannerTitle']}
               selectedKey={selectedKey}
               onSelect={onSelect}
@@ -1868,7 +1868,7 @@ function DevStudio() {
                 ];
                 const appSubs = [
                   { id: 'homepage', label: 'Homepage' },
-                  { id: 'private', label: 'Private' },
+                  { id: 'private', label: 'Personal' },
                   { id: 'bots', label: 'Bots' },
                   { id: 'knowledge', label: 'Knowledge' },
                 ];

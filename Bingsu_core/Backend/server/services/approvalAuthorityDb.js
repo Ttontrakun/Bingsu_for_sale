@@ -9,6 +9,8 @@ import {
   AUTHORITY_ROLE_MAP,
   isAuthorityDecisionQuery,
   isAuthorityRoleConfirmQuery,
+  extractTrialDays,
+  extractContractMillionPerYear,
 } from "./chat/queryClassifiers.js";
 
 let ruleCache = { data: null, expiresAt: 0 };
@@ -35,6 +37,7 @@ const loadRules = async () => {
 
 const detectServiceKey = (m) => {
   // ลำดับสำคัญ: ชื่อเฉพาะก่อนชื่อกว้าง
+  if (/(ทดลองใช้|ทดลองบริการ|ทดลองผลิตภัณฑ์)/.test(m)) return "trial";
   if (/(corporate\s*internet\s*lite|corp\s*lite)/.test(m)) return "corp_lite";
   if (/(nt\s*dark\s*fiber|dark\s*fiber|เส้นใยแก้วนำแสง)/.test(m)) return "dark_fiber";
   if (/\biig\b|อินเตอร์เน็ตเกตเวย์|อินเทอร์เน็ตเกตเวย์/.test(m)) return "iig";
@@ -59,7 +62,6 @@ const detectServiceKey = (m) => {
     return "ipl_full";
   }
   if (/(isdn|pri)/.test(m)) return "isdn_pri_sip";
-  if (/(ทดลองใช้|trial)/.test(m)) return "trial";
   if (/(nt\s*corporate|corporate\s*internet)/.test(m)) return "corporate";
   if (/(กลุ่มดิจิทัล|digital\s*group)/.test(m)) return "digital_group";
   return null;
@@ -160,16 +162,78 @@ export async function getApprovalAuthorityReply(message) {
   if (!raw) return null;
   const m = normalizeText(raw);
 
-  const isAuthQ = isAuthorityDecisionQuery(m) || isAuthorityRoleConfirmQuery(m);
+  const trialDays = extractTrialDays(raw);
+  const contractMil = extractContractMillionPerYear(raw);
+  const isContractChangeQ =
+    /(เปลี่ยนแปลง.*(เงื่อนไข|ข้อตกลง)|มูลค่าสัญญา|เงื่อนไขบริการ)/.test(m) && contractMil != null;
+  const isTrialAuthQ = /(ทดลองใช้|ทดลองบริการ)/.test(m) && trialDays != null
+    && /(อำนาจ|ระดับ|อนุมัติ|ใคร|ฝ่าย|ผจก|ชจญ|รจญ)/.test(m);
+
+  const isAuthQ = isAuthorityDecisionQuery(m) || isAuthorityRoleConfirmQuery(m) || isContractChangeQ || isTrialAuthQ;
   if (!isAuthQ) return null;
 
   const serviceKey = detectServiceKey(m);
-  // ต้องระบุบริการชัด — กันตอบผิดบริการ
+  // ต้องระบุบริการชัด — กันตอบผิดบริการ (ยกเว้น trial ที่ระบุจากคำว่าทดลองใช้)
   if (!serviceKey) return null;
 
   const rulesAll = await loadRules();
   const rules = (rulesAll || []).filter((r) => r.serviceKey === serviceKey && r.active !== false);
   if (rules.length === 0) return null;
+
+  // --- ทดลองใช้ N วัน ---
+  if (serviceKey === "trial" && trialDays != null) {
+    const trialRules = rules.filter((r) => r.conditionKey === "trial_days");
+    // เลือก band ที่ครอบคลุมวัน: ≤30 → ผส., ≤60 → ผจก., >90 → ชจญ., else รจญ. ตาม seed
+    let picked = null;
+    if (trialDays <= 30) {
+      picked = trialRules.find((r) => /ไม่เกิน\s*30/.test(String(r.conditionLabel || ""))) || trialRules[0];
+    } else if (trialDays <= 60) {
+      picked = trialRules.find((r) => /ไม่เกิน\s*60/.test(String(r.conditionLabel || ""))) || trialRules[1] || trialRules[0];
+    } else if (trialDays <= 90) {
+      // seed มี เกิน 90 เป็น ชจญ. — ช่วง 61-90 ไม่มีแถวชัด ใช้ ชจญ. ตามข้อถัดไปที่ใกล้สุด
+      picked = trialRules.find((r) => /เกิน\s*90|ไม่เกิน\s*90/.test(String(r.conditionLabel || ""))) || trialRules[2];
+    } else {
+      picked = trialRules.find((r) => /เกิน\s*90/.test(String(r.conditionLabel || ""))) || trialRules[2];
+    }
+    if (picked) {
+      return [
+        `ผู้อนุมัติ: ${formatAuthorityRole(picked.approverAbbr)}`,
+        `เงื่อนไข: ทดลองใช้ ${trialDays} วัน — ${picked.conditionLabel || picked.conditionKey}`,
+        picked.note ? `หมายเหตุ: ${picked.note}` : null,
+      ].filter(Boolean).join("\n");
+    }
+  }
+
+  // --- เปลี่ยนแปลงเงื่อนไขตามมูลค่าสัญญา (ล้านบาท/ปี) ---
+  if (contractMil != null && (isContractChangeQ || /(มูลค่าสัญญา|เปลี่ยนแปลง)/.test(m))) {
+    const contractRules = rules.filter((r) => r.conditionKey === "contract_value");
+    if (contractRules.length > 0) {
+      let picked = null;
+      if (contractMil < 5 || (contractMil <= 5 && contractRules.some((r) => /ไม่เกิน\s*5/.test(String(r.conditionLabel || ""))))) {
+        // 8 ล้านไม่เข้า ≤5
+      }
+      if (contractMil <= 5) {
+        picked = contractRules.find((r) => /ไม่เกิน\s*5/.test(String(r.conditionLabel || "")));
+      } else if (contractMil < 10) {
+        // 5 < x < 10 → แถว "ไม่เกิน 10 ล้าน"
+        picked = contractRules.find((r) => /ไม่เกิน\s*10/.test(String(r.conditionLabel || "")));
+      } else if (contractMil === 10) {
+        // ตามเอกสาร "ไม่เกิน 10" มักรวม 10; "ตั้งแต่ 10 ขึ้นไป" ก็มี — ใช้ไม่เกิน 10 ก่อนถ้ามี
+        picked = contractRules.find((r) => /ไม่เกิน\s*10/.test(String(r.conditionLabel || "")))
+          || contractRules.find((r) => /ตั้งแต่\s*10|10\s*ล้าน.*ขึ้นไป/.test(String(r.conditionLabel || "")));
+      } else {
+        picked = contractRules.find((r) => /ตั้งแต่\s*10|10\s*ล้าน.*ขึ้นไป|ตั้งแต่\s*10/.test(String(r.conditionLabel || "")));
+      }
+      if (picked) {
+        return [
+          `ผู้อนุมัติ: ${formatAuthorityRole(picked.approverAbbr)}`,
+          `เงื่อนไข: มูลค่าสัญญา ${contractMil} ล้านบาท/ปี — ${picked.conditionLabel || picked.conditionKey}`,
+          picked.note ? `หมายเหตุ: ${picked.note}` : null,
+          picked.serviceName ? `บริการ: ${picked.serviceName}` : null,
+        ].filter(Boolean).join("\n");
+      }
+    }
+  }
 
   const pct = extractPct(raw);
   const overFloor = mentionsOverFloor(m);
@@ -206,7 +270,7 @@ export async function getApprovalAuthorityReply(message) {
     return formatRoleConfirmReply(rule, asked.abbr);
   }
 
-  // ใครอนุมัติ — ถ้าไม่มี % ให้ลิสต์ช่วง
+  // ใครอนุมัติ — ถ้าไม่มี % ให้ลิสต์ช่วง (แต่ไม่ใช้เมื่อเป็น contract/trial ที่จัดการแล้ว)
   if (pct == null && !overFloor && !toFloorBand && /(ใครอนุมัติ|ใครมีอำนาจ|ผู้อนุมัติ)/.test(m)) {
     const bands = rules.map((r) => {
       const ap = formatAuthorityRole(r.approverAbbr);

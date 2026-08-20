@@ -1,6 +1,6 @@
-import { HiOutlineCollection } from 'react-icons/hi';
+import { HiOutlineCollection, HiLockClosed, HiDocumentText } from 'react-icons/hi';
 
-// แหล่งอ้างอิง — ชิปเลขกำกับใต้คำตอบ เลขตรงกับ [n] ในเนื้อความ
+// แหล่งอ้างอิงใต้คำตอบ — แสดงชื่อเอกสาร (ไม่มีเลขกำกับในเนื้อความ)
 const ReferenceChips = ({ references, onOpenReference }) => {
   if (!Array.isArray(references) || references.length === 0) return null;
   return (
@@ -24,18 +24,18 @@ const ReferenceChips = ({ references, onOpenReference }) => {
                 e.stopPropagation();
                 onOpenReference(ref);
               }}
-              className={`inline-flex items-center gap-1.5 max-w-[260px] rounded-full border pl-1 pr-2.5 py-[3px] text-xs shadow-sm transition-colors ${
+              className={`inline-flex items-center gap-1.5 max-w-[280px] rounded-full border pl-2 pr-2.5 py-[4px] text-xs shadow-sm transition-colors ${
                 isPrivateRef
                   ? 'border-violet-300 bg-violet-50 text-violet-900 hover:border-violet-400 hover:bg-violet-100 font-semibold'
                   : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300 hover:bg-amber-50/70'
               }`}
               title={`เปิดแหล่งที่มา: ${ref.displayName}${pageLabel ? ` (${pageLabel})` : ''}`}
             >
-              <span className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold flex-shrink-0 ${
-                isPrivateRef ? 'bg-violet-500 text-white' : 'bg-amber-400 text-gray-900'
-              }`}>
-                {i + 1}
-              </span>
+              {isPrivateRef ? (
+                <HiLockClosed className='text-sm text-violet-600 flex-shrink-0' aria-hidden />
+              ) : (
+                <HiDocumentText className='text-sm text-amber-600 flex-shrink-0' aria-hidden />
+              )}
               <span className='truncate min-w-0'>{ref.displayName}</span>
               {pageLabel && (
                 <span className={`text-[11px] flex-shrink-0 ${isPrivateRef ? 'text-violet-700' : 'text-gray-500'}`}>{pageLabel}</span>

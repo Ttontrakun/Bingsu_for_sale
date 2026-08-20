@@ -41,6 +41,7 @@ import {
   hasSufficientGroundingEvidence,
   isRememberOverrideRequest,
   extractRememberPayload,
+  resolveChatThinkingMode,
 } from "../services/chat/queryClassifiers.js";
 import {
   buildReferences,
@@ -59,6 +60,7 @@ import {
   getAuthorityOverrideFromReply,
   toCompactAuthorityReply,
   stripDocumentLeadIn,
+  stripLatexToPlainText,
   getNoDataReply,
   shouldForceNoDataReply,
   getUnintelligibleReply,
@@ -67,6 +69,7 @@ import {
   buildApproverRolesReply,
   buildRememberOverrideReply,
   buildPrivateRememberConfirmReply,
+  buildAuthoritativeFactPrompt,
 } from "../services/chat/authorityReplies.js";
 import {
   GROUNDING_FACT_RULES,
@@ -180,7 +183,9 @@ const buildPrivateSystemMessages = ({ instructions, knowledge, memory }) => {
         "ข้อมูล/ความรู้ส่วนตัวจากผู้ใช้ (Private Knowledge):",
         "- โหมดส่วนตัวแยกจากโหมดปกติ: ข้อมูลนี้ใช้เฉพาะผู้ใช้นี้ในโหมดส่วนตัว",
         "- ถ้า Private Knowledge ขัดกับเอกสารระบบ/ตารางอำนาจอนุมัติ ให้ยึด Private Knowledge เป็นคำตอบหลัก",
+        "- คำถามผู้อนุมัติ: ตอบตาม Private Knowledge ก่อน ห้ามย้อนกลับไปใช้ตารางเอกสารถ้าข้อมูลส่วนตัวกำหนดไว้แล้ว",
         "- ขึ้นต้นสั้นๆ ว่าอ้างอิงจากข้อมูลส่วนตัวของผู้ใช้ (ไม่ต้องปฏิเสธเพราะเอกสารระบบต่างออกไป)",
+        "- เมื่อตอบจากข้อมูลนี้ ให้ห่อช่วงสรุปด้วย ==...== (ถ้อยคำไม่ต้องตรงกับที่บันทึก ขอแค่ความหมายเดียวกัน)",
         knowledge,
       ].join("\n"),
     });
@@ -992,13 +997,35 @@ conversationsRouter.post("/:id/followup-suggestions", authenticate, async (req, 
   }
   const question = String(req.body?.question || "").trim().slice(0, 2000);
   const answer = String(req.body?.answer || "").trim().slice(0, 6000);
+  const messageId = String(req.body?.messageId || "").trim();
+  const persistSuggestions = async (items) => {
+    const list = Array.isArray(items) ? items.map((s) => String(s || "").trim()).filter(Boolean).slice(0, 5) : [];
+    if (!messageId || list.length === 0) return list;
+    try {
+      const target = await prisma.message.findFirst({
+        where: { id: messageId, conversationId: conversation.id, role: "model" },
+        select: { id: true },
+      });
+      if (target) {
+        await prisma.message.update({
+          where: { id: target.id },
+          data: { suggestions: list },
+        });
+        await invalidateConversationCaches(conversation.id, req.user.id);
+      }
+    } catch (err) {
+      console.warn("[conversations] persist followup suggestions failed:", err?.message || err);
+    }
+    return list;
+  };
   if (!answer) {
     res.json({ suggestions: [] });
     return;
   }
   // คำถาม/คำตอบนอกขอบเขต — อย่าให้ LLM ต่อยอดเป็นเมนูอาหาร/ช้อปปิ้ง ฯลฯ; ชี้กลับไปถามเอกสาร
   if (shouldOmitReferencesForReply(answer) || isCasualOffTopicQuery(question)) {
-    res.json({ suggestions: DOCUMENT_SCOPE_FOLLOWUPS });
+    const suggestions = await persistSuggestions(DOCUMENT_SCOPE_FOLLOWUPS);
+    res.json({ suggestions });
     return;
   }
   try {
@@ -1023,6 +1050,7 @@ conversationsRouter.post("/:id/followup-suggestions", authenticate, async (req, 
       ],
       undefined,
       "fast",
+      "fast",
     );
     const raw = String(data?.choices?.[0]?.message?.content || "").trim();
     let suggestions = [];
@@ -1043,6 +1071,7 @@ conversationsRouter.post("/:id/followup-suggestions", authenticate, async (req, 
         .filter((line) => line.length >= 5 && line.length <= 120)
         .slice(0, 3);
     }
+    suggestions = await persistSuggestions(suggestions);
     res.json({ suggestions });
   } catch (error) {
     console.warn("[conversations] followup-suggestions failed:", error?.message || error);
@@ -1583,15 +1612,12 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     || privateRememberReply
     || rememberGuidanceReply
     || approvalAuthorityReply
-    || productManagerReply
-    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
-  // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
-  // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ
-  const deterministicMultiQuestion = Boolean(deterministicReply) && hasMultipleQuestions(message);
-  if (deterministicReply && !deterministicMultiQuestion) {
-    const references = privateRememberReply
-      ? [PRIVATE_REFERENCE]
-      : buildReferences(groundingChunks, contextDocuments, conversation.document);
+    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null)
+    || productManagerReply;
+  // คำตอบสำเร็จรูป: ตัดจบตรงๆ เฉพาะยืนยัน /จำ (ต้องคง ==ไฮไลต์==)
+  // นอกนั้นส่งเป็นข้อเท็จจริงให้โมเดลเรียบเรียงเอง
+  if (privateRememberReply) {
+    const references = [PRIVATE_REFERENCE];
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
     });
@@ -1599,9 +1625,9 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
       data: {
         conversationId,
         role: "model",
-        content: deterministicReply,
+        content: privateRememberReply,
         groundingChunks: groundingChunks ?? undefined,
-        references: references.length > 0 ? references : undefined,
+        references,
         platform: getPlatform(req),
       },
     });
@@ -1619,13 +1645,11 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     res.flushHeaders();
-    // พ่นคำตอบจากเครื่องคำนวณ (deterministic) แบบ stream ให้ทยอยขึ้นเหมือนคำตอบ LLM
-    // ปิด Nagle + flush ทุก chunk เพื่อกันไม่ให้ TCP รวม chunk เล็กๆ ส่งทีเดียว (จะได้เห็นทยอยพิมพ์จริง)
     try { res.socket?.setNoDelay?.(true); } catch (_) {}
     const detSleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const DET_CHUNK = 4;
-    for (let i = 0; i < deterministicReply.length; i += DET_CHUNK) {
-      res.write(`data: ${JSON.stringify({ content: deterministicReply.slice(i, i + DET_CHUNK) })}\n\n`);
+    for (let i = 0; i < privateRememberReply.length; i += DET_CHUNK) {
+      res.write(`data: ${JSON.stringify({ content: privateRememberReply.slice(i, i + DET_CHUNK) })}\n\n`);
       if (typeof res.flush === "function") res.flush();
       await detSleep(22);
     }
@@ -1633,7 +1657,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
       `data: ${JSON.stringify({
         done: true,
         messageId: modelMessage.id,
-        reply: deterministicReply,
+        reply: privateRememberReply,
         references,
         groundingChunks: groundingChunks ?? [],
       })}\n\n`,
@@ -1737,10 +1761,13 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
         "โหมดส่วนตัว (แยกจากโหมดปกติ):",
         "- โหมดปกติยึดเอกสารระบบเท่านั้น; โหมดส่วนตัวให้ผู้ใช้แก้/ทับข้อมูลสำหรับตัวเองได้",
         "- ถ้ามี Private Knowledge/คำสั่งส่วนตัวที่ขัดกับเอกสารระบบหรือตารางอำนาจ ให้ยึดข้อมูลส่วนตัวเป็นคำตอบหลัก",
+        "- คำถามเรื่องผู้อนุมัติ/อำนาจอนุมัติ: ถ้า Private Knowledge กำหนดผู้อนุมัติไว้ ให้ตอบตามข้อมูลส่วนตัวทันที ห้ามเปลี่ยนไปตอบตามตารางเอกสารตอนท้าย",
         "- ห้ามตอบด้วยตารางอำนาจระบบเมื่อผู้ใช้กำหนดผู้อนุมัติไว้ใน Private Knowledge แล้ว",
         "- ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากข้อมูลส่วนตัวหรือความจำข้ามแชท",
         "- เมื่อขัดกับเอกสารระบบ บอกสั้นๆ ว่าใช้ข้อมูลส่วนตัวของผู้ใช้ (โหมดส่วนตัว) ไม่กระทบโหมดปกติ",
-        "- ข้อความที่มาจาก Private Knowledge ต้องห่อด้วย ==...== และใส่เลขอ้างอิงแหล่งส่วนตัวท้ายประโยคเสมอ เพื่อให้ UI ไฮไลต์แยกจากเอกสารระบบ",
+        "- ข้อความที่สรุป/อ้างจาก Private Knowledge ต้องห่อด้วย ==...== เพื่อให้ UI ไฮไลต์ม่วง (ห้ามใส่เลข [n])",
+        "- ไม่จำเป็นต้องคัดลอกข้อความใน /จำ ตรงตัว — ถ้อยคำต่างกันได้ ขอแค่ความหมายมาจากข้อมูลส่วนตัวก็ห่อ == ได้",
+        "- ห้ามห่อข้อความที่มาจากเอกสารระบบด้วย ==...==",
       ].join("\n"),
     );
   }
@@ -1761,8 +1788,7 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     .reverse()
     .map((m) => ({ role: m.role === "model" ? "assistant" : "user", content: String(m.content ?? "").trim() }))
     .filter((m) => m.content.length > 0);
-  // คำนวณรายการอ้างอิงล่วงหน้า (จาก chunks ที่รู้ก่อนเรียกโมเดล) เพื่อฉีดเลข [n] เข้า prompt
-  // และบันทึกเป็น references ของข้อความบอทให้เลขตรงกันเสมอ
+  // คำนวณรายการอ้างอิงล่วงหน้า (แสดงเป็นการ์ดใต้คำตอบ — ไม่ฉีดเลข [n] ในเนื้อความ)
   const citationReferences = flattenReferencesForCitations(
     buildReferencesForReply({
       groundingChunks,
@@ -1782,11 +1808,10 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
     ...(citationSystemMessage ? [citationSystemMessage] : []),
-    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: knowledgeForPrompt, memory: privateMemory }),
     ...(deterministicReply
       ? [{
           role: "system",
-          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+          content: buildAuthoritativeFactPrompt(deterministicReply),
         }]
       : []),
     ...(isComparativeAuthorityQuery(message)
@@ -1796,6 +1821,8 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
         }]
       : []),
     ...historyMessages,
+    // Private Knowledge ไว้ใกล้ข้อความผู้ใช้ เพื่อไม่ให้ตารางเอกสารทับตอนตอบ
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: knowledgeForPrompt, memory: privateMemory }),
     { role: "user", content: message },
   ];
 
@@ -1804,7 +1831,16 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
     });
 
-    const streamBody = await callOpenAiGatewayStream(messages, undefined, req.body?.mode === "fast" ? "fast" : undefined);
+    const thinkingMode = resolveChatThinkingMode(message, {
+      forceFast: req.body?.mode === "fast" || req.body?.thinkingMode === "fast",
+      forceThink: req.body?.thinkingMode === "think",
+    });
+    const streamBody = await callOpenAiGatewayStream(
+      messages,
+      conversation.bot?.model || undefined,
+      req.body?.mode === "fast" ? "fast" : undefined,
+      thinkingMode,
+    );
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -1857,8 +1893,11 @@ chatRouter.post("/stream", authenticate, async (req, res) => {
     }
 
     replyToSave = stripDocumentLeadIn(replyToSave);
+    replyToSave = stripLatexToPlainText(replyToSave);
     replyToSave = stripRedundantShortSummary(replyToSave);
-    replyToSave = toCompactAuthorityReply(message, replyToSave);
+    replyToSave = toCompactAuthorityReply(message, replyToSave, {
+      respectPrivate: hasPrivateContext,
+    });
 
     // ถ้าโมเดลตอบนอกขอบเขต/ไม่พบข้อมูล — อย่าแปะการ์ดเอกสารจาก retrieval top-k
     const references = shouldOmitReferencesForReply(replyToSave) ? [] : citationReferences;
@@ -2304,15 +2343,12 @@ chatRouter.post("/", authenticate, async (req, res) => {
     || privateRememberReply
     || rememberGuidanceReply
     || approvalAuthorityReply
-    || productManagerReply
-    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
-  // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
-  // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ
-  const deterministicMultiQuestion = Boolean(deterministicReply) && hasMultipleQuestions(message);
-  if (deterministicReply && !deterministicMultiQuestion) {
-    const references = privateRememberReply
-      ? [PRIVATE_REFERENCE]
-      : buildReferences(groundingChunks, contextDocuments, conversation.document);
+    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null)
+    || productManagerReply;
+  // คำตอบสำเร็จรูป: ตัดจบตรงๆ เฉพาะยืนยัน /จำ (ต้องคง ==ไฮไลต์==)
+  // นอกนั้นส่งเป็นข้อเท็จจริงให้โมเดลเรียบเรียงเอง
+  if (privateRememberReply) {
+    const references = [PRIVATE_REFERENCE];
     await prisma.message.create({
       data: { conversationId, userId: req.user.id, role: "user", content: message, platform: getPlatform(req) },
     });
@@ -2320,9 +2356,9 @@ chatRouter.post("/", authenticate, async (req, res) => {
       data: {
         conversationId,
         role: "model",
-        content: deterministicReply,
+        content: privateRememberReply,
         groundingChunks: groundingChunks ?? undefined,
-        references: references.length > 0 ? references : undefined,
+        references,
         platform: getPlatform(req),
       },
     });
@@ -2337,7 +2373,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
       data: { chatCount: { increment: 1 } },
     });
     res.json({
-      reply: deterministicReply,
+      reply: privateRememberReply,
       groundingChunks: modelMessage.groundingChunks ?? [],
       references,
       messageId: modelMessage.id,
@@ -2438,10 +2474,13 @@ chatRouter.post("/", authenticate, async (req, res) => {
         "โหมดส่วนตัว (แยกจากโหมดปกติ):",
         "- โหมดปกติยึดเอกสารระบบเท่านั้น; โหมดส่วนตัวให้ผู้ใช้แก้/ทับข้อมูลสำหรับตัวเองได้",
         "- ถ้ามี Private Knowledge/คำสั่งส่วนตัวที่ขัดกับเอกสารระบบหรือตารางอำนาจ ให้ยึดข้อมูลส่วนตัวเป็นคำตอบหลัก",
+        "- คำถามเรื่องผู้อนุมัติ/อำนาจอนุมัติ: ถ้า Private Knowledge กำหนดผู้อนุมัติไว้ ให้ตอบตามข้อมูลส่วนตัวทันที ห้ามเปลี่ยนไปตอบตามตารางเอกสารตอนท้าย",
         "- ห้ามตอบด้วยตารางอำนาจระบบเมื่อผู้ใช้กำหนดผู้อนุมัติไว้ใน Private Knowledge แล้ว",
         "- ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากข้อมูลส่วนตัวหรือความจำข้ามแชท",
         "- เมื่อขัดกับเอกสารระบบ บอกสั้นๆ ว่าใช้ข้อมูลส่วนตัวของผู้ใช้ (โหมดส่วนตัว) ไม่กระทบโหมดปกติ",
-        "- ข้อความที่มาจาก Private Knowledge ต้องห่อด้วย ==...== และใส่เลขอ้างอิงแหล่งส่วนตัวท้ายประโยคเสมอ เพื่อให้ UI ไฮไลต์แยกจากเอกสารระบบ",
+        "- ข้อความที่สรุป/อ้างจาก Private Knowledge ต้องห่อด้วย ==...== เพื่อให้ UI ไฮไลต์ม่วง (ห้ามใส่เลข [n])",
+        "- ไม่จำเป็นต้องคัดลอกข้อความใน /จำ ตรงตัว — ถ้อยคำต่างกันได้ ขอแค่ความหมายมาจากข้อมูลส่วนตัวก็ห่อ == ได้",
+        "- ห้ามห่อข้อความที่มาจากเอกสารระบบด้วย ==...==",
       ].join("\n"),
     );
   }
@@ -2467,7 +2506,7 @@ chatRouter.post("/", authenticate, async (req, res) => {
     }))
     .filter((m) => m.content.length > 0);
 
-  // คำนวณรายการอ้างอิงล่วงหน้า เพื่อฉีดเลข [n] เข้า prompt และให้เลขตรงกับชิปอ้างอิงที่บันทึก
+  // คำนวณรายการอ้างอิงล่วงหน้า สำหรับการ์ดใต้คำตอบ (ไม่ใช้เลข [n] ในเนื้อความ)
   const citationReferences = flattenReferencesForCitations(
     buildReferencesForReply({
       groundingChunks,
@@ -2486,11 +2525,10 @@ chatRouter.post("/", authenticate, async (req, res) => {
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
     ...(citationSystemMessage ? [citationSystemMessage] : []),
-    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: knowledgeForPrompt, memory: privateMemory }),
     ...(deterministicReply
       ? [{
           role: "system",
-          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+          content: buildAuthoritativeFactPrompt(deterministicReply),
         }]
       : []),
     ...(isComparativeAuthorityQuery(message)
@@ -2500,6 +2538,8 @@ chatRouter.post("/", authenticate, async (req, res) => {
         }]
       : []),
     ...historyMessages,
+    // Private Knowledge ไว้ใกล้ข้อความผู้ใช้ เพื่อไม่ให้ตารางเอกสารทับตอนตอบ
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: knowledgeForPrompt, memory: privateMemory }),
     { role: "user", content: message },
   ];
 
@@ -2514,12 +2554,23 @@ chatRouter.post("/", authenticate, async (req, res) => {
       },
     });
 
-    // ใช้ OPENAI_MODEL จาก .env เสมอ — คีย์ gateway มักรองรับแค่บางโมเดล (เช่น gpt-4o-mini) ถ้าใช้ bot.model อาจได้ 401
-    const gatewayResponse = await callOpenAiGateway(messages, undefined, req.body?.mode === "fast" ? "fast" : undefined);
+    // ใช้ Bot.model ถ้าแอดมินเลือกไว้ — ว่าง = OPENAI_MODEL จาก .env; catalog จะ route ไป H100/NT ให้ถูก
+    const thinkingMode = resolveChatThinkingMode(message, {
+      forceFast: req.body?.mode === "fast" || req.body?.thinkingMode === "fast",
+      forceThink: req.body?.thinkingMode === "think",
+    });
+    const gatewayResponse = await callOpenAiGateway(
+      messages,
+      conversation.bot?.model || undefined,
+      req.body?.mode === "fast" ? "fast" : undefined,
+      thinkingMode,
+    );
     const tokenUsage = getTokenUsage(gatewayResponse);
+    const msg = gatewayResponse?.choices?.[0]?.message;
     const rawReply =
-      gatewayResponse?.choices?.[0]?.message?.content?.trim() ||
-      "Sorry, I could not generate a response.";
+      String(msg?.content || "").trim()
+      || String(msg?.reasoning_content || "").trim()
+      || "Sorry, I could not generate a response.";
 
     let replyToSave = rawReply;
     let suggestions = [];
@@ -2534,8 +2585,11 @@ chatRouter.post("/", authenticate, async (req, res) => {
     }
 
     replyToSave = stripDocumentLeadIn(replyToSave);
+    replyToSave = stripLatexToPlainText(replyToSave);
     replyToSave = stripRedundantShortSummary(replyToSave);
-    replyToSave = toCompactAuthorityReply(message, replyToSave);
+    replyToSave = toCompactAuthorityReply(message, replyToSave, {
+      respectPrivate: hasPrivateContext,
+    });
 
     const references = shouldOmitReferencesForReply(replyToSave) ? [] : citationReferences;
     replyToSave = stripInvalidCitationMarkers(replyToSave, references.length);
@@ -2803,34 +2857,9 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const deterministicReply = ntPricingReply
     || rememberGuidanceReply
     || approvalAuthorityReply
-    || productManagerReply
-    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null);
-  // ถามหลายข้อในข้อความเดียว: ห้ามตัดจบด้วยคำตอบสำเร็จรูปข้อเดียว
-  // ให้ส่งคำตอบสำเร็จรูปเข้าไปเป็นข้อมูล authoritative แล้วให้โมเดลตอบให้ครบทุกข้อ
-  const deterministicMultiQuestion = Boolean(deterministicReply) && hasMultipleQuestions(message);
-  if (deterministicReply && !deterministicMultiQuestion) {
-    const references = buildReferences(groundingChunks, contextDocuments, conversation.document);
-    await prisma.message.create({
-      data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
-    });
-    await prisma.message.create({
-      data: {
-        conversationId,
-        role: "model",
-        content: deterministicReply,
-        groundingChunks: groundingChunks ?? undefined,
-        references: references.length > 0 ? references : undefined,
-        platform: LINE_PLATFORM,
-      },
-    });
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { updatedAt: new Date(), title: conversation.title ?? message.trim().slice(0, 80) },
-    });
-    await prisma.usageDaily.update({ where: { id: usage.id }, data: { chatCount: { increment: 1 } } });
-    await invalidateConversationCaches(conversation.id, userId);
-    return { reply: deterministicReply };
-  }
+    || (!privateMode && deterministicRulesEnabled ? getDeterministicRuleReply(message) : null)
+    || productManagerReply;
+  // ส่งข้อเท็จจริงให้โมเดลเรียบเรียง — ไม่ตัดจบด้วยประโยคสำเร็จรูป
   const hasEvidence = hasSufficientGroundingEvidence(message, groundingChunks);
   const casualOffTopic = !isHelpBot && !hasPrivateContext && isCasualOffTopicQuery(message);
   const rejectNoGrounding = !isHelpBot && !overviewRequest
@@ -2898,7 +2927,7 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   if (conversation.bot?.prompt?.trim()) systemParts.push(`คำสั่งเพิ่มเติม:\n${conversation.bot.prompt.trim()}`);
   if (hasPrivateContext) {
     systemParts.push(
-      "โหมดส่วนตัว: ผู้ใช้ได้ตั้งค่าส่วนตัวไว้ (อาจมี 'คำสั่งจากผู้ใช้', 'ข้อมูล/ความรู้ส่วนตัว' และ 'บทสนทนาก่อนหน้า'). ให้ทำตามคำสั่งของผู้ใช้อย่างเคร่งครัด, ใช้ข้อมูลส่วนตัวและความจำก่อนหน้าตอบได้เต็มที่ร่วมกับ Context จากเอกสารระบบ, ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากส่วนเหล่านี้, และเมื่อข้อมูลส่วนตัวขัดกับเอกสารระบบให้ระบุที่มาทั้งสองฝั่งอย่างชัดเจน.",
+      "โหมดส่วนตัว: ผู้ใช้ได้ตั้งค่าส่วนตัวไว้ (อาจมี 'คำสั่งจากผู้ใช้', 'ข้อมูล/ความรู้ส่วนตัว' และ 'บทสนทนาก่อนหน้า'). ให้ทำตามคำสั่งของผู้ใช้อย่างเคร่งครัด, ใช้ข้อมูลส่วนตัวและความจำก่อนหน้าตอบได้เต็มที่ร่วมกับ Context จากเอกสารระบบ, ห้ามตอบว่าไม่พบข้อมูลถ้าตอบได้จากส่วนเหล่านี้, และเมื่อข้อมูลส่วนตัวขัดกับเอกสารระบบให้ระบุที่มาทั้งสองฝั่งอย่างชัดเจน. ข้อความจากข้อมูลส่วนตัวให้ห่อด้วย ==...==",
     );
   }
   const systemPrompt = systemParts.filter(Boolean).join("\n\n");
@@ -2943,11 +2972,10 @@ export async function getChatReplyForLine(conversationId, message, userId) {
   const messages = [
     { role: "system", content: systemPrompt },
     ...(contextText ? [{ role: "system", content: `${contextLabel}:\n${contextText}` }] : []),
-    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: privateKnowledge, memory: privateMemory }),
     ...(deterministicReply
       ? [{
           role: "system",
-          content: `ข้อมูลที่ยืนยันแล้ว (authoritative): สำหรับส่วนของคำถามที่ตรงกับข้อมูลนี้ ให้ใช้ข้อความนี้ตรงตัว ห้ามแก้ตัวเลขหรือถ้อยคำ และต้องตอบส่วนอื่นของคำถามให้ครบด้วย:\n${deterministicReply}`,
+          content: buildAuthoritativeFactPrompt(deterministicReply),
         }]
       : []),
     ...(isComparativeAuthorityQuery(message)
@@ -2957,23 +2985,36 @@ export async function getChatReplyForLine(conversationId, message, userId) {
         }]
       : []),
     ...historyMessages,
+    ...buildPrivateSystemMessages({ instructions: privateInstructions, knowledge: privateKnowledge, memory: privateMemory }),
     { role: "user", content: message },
   ];
 
   await prisma.message.create({
     data: { conversationId, userId, role: "user", content: message, platform: LINE_PLATFORM },
   });
-  const gatewayResponse = await callOpenAiGateway(messages, undefined);
+  const thinkingMode = resolveChatThinkingMode(message);
+  const gatewayResponse = await callOpenAiGateway(
+    messages,
+    conversation.bot?.model || undefined,
+    undefined,
+    thinkingMode,
+  );
   const tokenUsage = getTokenUsage(gatewayResponse);
+  const msg = gatewayResponse?.choices?.[0]?.message;
   const rawReply =
-    gatewayResponse?.choices?.[0]?.message?.content?.trim() || "Sorry, I could not generate a response.";
+    String(msg?.content || "").trim()
+    || String(msg?.reasoning_content || "").trim()
+    || "Sorry, I could not generate a response.";
   let replyToSave = rawReply;
   const suggestionsMatch = rawReply.match(/\n\s*SUGGESTIONS\s*:\s*\n([\s\S]*)/i);
   if (suggestionsMatch) replyToSave = rawReply.slice(0, suggestionsMatch.index).trim();
 
   replyToSave = stripDocumentLeadIn(replyToSave);
+  replyToSave = stripLatexToPlainText(replyToSave);
   replyToSave = stripRedundantShortSummary(replyToSave);
-  replyToSave = toCompactAuthorityReply(message, replyToSave);
+  replyToSave = toCompactAuthorityReply(message, replyToSave, {
+    respectPrivate: hasPrivateContext,
+  });
 
   const candidateRefs = flattenReferencesForCitations(
     buildReferencesForReply({

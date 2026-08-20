@@ -420,13 +420,17 @@ export const chatMessageAPI = {
         return response.data;
     },
 
-    /** ขอคำถามต่อเนื่อง (follow-up suggestions) จากคำถาม-คำตอบล่าสุด — คืน array ของ string */
-    getFollowUpSuggestions: async (chatId, question, answer) => {
+    /** ขอคำถามต่อเนื่อง (follow-up suggestions) จากคำถาม-คำตอบล่าสุด — คืน array ของ string (บันทึกที่ message ถ้าส่ง messageId) */
+    getFollowUpSuggestions: async (chatId, question, answer, messageId = null) => {
         const sid = chatId != null ? String(chatId).trim() : '';
         if (!sid || sid === 'undefined' || sid === 'null') throw new Error('Invalid chat ID');
         const response = await api.post(
             `/conversations/${encodeURIComponent(sid)}/followup-suggestions`,
-            { question, answer },
+            {
+              question,
+              answer,
+              ...(messageId ? { messageId: String(messageId) } : {}),
+            },
         );
         return Array.isArray(response.data?.suggestions) ? response.data.suggestions : [];
     },
