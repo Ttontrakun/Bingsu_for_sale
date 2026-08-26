@@ -574,7 +574,7 @@ async def ocr_extract(
                 content={"ok": False, "error": "empty file"}
             )
         
-        # Check file size limit (5MB)
+        # Check file size limit (default 50MB; override via MAX_FILE_SIZE_MB)
         file_size_mb = len(data) / (1024 * 1024)
         if file_size_mb > MAX_FILE_SIZE_MB:
             return JSONResponse(

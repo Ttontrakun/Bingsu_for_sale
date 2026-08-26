@@ -65,3 +65,54 @@
   width: 0;
   height: 0;
 }
+
+/* Platform landing */
+.platform-font-brand {
+  font-family: 'Taviraj', 'Anuphan', serif;
+}
+.platform-font-display {
+  font-family: 'Taviraj', 'Anuphan', serif;
+}
+.platform-font-body {
+  font-family: 'Anuphan', sans-serif;
+}
+
+@keyframes platform-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes platform-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+.platform-hero-copy {
+  animation: platform-fade-up 0.7s ease-out both;
+}
+
+.platform-mascot-float {
+  animation: platform-float 5.5s ease-in-out infinite;
+}
+
+input.hide-native-password-toggle::-ms-reveal,
+input.hide-native-password-toggle::-ms-clear {
+  display: none;
+}
+input.hide-native-password-toggle::-webkit-credentials-auto-fill-button,
+input.hide-native-password-toggle::-webkit-password-toggle-button {
+  visibility: hidden;
+  pointer-events: none;
+  display: none !important;
+}

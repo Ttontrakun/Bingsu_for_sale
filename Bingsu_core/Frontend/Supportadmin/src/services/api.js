@@ -623,6 +623,56 @@ export const supportDocuments = {
       body: JSON.stringify({ text: typeof text === 'string' ? text : '' }),
     });
   },
+  attachOriginal: async (documentId, fileIndex, file) => {
+    const id = documentId != null ? String(documentId).trim() : '';
+    if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getStoredToken();
+    const url = `${getApiBaseURL()}/api/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/original`;
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
+      if (typeof msg !== 'string') msg = String(msg);
+      if (res.status === 401) {
+        setSession(null, null);
+        throw new Error('SESSION_EXPIRED');
+      }
+      throw new Error(msg);
+    }
+    return data;
+  },
+  fetchOriginalBlob: async (documentId, fileIndex, { inline = false } = {}) => {
+    const id = documentId != null ? String(documentId).trim() : '';
+    if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
+    const token = getStoredToken();
+    const qs = inline ? '?inline=1' : '';
+    const url = `${getApiBaseURL()}/api/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/download${qs}`;
+    const headers = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
+      if (typeof msg !== 'string') msg = String(msg);
+      if (res.status === 401) {
+        setSession(null, null);
+        throw new Error('SESSION_EXPIRED');
+      }
+      throw new Error(msg);
+    }
+    return res.blob();
+  },
+  fetchExcelPreview: async (documentId, fileIndex) => {
+    const id = documentId != null ? String(documentId).trim() : '';
+    if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
+    return request(
+      `/api/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/excel-preview`
+    );
+  },
   createDocument: async (documentData) => {
     return request('/api/documents', {
       method: 'POST',

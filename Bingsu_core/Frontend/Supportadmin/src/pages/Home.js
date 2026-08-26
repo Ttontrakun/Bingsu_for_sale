@@ -14,6 +14,14 @@ import {
   HiDownload,
   HiHome,
   HiRefresh,
+  HiDocumentText,
+  HiClipboardList,
+  HiChatAlt2,
+  HiUsers,
+  HiFolder,
+  HiCog,
+  HiQuestionMarkCircle,
+  HiShieldCheck,
 } from 'react-icons/hi';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { api } from '../services/api';
@@ -22,12 +30,22 @@ import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-const ICON_MAP = {
-  form: HiLightBulb,
-  manual: HiBookOpen,
-  pricing: HiCurrencyDollar,
-  presentation: HiPresentationChartBar,
-};
+const ICON_OPTIONS = [
+  { iconKey: 'form', label: 'ไอเดีย', Icon: HiLightBulb, iconBg: 'bg-yellow-100', iconColor: 'text-yellow-500' },
+  { iconKey: 'manual', label: 'คู่มือ', Icon: HiBookOpen, iconBg: 'bg-blue-100', iconColor: 'text-blue-500' },
+  { iconKey: 'pricing', label: 'ราคา', Icon: HiCurrencyDollar, iconBg: 'bg-green-100', iconColor: 'text-green-500' },
+  { iconKey: 'presentation', label: 'สไลด์', Icon: HiPresentationChartBar, iconBg: 'bg-purple-100', iconColor: 'text-purple-500' },
+  { iconKey: 'document', label: 'เอกสาร', Icon: HiDocumentText, iconBg: 'bg-sky-100', iconColor: 'text-sky-500' },
+  { iconKey: 'clipboard', label: 'ฟอร์ม', Icon: HiClipboardList, iconBg: 'bg-amber-100', iconColor: 'text-amber-600' },
+  { iconKey: 'chat', label: 'แชท', Icon: HiChatAlt2, iconBg: 'bg-teal-100', iconColor: 'text-teal-500' },
+  { iconKey: 'users', label: 'ผู้ใช้', Icon: HiUsers, iconBg: 'bg-indigo-100', iconColor: 'text-indigo-500' },
+  { iconKey: 'folder', label: 'โฟลเดอร์', Icon: HiFolder, iconBg: 'bg-orange-100', iconColor: 'text-orange-500' },
+  { iconKey: 'settings', label: 'ตั้งค่า', Icon: HiCog, iconBg: 'bg-zinc-100', iconColor: 'text-zinc-600' },
+  { iconKey: 'help', label: 'ช่วยเหลือ', Icon: HiQuestionMarkCircle, iconBg: 'bg-rose-100', iconColor: 'text-rose-500' },
+  { iconKey: 'shield', label: 'ความปลอดภัย', Icon: HiShieldCheck, iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+];
+
+const ICON_MAP = Object.fromEntries(ICON_OPTIONS.map((opt) => [opt.iconKey, opt.Icon]));
 
 const FALLBACK_DOCUMENTS = [
   {
@@ -230,7 +248,13 @@ function Home({ userRole }) {
 
   const handleEditCategory = (doc) => {
     setEditingCategory(doc.id);
-    setEditCategoryData({ title: doc.title, description: doc.description });
+    setEditCategoryData({
+      title: doc.title,
+      description: doc.description,
+      iconKey: doc.iconKey || 'form',
+      iconBg: doc.iconBg || 'bg-yellow-100',
+      iconColor: doc.iconColor || 'text-yellow-500',
+    });
   };
 
   const handleSaveCategory = async (docId) => {
@@ -255,20 +279,20 @@ function Home({ userRole }) {
   };
 
   const handleAddCategory = async () => {
-    const next = [
-      ...documents,
-      {
-        id: newId('cat'),
-        type: 'content',
-        title: 'หัวข้อหลักใหม่',
-        description: 'คำอธิบาย',
-        iconKey: 'form',
-        iconBg: 'bg-yellow-100',
-        iconColor: 'text-yellow-500',
-        subcategories: [],
-      },
-    ];
+    const newDoc = {
+      id: newId('cat'),
+      type: 'content',
+      title: 'หัวข้อหลักใหม่',
+      description: 'คำอธิบาย',
+      iconKey: 'form',
+      iconBg: 'bg-yellow-100',
+      iconColor: 'text-yellow-500',
+      subcategories: [],
+    };
+    const next = [...documents, newDoc];
     setDocuments(next);
+    setOpenDocument(newDoc.id);
+    handleEditCategory(newDoc);
     await persistDocuments(next, 'เพิ่มหัวข้อหลักแล้ว');
   };
 
@@ -487,13 +511,14 @@ function Home({ userRole }) {
 
         {documents.map((doc) => {
           const Icon = ICON_MAP[doc.iconKey] || HiLightBulb;
+          const PreviewIcon = ICON_MAP[editCategoryData.iconKey] || Icon;
           return (
             <div key={doc.id} className='bg-white border border-gray-200 rounded-2xl p-4 md:p-6 shadow-sm relative'>
               {editingCategory === doc.id ? (
                 <div className='space-y-4'>
-                  <div className='flex items-center gap-3'>
-                    <div className={`w-11 h-11 rounded-xl ${doc.iconBg || 'bg-yellow-100'} flex items-center justify-center shrink-0`}>
-                      <Icon className={`${doc.iconColor || 'text-yellow-500'} text-2xl`} />
+                  <div className='flex items-start gap-3'>
+                    <div className={`w-11 h-11 rounded-xl ${editCategoryData.iconBg || doc.iconBg || 'bg-yellow-100'} flex items-center justify-center shrink-0`}>
+                      <PreviewIcon className={`${editCategoryData.iconColor || doc.iconColor || 'text-yellow-500'} text-2xl`} />
                     </div>
                     <div className='flex-1 space-y-2'>
                       <input
@@ -510,6 +535,37 @@ function Home({ userRole }) {
                         className='w-full text-sm text-gray-600 border-2 border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:border-[#F5C200]'
                         placeholder='คำอธิบาย'
                       />
+                    </div>
+                  </div>
+                  <div>
+                    <p className='text-xs font-semibold text-gray-500 mb-2'>ไอคอน</p>
+                    <div className='grid grid-cols-4 sm:grid-cols-6 gap-2'>
+                      {ICON_OPTIONS.map((opt) => {
+                        const selected = (editCategoryData.iconKey || doc.iconKey) === opt.iconKey;
+                        return (
+                          <button
+                            key={opt.iconKey}
+                            type='button'
+                            onClick={() => setEditCategoryData({
+                              ...editCategoryData,
+                              iconKey: opt.iconKey,
+                              iconBg: opt.iconBg,
+                              iconColor: opt.iconColor,
+                            })}
+                            className={`flex flex-col items-center gap-1 rounded-xl border px-2 py-2 text-[11px] transition-colors ${
+                              selected
+                                ? 'border-[#F5C200] bg-yellow-50 text-gray-800'
+                                : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50'
+                            }`}
+                            title={opt.label}
+                          >
+                            <span className={`w-8 h-8 rounded-lg ${opt.iconBg} flex items-center justify-center`}>
+                              <opt.Icon className={`${opt.iconColor} text-lg`} />
+                            </span>
+                            <span className='truncate w-full text-center'>{opt.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                   <div className='flex items-center gap-2'>
@@ -860,7 +916,7 @@ function Home({ userRole }) {
                                       ) : (
                                         <>
                                           {item.type === 'text' && (
-                                            <p className='text-gray-700 text-sm leading-relaxed'>{item.value}</p>
+                                            <p className='text-gray-700 text-sm leading-relaxed whitespace-pre-wrap'>{item.value}</p>
                                           )}
                                           {item.type === 'price' && (
                                             <div className='text-2xl font-bold text-green-600 mb-2'>{item.value}</div>

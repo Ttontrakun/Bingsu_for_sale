@@ -23,6 +23,8 @@ import { runOcrExtract } from "../services/uploadQueue.js";
 import { structureOcrTextWithLlm } from "../services/chat.js";
 import { extractExcelText, isExcelFile } from "../services/excel.js";
 import { invalidateAllRagCache, invalidateRagCacheForDocument } from "../services/rag.js";
+import { storeOriginalFile } from "../services/fileStorage.js";
+import { decodeUploadFileName, repairStoredFileName } from "../lib/fileNameEncoding.js";
 
 export const documentsRouter = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
@@ -536,7 +538,7 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
       res.status(400).json({ ok: false, error: "ไม่มีไฟล์" });
       return;
     }
-    const fileName = req.file.originalname || req.file.fieldname || "file";
+    const fileName = decodeUploadFileName(req.file.originalname || req.file.fieldname || "file");
     const contentType = req.file.mimetype || "application/octet-stream";
     const isExcel = isExcelFile({ fileName, contentType });
     const isPdf = contentType.toLowerCase().includes("pdf") || /\.pdf$/i.test(fileName);
@@ -577,15 +579,34 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
       return;
     }
 
+    let storage = null;
+    if (storeRawFiles) {
+      try {
+        storage = await storeOriginalFile({
+          buffer: req.file.buffer,
+          fileName,
+          contentType,
+          userId: document.ownerId,
+          documentId: document.id,
+        });
+      } catch (storeErr) {
+        console.error("[documents] store original after OCR failed:", storeErr?.message || storeErr);
+      }
+    }
+
     const currentSourceFiles = Array.isArray(document.sourceFiles) ? document.sourceFiles : [];
-    const mergedSourceFiles = [...currentSourceFiles, {
+    const fileEntry = {
       name: fileName,
       type: contentType,
+      size: req.file.size || req.file.buffer?.length || undefined,
       text,
       blocks,
       metadata: body?.metadata || {},
-    }];
+      ...(storage ? { storage, hasOriginal: true, originalName: fileName, originalType: contentType } : {}),
+    };
+    const mergedSourceFiles = [...currentSourceFiles, fileEntry];
     const prepared = ensureSourceFileBlocks(mergedSourceFiles);
+    const fileIndex = prepared.length - 1;
 
     const updated = await prisma.document.update({
       where: { id: document.id },
@@ -608,6 +629,9 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
       text,
       blocks,
       metadata: body?.metadata || {},
+      storage: storage || null,
+      hasOriginal: Boolean(storage),
+      fileIndex,
       document: {
         id: updated.id,
         displayName: updated.displayName,
@@ -620,6 +644,79 @@ documentsRouter.post("/:id/files/ocr", authenticate, async (req, res) => {
     res.status(isMulterError ? 400 : 500).json({
       ok: false,
       error: isMulterError ? `Upload failed: ${message}` : message || "OCR upload failed",
+    });
+  }
+});
+
+/** POST /api/documents/:id/files/:index/original — แนบ PDF/Excel ต้นฉบับทีหลัง (ไม่ทับ OCR) */
+documentsRouter.post("/:id/files/:index/original", authenticate, async (req, res) => {
+  try {
+    if (!storeRawFiles) {
+      res.status(400).json({ ok: false, error: "การเก็บไฟล์ต้นฉบับถูกปิดอยู่ (STORE_RAW_FILES)" });
+      return;
+    }
+    await runSingleUpload(req, res);
+    const index = Number(req.params.index);
+    if (!Number.isFinite(index) || index < 0) {
+      res.status(400).json({ ok: false, error: "Invalid file index" });
+      return;
+    }
+    const document = await prisma.document.findFirst({
+      where: documentWhereById(req.params.id, req.user, { editorOnly: true }),
+    });
+    if (!document) {
+      res.status(404).json({ ok: false, error: "Document not found or no edit permission" });
+      return;
+    }
+    if (!req.file || !req.file.buffer) {
+      res.status(400).json({ ok: false, error: "ไม่มีไฟล์" });
+      return;
+    }
+    const sourceFiles = Array.isArray(document.sourceFiles) ? [...document.sourceFiles] : [];
+    if (!sourceFiles[index]) {
+      res.status(404).json({ ok: false, error: "File not found" });
+      return;
+    }
+    const fileName = decodeUploadFileName(req.file.originalname || req.file.fieldname || "file");
+    const contentType = req.file.mimetype || "application/octet-stream";
+    const storage = await storeOriginalFile({
+      buffer: req.file.buffer,
+      fileName,
+      contentType,
+      userId: document.ownerId,
+      documentId: document.id,
+    });
+    const prev = sourceFiles[index] && typeof sourceFiles[index] === "object" ? sourceFiles[index] : {};
+    sourceFiles[index] = {
+      ...prev,
+      storage,
+      hasOriginal: true,
+      originalName: fileName,
+      originalType: contentType,
+      size: req.file.size || req.file.buffer?.length || prev.size,
+    };
+    const prepared = ensureSourceFileBlocks(sourceFiles);
+    const updated = await prisma.document.update({
+      where: { id: document.id },
+      data: { sourceFiles: prepared },
+    });
+    await invalidateUserCaches(updated.ownerId);
+    res.json({
+      ok: true,
+      fileIndex: index,
+      storage,
+      hasOriginal: true,
+      originalName: fileName,
+      originalType: contentType,
+      document: { id: updated.id, displayName: updated.displayName },
+    });
+  } catch (error) {
+    const message = error?.message || String(error);
+    const isMulterError = error?.name === "MulterError";
+    console.error("[documents] /:id/files/:index/original error:", message);
+    res.status(isMulterError ? 400 : 500).json({
+      ok: false,
+      error: isMulterError ? `Upload failed: ${message}` : message || "Attach original failed",
     });
   }
 });
@@ -723,7 +820,13 @@ documentsRouter.get("/:id/files/:index/download", authenticate, async (req, res)
     return;
   }
   const storage = file?.storage || null;
-  const fileName = file?.name || `file-${index + 1}`;
+  const fileName = repairStoredFileName(file?.name || `file-${index + 1}`);
+  const inline = String(req.query.inline || "") === "1" || String(req.query.inline || "").toLowerCase() === "true";
+  const downloadName = repairStoredFileName(file?.originalName || fileName);
+  let contentType = file?.originalType || file?.type || "application/octet-stream";
+  if (/\.pdf$/i.test(downloadName) && (!contentType || contentType === "application/octet-stream")) {
+    contentType = "application/pdf";
+  }
 
   if (storage?.provider === "s3") {
     if (storage.url) {
@@ -753,5 +856,85 @@ documentsRouter.get("/:id/files/:index/download", authenticate, async (req, res)
     return;
   }
 
-  res.download(filePath, fileName);
+  if (inline) {
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(downloadName)}`);
+    fs.createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  res.download(filePath, downloadName);
+});
+
+/** GET /api/documents/:id/files/:index/excel-preview — พรีวิวชีตจากไฟล์ต้นฉบับ Excel/CSV */
+documentsRouter.get("/:id/files/:index/excel-preview", authenticate, async (req, res) => {
+  if (!storeRawFiles) {
+    res.status(404).json({ ok: false, error: "Original file storage is disabled" });
+    return;
+  }
+  const index = Number(req.params.index);
+  if (!Number.isFinite(index) || index < 0) {
+    res.status(400).json({ ok: false, error: "Invalid file index" });
+    return;
+  }
+  const document = await prisma.document.findFirst({
+    where: documentWhereById(req.params.id, req.user, { editorOnly: false }),
+  });
+  if (!document) {
+    res.status(404).json({ ok: false, error: "Document not found" });
+    return;
+  }
+  const sourceFiles = Array.isArray(document.sourceFiles) ? document.sourceFiles : [];
+  const file = sourceFiles[index];
+  if (!file) {
+    res.status(404).json({ ok: false, error: "File not found" });
+    return;
+  }
+  const displayName = repairStoredFileName(file?.originalName || file?.name || `file-${index + 1}`);
+  const contentType = file?.originalType || file?.type || "";
+  if (!isExcelFile({ fileName: displayName, contentType })) {
+    res.status(400).json({ ok: false, error: "ไฟล์นี้ไม่ใช่ Excel/CSV" });
+    return;
+  }
+  const storage = file?.storage || null;
+  if (!storage || storage.provider === "s3") {
+    res.status(404).json({
+      ok: false,
+      error: storage?.provider === "s3"
+        ? "ยังไม่รองรับพรีวิว Excel จาก S3 ในรอบนี้ — ใช้ดาวน์โหลดแทน"
+        : "Original file not available",
+    });
+    return;
+  }
+  const filePath = storage?.path;
+  if (!filePath || typeof filePath !== "string") {
+    res.status(404).json({ ok: false, error: "Original file not available" });
+    return;
+  }
+  const ownerScopedRoot = path.join(localFilesRoot, String(document.ownerId || ""));
+  const docScopedRoot = path.join(ownerScopedRoot, String(document.id || ""));
+  const allowedRoot = fs.existsSync(docScopedRoot) ? docScopedRoot : ownerScopedRoot;
+  if (!isPathInsideRoot(localFilesRoot, filePath) || !isPathInsideRoot(allowedRoot, filePath)) {
+    res.status(400).json({ ok: false, error: "Invalid file path" });
+    return;
+  }
+  if (!fs.existsSync(filePath)) {
+    res.status(404).json({ ok: false, error: "File missing on disk" });
+    return;
+  }
+  try {
+    const buffer = await fsPromises.readFile(filePath);
+    const parsed = extractExcelText({ buffer, fileName: displayName });
+    const sheets = Array.isArray(parsed?.metadata?.previewSheets) ? parsed.metadata.previewSheets : [];
+    res.json({
+      ok: true,
+      name: displayName,
+      sheets,
+      sheetCount: sheets.length,
+      rowCount: parsed?.metadata?.rowCount || 0,
+    });
+  } catch (error) {
+    console.error("[documents] excel-preview error:", error?.message || error);
+    res.status(500).json({ ok: false, error: error?.message || "Excel preview failed" });
+  }
 });

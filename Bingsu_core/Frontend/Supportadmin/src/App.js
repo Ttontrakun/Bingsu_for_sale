@@ -30,7 +30,6 @@ function AppContent() {
 
   const loadUsers = useCallback(async () => {
     const sessionRole = normalizeDashboardRole(sessionUser?.role || getStoredUser()?.role || userRole || 'support');
-    // admin_dev ไม่ใช้รายชื่อผู้ใช้ / กระดิ่ง — ข้ามเพื่อไม่โดน 403
     if (sessionRole === 'admin_dev') {
       setUsers([]);
       return;
@@ -57,7 +56,6 @@ function AppContent() {
         if (!user?.id) throw new Error('no session');
         if (!cancelled) {
           setSessionUser(user);
-          // sync local cache from server role only
           try {
             localStorage.setItem('supportadmin_user', JSON.stringify({
               id: user.id,
@@ -70,7 +68,10 @@ function AppContent() {
       } catch {
         if (!cancelled) {
           setSessionUser(null);
-          try { api.logout(); } catch (_) {}
+          try {
+            localStorage.removeItem('supportadmin_token');
+            localStorage.removeItem('supportadmin_user');
+          } catch (_) {}
         }
       } finally {
         if (!cancelled) setSessionChecked(true);
@@ -107,6 +108,7 @@ function AppContent() {
     );
   }
   if (!sessionUser) return <Navigate to="/login" replace />;
+
   const isAdmin = userRole === 'admin';
   const isAdminMetrics = userRole === 'admin_metrics';
   const isSupport = userRole === 'support';
@@ -123,7 +125,6 @@ function AppContent() {
         onCollapseChange={setIsSidebarCollapsed}
         userRole={userRole}
       />
-      {/* Main Content */}
       <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''} ${isKnowledgePage ? 'thin-scrollbar' : ''}`}>
           {!isAdminDev && (
             <div className="flex justify-end mb-3 shrink-0">
@@ -166,6 +167,7 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/auth" element={<Login />} />
+            <Route path="/" element={<Navigate to="/login" replace />} />
             <Route path="/*" element={<AppContent />} />
           </Routes>
         </Router>

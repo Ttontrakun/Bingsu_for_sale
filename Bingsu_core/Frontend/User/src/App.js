@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Auth from './pages/auth';
+import Platform from './pages/Platform';
 import ForgotPassword from './pages/forgotpassword';
 import Homepage from './pages/homepage';
 import Verifying from './pages/verifying';
@@ -23,8 +24,8 @@ function App() {
       <Router>
         <ToastContainer />
         <Routes>
+          <Route path="/" element={<Platform />} />
           <Route path="/auth" element={<Auth />} />
-          <Route path="/" element={<Navigate to="/auth" replace />} />
           <Route path="/forgotpassword" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verifying" element={<Verifying />} />
@@ -40,7 +41,7 @@ function App() {
           <Route path="/my-knowledge/create" element={<RequireAuth><MyKnowledgeCreate /></RequireAuth>} />
           <Route path="/my-knowledge/:id/add-data" element={<RequireAuth><MyKnowledgeAddData /></RequireAuth>} />
           <Route path="/chat/:chatId" element={<RequireAuth><Chat /></RequireAuth>} />
-          <Route path="*" element={<Navigate to="/auth" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Router>
     </SystemConfigProvider>

@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom';
-import { HiArrowLeft, HiPlus, HiX, HiOutlinePencil, HiDocumentText, HiChevronDown } from 'react-icons/hi';
+import { HiArrowLeft, HiPlus, HiX, HiOutlinePencil, HiDocumentText, HiChevronDown, HiDownload, HiEye, HiPaperClip } from 'react-icons/hi';
 import Dropdown from '../components/Dropdown';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supportDocuments, getErrorMessage } from '../services/api';
@@ -163,6 +163,9 @@ function SupportAddKnowledgeData() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [document, setDocument] = useState(null);
+  const [attachingFileId, setAttachingFileId] = useState(null);
+  const [originalPreview, setOriginalPreview] = useState(null);
+  const attachOriginalInputRef = useRef(null);
 
   const loadDocument = useCallback(async () => {
     if (!id) return;
@@ -210,6 +213,11 @@ function SupportAddKnowledgeData() {
             structuredText: file.structuredText || '',
             pages: Array.isArray(file.pages) ? file.pages : [],
             existing: true,
+            fileIndex: index,
+            storage: file.storage || null,
+            hasOriginal: Boolean(file.storage || file.hasOriginal),
+            originalName: file.originalName || '',
+            originalType: file.originalType || file.type || '',
             originalSourceFile: file,
           };
         });
@@ -351,6 +359,11 @@ function SupportAddKnowledgeData() {
                   processingOCR: false,
                   processingTime: processingTime,
                   pageCount: pageCount || f.pageCount || (result.pages ? result.pages.length : null),
+                  storage: result.storage || null,
+                  hasOriginal: Boolean(result.hasOriginal || result.storage),
+                  fileIndex: Number.isFinite(Number(result.fileIndex)) ? Number(result.fileIndex) : f.fileIndex,
+                  originalName: result.filename || f.name,
+                  originalType: f.file?.type || f.originalType || '',
                 }
               : f
           )
@@ -407,7 +420,8 @@ function SupportAddKnowledgeData() {
 
   // ตรวจสอบไฟล์ก่อนเพิ่ม
   const validateFile = (file) => {
-    const maxSize = 5 * 1024 * 1024; // 5 MB in bytes
+    const maxSizeMb = 50;
+    const maxSize = maxSizeMb * 1024 * 1024;
     
     if (!file) {
       return { valid: false, message: 'กรุณาเลือกไฟล์' };
@@ -423,7 +437,7 @@ function SupportAddKnowledgeData() {
     if (file.size > maxSize) {
       return { 
         valid: false, 
-        message: `ขนาดไฟล์เกิน 5 MB (ขนาดไฟล์: ${(file.size / 1024 / 1024).toFixed(2)} MB)` 
+        message: `ขนาดไฟล์เกิน ${maxSizeMb} MB (ขนาดไฟล์: ${(file.size / 1024 / 1024).toFixed(2)} MB)` 
       };
     }
 
@@ -684,6 +698,160 @@ function SupportAddKnowledgeData() {
     setSelectedPreviewChunks(rows.map((r) => r.idx));
     setPreviewEditMode(false);
     setIsPreviewModalOpen(true);
+  };
+
+  const resolveFileIndex = (file) => {
+    if (Number.isFinite(Number(file?.fileIndex))) return Number(file.fileIndex);
+    const idx = uploadedFiles.findIndex((f) => f.id === file?.id);
+    return idx >= 0 ? idx : null;
+  };
+
+  const handleDownloadOriginal = async (file) => {
+    const fileIndex = resolveFileIndex(file);
+    if (fileIndex == null || !id) {
+      showToast('ยังไม่มีไฟล์ต้นฉบับสำหรับดาวน์โหลด', 'warning');
+      return;
+    }
+    try {
+      const blob = await supportDocuments.fetchOriginalBlob(id, fileIndex, { inline: false });
+      const url = URL.createObjectURL(blob);
+      const a = window.document.createElement('a');
+      a.href = url;
+      a.download = file.originalName || file.name || 'document';
+      window.document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast(getErrorMessage(err) || 'ดาวน์โหลดต้นฉบับไม่สำเร็จ', 'error');
+    }
+  };
+
+  const repairDisplayName = (name) => {
+    const raw = String(name || 'document');
+    if (/[\u0E00-\u0E7F]/.test(raw) || !/à[¸¹]/.test(raw)) return raw;
+    try {
+      const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0));
+      const fixed = new TextDecoder('utf-8').decode(bytes);
+      return /[\u0E00-\u0E7F]/.test(fixed) ? fixed : raw;
+    } catch {
+      return raw;
+    }
+  };
+
+  const handleViewOriginal = async (file) => {
+    const fileIndex = resolveFileIndex(file);
+    if (fileIndex == null || !id) {
+      showToast('ยังไม่มีไฟล์ต้นฉบับให้ดู', 'warning');
+      return;
+    }
+    const displayName = repairDisplayName(file.originalName || file.name || 'document');
+    const isPdf = /\.pdf$/i.test(displayName) || /pdf/i.test(String(file.originalType || file.type || ''));
+    const isExcel =
+      /\.(xlsx|xls|csv)$/i.test(displayName) ||
+      /spreadsheet|ms-excel|csv/i.test(String(file.originalType || file.type || ''));
+
+    if (isExcel) {
+      setOriginalPreview({
+        kind: 'excel',
+        url: null,
+        name: displayName,
+        loading: true,
+        sheets: [],
+        fileIndex,
+      });
+      try {
+        const result = await supportDocuments.fetchExcelPreview(id, fileIndex);
+        if (!result?.ok) throw new Error(result?.error || 'พรีวิว Excel ไม่สำเร็จ');
+        setOriginalPreview({
+          kind: 'excel',
+          url: null,
+          name: repairDisplayName(result.name || displayName),
+          loading: false,
+          sheets: Array.isArray(result.sheets) ? result.sheets : [],
+          fileIndex,
+        });
+      } catch (err) {
+        setOriginalPreview(null);
+        showToast(getErrorMessage(err) || 'พรีวิว Excel ไม่สำเร็จ — ลองดาวน์โหลดแทน', 'error');
+      }
+      return;
+    }
+
+    if (!isPdf) {
+      showToast('ไฟล์นี้พรีวิวในเว็บไม่ได้ — จะดาวน์โหลดให้แทน', 'info');
+      await handleDownloadOriginal(file);
+      return;
+    }
+
+    setOriginalPreview({ kind: 'pdf', url: null, name: displayName, loading: true, sheets: [], fileIndex });
+    try {
+      const blob = await supportDocuments.fetchOriginalBlob(id, fileIndex, { inline: true });
+      const typed = blob.type && blob.type !== 'application/octet-stream'
+        ? blob
+        : new Blob([blob], { type: 'application/pdf' });
+      const url = URL.createObjectURL(typed);
+      setOriginalPreview({ kind: 'pdf', url, name: displayName, loading: false, sheets: [], fileIndex });
+    } catch (err) {
+      setOriginalPreview(null);
+      showToast(getErrorMessage(err) || 'เปิดต้นฉบับไม่สำเร็จ', 'error');
+    }
+  };
+
+  const closeOriginalPreview = () => {
+    if (originalPreview?.url) URL.revokeObjectURL(originalPreview.url);
+    setOriginalPreview(null);
+  };
+
+  const handleAttachOriginalClick = (file) => {
+    if (!file?.existing) {
+      showToast('บันทึก Knowledge ก่อน แล้วค่อยแนบต้นฉบับ', 'warning');
+      return;
+    }
+    setAttachingFileId(file.id);
+    attachOriginalInputRef.current?.click();
+  };
+
+  const handleAttachOriginalSelected = async (e) => {
+    const picked = e.target.files?.[0];
+    e.target.value = '';
+    const targetId = attachingFileId;
+    setAttachingFileId(null);
+    if (!picked || !targetId || !id) return;
+    const file = uploadedFiles.find((f) => f.id === targetId);
+    const fileIndex = resolveFileIndex(file);
+    if (fileIndex == null) {
+      showToast('ไม่พบไฟล์ปลายทาง', 'error');
+      return;
+    }
+    try {
+      showToast(`กำลังแนบต้นฉบับ ${picked.name}...`, 'info');
+      const result = await supportDocuments.attachOriginal(id, fileIndex, picked);
+      if (!result?.ok) throw new Error(result?.error || 'แนบต้นฉบับไม่สำเร็จ');
+      setUploadedFiles((prev) =>
+        prev.map((f) =>
+          f.id === targetId
+            ? {
+                ...f,
+                storage: result.storage || f.storage,
+                hasOriginal: true,
+                originalName: result.originalName || picked.name,
+                originalType: result.originalType || picked.type,
+                originalSourceFile: {
+                  ...(f.originalSourceFile || {}),
+                  storage: result.storage,
+                  hasOriginal: true,
+                  originalName: result.originalName || picked.name,
+                  originalType: result.originalType || picked.type,
+                },
+              }
+            : f
+        )
+      );
+      showToast('แนบต้นฉบับสำเร็จ', 'success');
+    } catch (err) {
+      showToast(getErrorMessage(err) || 'แนบต้นฉบับไม่สำเร็จ', 'error');
+    }
   };
 
   const handleSavePreviewEdit = () => {
@@ -1230,6 +1398,15 @@ function SupportAddKnowledgeData() {
         if (file.metadata && typeof file.metadata === 'object') {
           sourceFile.metadata = file.metadata;
         }
+
+        if (file.storage) {
+          sourceFile.storage = file.storage;
+          sourceFile.hasOriginal = true;
+          if (file.originalName) sourceFile.originalName = file.originalName;
+          if (file.originalType) sourceFile.originalType = file.originalType;
+        } else if (file.hasOriginal) {
+          sourceFile.hasOriginal = true;
+        }
         
         // Add blocks if available
         if (file.blocks && file.blocks.length > 0) {
@@ -1328,6 +1505,13 @@ function SupportAddKnowledgeData() {
         </button>
 
         <form onSubmit={handleSubmit} className='flex-1 max-w-6xl'>
+          <input
+            ref={attachOriginalInputRef}
+            type='file'
+            accept='.pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv'
+            className='hidden'
+            onChange={handleAttachOriginalSelected}
+          />
           {/* Error Message */}
           {error && (
             <div className='mb-6 p-4 bg-red-50 border-2 border-red-300 rounded-lg shadow-sm'>
@@ -1502,7 +1686,7 @@ function SupportAddKnowledgeData() {
                         <HiPlus className='text-3xl text-gray-400' />
                         <span className='text-gray-600'>Click to upload file</span>
                         <span className='text-sm text-gray-400'>or drag and drop</span>
-                        <span className='text-xs text-red-500 font-semibold mt-2'>**รองรับ PDF, XLSX, XLS, CSV ครั้งละ 1 ไฟล์ และขนาดไม่เกิน 5 MB**</span>
+                        <span className='text-xs text-red-500 font-semibold mt-2'>**รองรับ PDF, XLSX, XLS, CSV ครั้งละ 1 ไฟล์ และขนาดไม่เกิน 50 MB**</span>
                       </label>
                       </div>
                       {fileError && (
@@ -1618,12 +1802,49 @@ function SupportAddKnowledgeData() {
                               <span>ดูผล OCR</span>
                             </button>
                           )}
+
+                          {file.hasOriginal || file.storage ? (
+                            <div className='grid grid-cols-2 gap-2'>
+                              <button
+                                type='button'
+                                onClick={() => handleViewOriginal(file)}
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-colors'
+                                title={file.originalName ? `เปิด ${file.originalName}` : 'เปิดต้นฉบับ'}
+                              >
+                                <HiEye className='text-base flex-shrink-0' />
+                                <span>ดูต้นฉบับ</span>
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => handleDownloadOriginal(file)}
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 transition-colors'
+                              >
+                                <HiDownload className='text-base flex-shrink-0' />
+                                <span>ดาวน์โหลด</span>
+                              </button>
+                            </div>
+                          ) : file.existing ? (
+                            <button
+                              type='button'
+                              onClick={() => handleAttachOriginalClick(file)}
+                              className='w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-zinc-400 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors'
+                              title='แนบ PDF/Excel ต้นฉบับทีหลัง โดยไม่ทับข้อความ OCR'
+                            >
+                              <HiPaperClip className='text-lg flex-shrink-0' />
+                              <span>แนบต้นฉบับ PDF/Excel</span>
+                            </button>
+                          ) : null}
                           
                           {/* Status Badge */}
                           <div className='flex items-center gap-2 flex-wrap'>
                             {file.existing && (
                               <span className='text-xs bg-gray-200 text-gray-700 px-2 py-0.5 rounded'>
                                 บันทึกแล้วใน Knowledge
+                              </span>
+                            )}
+                            {(file.hasOriginal || file.storage) && (
+                              <span className='text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded'>
+                                มีต้นฉบับ
                               </span>
                             )}
                             {file.processingOCR ? (
@@ -1687,6 +1908,108 @@ function SupportAddKnowledgeData() {
         </form>
 
         {/* Delete Confirmation Modal */}
+        {originalPreview && (
+          <>
+            <div className='fixed inset-0 bg-black/50 z-40' onClick={closeOriginalPreview} />
+            <div className='fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none'>
+              <div className='bg-white rounded-2xl shadow-xl w-full max-w-5xl h-[85vh] flex flex-col pointer-events-auto'>
+                <div className='px-5 py-3 border-b border-gray-200 flex items-center justify-between gap-3'>
+                  <p className='text-sm font-semibold text-gray-900 truncate' title={originalPreview.name}>
+                    ต้นฉบับ: {originalPreview.name}
+                  </p>
+                  <div className='flex items-center gap-2 shrink-0'>
+                    {Number.isFinite(Number(originalPreview.fileIndex)) && (
+                      <button
+                        type='button'
+                        onClick={() => handleDownloadOriginal({
+                          fileIndex: originalPreview.fileIndex,
+                          originalName: originalPreview.name,
+                          name: originalPreview.name,
+                        })}
+                        className='inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50'
+                      >
+                        <HiDownload className='text-sm' />
+                        ดาวน์โหลด
+                      </button>
+                    )}
+                    <button
+                      type='button'
+                      onClick={closeOriginalPreview}
+                      className='text-gray-500 hover:text-gray-800 p-1'
+                      aria-label='ปิด'
+                    >
+                      <HiX className='text-lg' />
+                    </button>
+                  </div>
+                </div>
+                <div className='flex-1 min-h-0 bg-gray-100 overflow-auto'>
+                  {originalPreview.loading ? (
+                    <div className='h-full flex items-center justify-center text-sm text-gray-600'>กำลังโหลดต้นฉบับ...</div>
+                  ) : originalPreview.kind === 'excel' ? (
+                    Array.isArray(originalPreview.sheets) && originalPreview.sheets.length > 0 ? (
+                      <div className='p-4 space-y-5'>
+                        {originalPreview.sheets.map((sheet, sheetIndex) => {
+                          const columns = Array.isArray(sheet?.columns) ? sheet.columns : [];
+                          const rows = Array.isArray(sheet?.rows) ? sheet.rows : [];
+                          if (!columns.length) return null;
+                          return (
+                            <div key={`${sheet?.name || 'sheet'}-${sheetIndex}`} className='rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden'>
+                              <div className='px-4 py-2 bg-slate-100 border-b border-slate-200 text-sm font-semibold text-slate-700'>
+                                Sheet: {sheet?.name || `Sheet ${sheetIndex + 1}`} ({rows.length} แถวพรีวิว)
+                              </div>
+                              <div className='overflow-x-auto max-h-[55vh] overflow-y-auto'>
+                                <table className='min-w-full border-collapse text-sm'>
+                                  <thead className='sticky top-0 z-10'>
+                                    <tr className='bg-slate-50 border-b border-slate-200 text-left text-xs text-slate-600'>
+                                      <th className='px-3 py-2.5 font-semibold w-12'>#</th>
+                                      {columns.map((column, colIdx) => (
+                                        <th key={`${sheetIndex}-col-${colIdx}`} className='px-3 py-2.5 font-semibold whitespace-nowrap'>
+                                          {column}
+                                        </th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {rows.map((row, rowIdx) => (
+                                      <tr
+                                        key={`${sheetIndex}-row-${rowIdx}`}
+                                        className={`border-b border-slate-100 align-top ${rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/80'}`}
+                                      >
+                                        <td className='px-3 py-3 text-slate-500 tabular-nums'>{rowIdx + 1}</td>
+                                        {columns.map((column, colIdx) => (
+                                          <td key={`${sheetIndex}-cell-${rowIdx}-${colIdx}`} className='px-3 py-3 text-slate-800 leading-relaxed whitespace-pre-wrap'>
+                                            {String(row?.[column] ?? '').trim() || '—'}
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className='h-full flex items-center justify-center text-sm text-gray-600 px-4 text-center'>
+                        ไม่พบตารางในไฟล์ — กดดาวน์โหลดเพื่อเปิดใน Excel
+                      </div>
+                    )
+                  ) : originalPreview.url ? (
+                    <iframe
+                      title={originalPreview.name}
+                      src={originalPreview.url}
+                      className='w-full h-full border-0'
+                    />
+                  ) : (
+                    <div className='h-full flex items-center justify-center text-sm text-red-600'>โหลดต้นฉบับไม่สำเร็จ</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
         {isDeleteConfirmOpen && (
           <>
             {/* Backdrop */}

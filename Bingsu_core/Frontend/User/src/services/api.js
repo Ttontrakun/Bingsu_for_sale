@@ -109,19 +109,25 @@ api.interceptors.response.use(
     (error) => {
         // Handle 401 Unauthorized - clear token and redirect to login
         if (error.response?.status === 401) {
-            const publicPaths = ['/auth', '/verifying', '/forgot-password', '/reset-password', '/create-password'];
+            // หน้าสาธารณะ — อย่าพาไป /auth (โดยเฉพาะ "/" = Platform landing)
+            const publicExact = new Set(['/', '/auth', '/verifying', '/forgotpassword', '/forgot-password', '/reset-password', '/create-password', '/approval', '/privacy-policy']);
+            const publicPrefixes = ['/auth', '/verifying', '/forgotpassword', '/forgot-password', '/reset-password', '/create-password', '/approval', '/privacy-policy'];
+            const isPublicPath = (pathname) => {
+                const path = String(pathname || '');
+                if (publicExact.has(path)) return true;
+                return publicPrefixes.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+            };
             const currentPath = window.location.pathname;
             
             // Clear cached user data
             localStorage.removeItem('user');
             
             // Only redirect if not on a public page
-            if (!publicPaths.some(path => currentPath.startsWith(path))) {
+            if (!isPublicPath(currentPath)) {
                 // Use setTimeout to avoid redirect during render
                 setTimeout(() => {
                     const newPath = window.location.pathname;
-                    // Double check we're not on a public path before redirecting
-                    if (!publicPaths.some(path => newPath.startsWith(path)) && newPath !== '/auth') {
+                    if (!isPublicPath(newPath)) {
                         window.location.href = '/auth';
                     }
                 }, 100);
@@ -650,6 +656,42 @@ export const knowledgeAPI = {
             `/documents/${encodeURIComponent(id)}/files/ocr/structure-text`,
             { text: typeof text === 'string' ? text : '' },
             { timeout: 600000 },
+        );
+        return response.data;
+    },
+    /** แนบ PDF/Excel ต้นฉบับให้ไฟล์ที่มีอยู่แล้ว (ไม่ทับ OCR) */
+    attachOriginal: async (documentId, fileIndex, file) => {
+        const id = documentId != null ? String(documentId).trim() : '';
+        if (!id) throw new Error('Invalid document ID');
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await api.post(
+            `/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/original`,
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 600000 },
+        );
+        return response.data;
+    },
+    /** ดาวน์โหลด/พรีวิวต้นฉบับ — คืน blob */
+    fetchOriginalBlob: async (documentId, fileIndex, { inline = false } = {}) => {
+        const id = documentId != null ? String(documentId).trim() : '';
+        if (!id) throw new Error('Invalid document ID');
+        const response = await api.get(
+            `/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/download`,
+            {
+                params: inline ? { inline: 1 } : undefined,
+                responseType: 'blob',
+                timeout: 120000,
+            },
+        );
+        return response.data;
+    },
+    fetchExcelPreview: async (documentId, fileIndex) => {
+        const id = documentId != null ? String(documentId).trim() : '';
+        if (!id) throw new Error('Invalid document ID');
+        const response = await api.get(
+            `/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/excel-preview`,
+            { timeout: 120000 },
         );
         return response.data;
     },

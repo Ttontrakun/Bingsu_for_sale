@@ -114,6 +114,51 @@
   margin: 0.75rem 0;
 }
 
+/* Platform landing */
+.platform-font-brand {
+  font-family: 'Taviraj', 'Anuphan', serif;
+}
+.platform-font-display {
+  font-family: 'Taviraj', 'Anuphan', serif;
+}
+.platform-font-body {
+  font-family: 'Anuphan', sans-serif;
+}
+
+@keyframes platform-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes platform-mascot-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.platform-hero-copy {
+  animation: platform-fade-up 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.platform-mascot-stage {
+  animation: platform-mascot-in 0.6s ease-out both;
+}
+
+.platform-mascot-stage img {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
 /* Hide browser-native password reveal/clear icons (Edge/IE) when using custom eye button */
 input.hide-native-password-toggle::-ms-reveal,
 input.hide-native-password-toggle::-ms-clear {

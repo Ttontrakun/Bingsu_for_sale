@@ -79,6 +79,8 @@ services:
       QDRANT_URL: http://qdrant:6333
       OCR_API_URL: http://ocr:8001
       UPLOAD_QUEUE_MODE: redis
+      STORE_RAW_FILES: "true"
+      FILE_STORAGE_PROVIDER: local
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,6 +94,7 @@ services:
       - "5052:5052"
     volumes:
       - bb_uploads:/app/uploads
+      - bb_files:/app/.files
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://127.0.0.1:5052/api/ping"]
       interval: 15s
@@ -126,3 +129,4 @@ volumes:
   bb_ocr_models:
   bb_ocr_cache:
   bb_uploads:
+  bb_files:

@@ -24,20 +24,9 @@ const upload = multer({
 
 const MANUAL_ID = "default";
 
-const DEFAULT_PAYLOAD = {
-  documents: [
-    {
-      id: "form",
-      type: "content",
-      title: "แบบฟอร์มบันทึก",
-      description: "รวมแบบฟอร์มการใช้งานที่เกี่ยวข้องกับระบบ Enterprise AI Chatbot",
-      iconKey: "form",
-      iconBg: "bg-yellow-100",
-      iconColor: "text-yellow-500",
-      subcategories: [],
-    },
-  ],
-};
+const DEFAULT_PAYLOAD = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "../data/manualDefault.json"), "utf8"),
+);
 
 const CONTENT_TYPES = new Set(["text", "list", "price", "pdf"]);
 

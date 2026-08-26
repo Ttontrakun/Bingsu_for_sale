@@ -143,7 +143,7 @@ function Auth() {
     <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
       <NtBrandBar
         logoSrc={ntLogo}
-        className="relative z-20 flex h-[55px] shrink-0 items-center justify-start bg-[#FFD100] px-4 shadow-sm md:px-6"
+        className="relative z-20 flex h-[55px] shrink-0 items-center justify-start bg-white px-4 shadow-sm md:px-6"
         logoClassName="h-9 w-auto max-w-[240px] object-contain object-left"
       />
 
