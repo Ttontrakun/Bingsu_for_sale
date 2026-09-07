@@ -513,7 +513,7 @@ function Home({ userRole }) {
           const Icon = ICON_MAP[doc.iconKey] || HiLightBulb;
           const PreviewIcon = ICON_MAP[editCategoryData.iconKey] || Icon;
           return (
-            <div key={doc.id} className='bg-white border border-gray-200 rounded-2xl p-4 md:p-6 shadow-sm relative'>
+            <div key={doc.id} className='bg-white border border-gray-200 rounded-2xl p-4 md:p-6 shadow-sm hover:border-yellow-200 transition-colors relative'>
               {editingCategory === doc.id ? (
                 <div className='space-y-4'>
                   <div className='flex items-start gap-3'>

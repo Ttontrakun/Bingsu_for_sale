@@ -91,6 +91,9 @@ const EVENT_LABEL_TH = {
   'admin.announcement.enabled': 'เปิดแสดงประกาศ',
   'admin.announcement.disabled': 'ปิดแสดงประกาศ',
   'admin.announcement.deleted': 'ลบประกาศ',
+  'admin.maintenance.enabled': 'เปิดโหมดปิดปรับปรุง',
+  'admin.maintenance.disabled': 'ปิดโหมดปิดปรับปรุง',
+  'admin.maintenance.updated': 'แก้ไขโหมดปิดปรับปรุง',
   'admin.restore': 'กู้คืนข้อมูล',
   'admin.restore.failed': 'กู้คืนข้อมูล (ล้มเหลว)',
   'chat.retention.pruned': 'ลบแชทเก่าอัตโนมัติ',
@@ -487,6 +490,16 @@ function formatAdminSummary(eventMessage, meta) {
       return m.message
         ? `ลบประกาศ — ${q(String(m.message).slice(0, 80))}`
         : 'ลบประกาศถึงผู้ใช้';
+    case 'admin.maintenance.enabled':
+      return m.message
+        ? `เปิดโหมดปิดปรับปรุง — ${q(String(m.message).slice(0, 80))}`
+        : 'เปิดโหมดปิดปรับปรุงทั้งเว็บผู้ใช้';
+    case 'admin.maintenance.disabled':
+      return 'ปิดโหมดปิดปรับปรุง — ผู้ใช้ใช้เว็บได้ตามปกติ';
+    case 'admin.maintenance.updated':
+      return m.message
+        ? `แก้ไขข้อความปิดปรับปรุง — ${q(String(m.message).slice(0, 80))}`
+        : 'แก้ไขข้อความโหมดปิดปรับปรุง';
     case 'synonym.created':
       return m.term ? `เพิ่มคำพ้อง — คำในเอกสาร ${q(m.term)}` : 'เพิ่มคำพ้องความหมาย';
     case 'synonym.updated':
@@ -706,6 +719,9 @@ const EVENT_FILTER_GROUPS = [
       'admin.announcement.enabled',
       'admin.announcement.disabled',
       'admin.announcement.deleted',
+      'admin.maintenance.enabled',
+      'admin.maintenance.disabled',
+      'admin.maintenance.updated',
     ],
   },
   {

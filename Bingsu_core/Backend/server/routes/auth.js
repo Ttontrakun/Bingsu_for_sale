@@ -29,11 +29,12 @@ import {
   passwordResetTokenTtlHours,
   requireEmailVerification,
   isProduction,
+  allowDevAuthTokens,
   allowSignupAutoApprove,
+  bcryptRounds,
   sessionCookieDomain,
   sessionCookieName,
   sessionCookieSameSite,
-  sessionCookieSecure,
 } from "../config.js";
 
 export const authRouter = express.Router();
@@ -54,9 +55,14 @@ const normalizeSameSite = (value) => {
   return "lax";
 };
 
-const buildSessionCookieOptions = (expiresAt) => ({
+const requestIsHttps = (req) => {
+  const forwarded = String(req?.headers?.["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  return forwarded === "https" || req?.secure === true;
+};
+
+const buildSessionCookieOptions = (expiresAt, req) => ({
   httpOnly: true,
-  secure: !!sessionCookieSecure,
+  secure: requestIsHttps(req),
   sameSite: normalizeSameSite(sessionCookieSameSite),
   path: "/",
   expires: expiresAt instanceof Date ? expiresAt : undefined,
@@ -159,7 +165,7 @@ export async function signupHandler(req, res) {
           pending: true,
           verificationRequired: true,
           verificationEmailSent: emailFeatures.isConfigured(),
-          verificationToken: !isProduction ? token : undefined,
+          verificationToken: allowDevAuthTokens ? token : undefined,
           onboardingState: "email_verification_pending",
         });
         return;
@@ -189,7 +195,7 @@ export async function signupHandler(req, res) {
           verificationRequired: false,
           passwordSetupRequired: true,
           resetEmailSent: emailFeatures.isConfigured(),
-          passwordSetupToken: !isProduction ? passwordSetupToken : undefined,
+          passwordSetupToken: allowDevAuthTokens ? passwordSetupToken : undefined,
           onboardingState: "password_setup_pending",
         });
         return;
@@ -214,7 +220,7 @@ export async function signupHandler(req, res) {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(passwordToUse, 10);
+  const passwordHash = await bcrypt.hash(passwordToUse, bcryptRounds);
   const user = await prisma.user.create({
     data: {
       email: normEmail,
@@ -272,7 +278,7 @@ export async function signupHandler(req, res) {
     pending: true,
     verificationRequired: requireEmailVerification,
     verificationEmailSent: emailFeatures.isConfigured(),
-    verificationToken: !isProduction ? verificationToken : undefined,
+    verificationToken: allowDevAuthTokens ? verificationToken : undefined,
   });
 }
 
@@ -384,11 +390,9 @@ authRouter.post("/login", async (req, res) => {
       meta: { email: user.email, name: user.name, role: user.role, ...context },
     }).catch((err) => console.error("[auth] logEvent failed:", err));
 
-    res.cookie(sessionCookieName, session.token, buildSessionCookieOptions(session.expiresAt));
+    res.cookie(sessionCookieName, session.token, buildSessionCookieOptions(session.expiresAt, req));
     res.json({
       user: sanitizeUser(user),
-      // ให้ SPA (Supportadmin) เก็บ Bearer ได้ — กันเคส cookie อย่างเดียวหลุด
-      token: session.token,
       expiresAt: session.expiresAt,
     });
   } catch (err) {
@@ -546,7 +550,7 @@ authRouter.post("/resend-verification", async (req, res) => {
   res.json({
     ok: true,
     verificationEmailSent: emailFeatures.isConfigured(),
-    verificationToken: !isProduction ? token : undefined,
+    verificationToken: allowDevAuthTokens ? token : undefined,
   });
 });
 
@@ -613,7 +617,7 @@ const handleRequestPasswordReset = async (req, res) => {
     res.json({
       ok: true,
       resetEmailSent: emailFeatures.isConfigured(),
-      resetToken: !isProduction ? token : undefined,
+      resetToken: allowDevAuthTokens ? token : undefined,
     });
     return;
   }
@@ -666,7 +670,7 @@ const consumePasswordToken = async ({
     return;
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, bcryptRounds);
   await prisma.user.update({
     where: { id: user.id },
     data: {
@@ -762,7 +766,7 @@ authRouter.post("/change-password", authenticate, async (req, res) => {
     return;
   }
 
-  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const passwordHash = await bcrypt.hash(newPassword, bcryptRounds);
   await prisma.user.update({
     where: { id: user.id },
     data: { passwordHash },

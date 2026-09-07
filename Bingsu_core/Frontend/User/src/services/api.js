@@ -26,6 +26,14 @@ export const getErrorMessage = (error) => {
         return 'เกิดข้อผิดพลาด';
     }
 
+    if (error.response?.status === 503) {
+        const data = error.response?.data;
+        if (data?.error === 'maintenance') {
+            return data.message || 'ระบบปิดปรับปรุงชั่วคราว กรุณาลองใหม่ภายหลัง';
+        }
+        return 'ระบบปิดปรับปรุงชั่วคราว กรุณาลองใหม่ภายหลัง';
+    }
+
     // Handle 429 Too Many Requests (Rate Limiting)
     if (error.response?.status === 429) {
         const retryAfter = error.response.headers['retry-after'];
@@ -110,7 +118,7 @@ api.interceptors.response.use(
         // Handle 401 Unauthorized - clear token and redirect to login
         if (error.response?.status === 401) {
             // หน้าสาธารณะ — อย่าพาไป /auth (โดยเฉพาะ "/" = Platform landing)
-            const publicExact = new Set(['/', '/auth', '/verifying', '/forgotpassword', '/forgot-password', '/reset-password', '/create-password', '/approval', '/privacy-policy']);
+            const publicExact = new Set(['/', '/auth', '/platform', '/verifying', '/forgotpassword', '/forgot-password', '/reset-password', '/create-password', '/approval', '/privacy-policy']);
             const publicPrefixes = ['/auth', '/verifying', '/forgotpassword', '/forgot-password', '/reset-password', '/create-password', '/approval', '/privacy-policy'];
             const isPublicPath = (pathname) => {
                 const path = String(pathname || '');
@@ -558,6 +566,10 @@ export const announcementAPI = {
         const response = await api.get('/announcements/active');
         return Array.isArray(response.data?.announcements) ? response.data.announcements : [];
     },
+    getMaintenance: async () => {
+        const response = await api.get('/announcements/maintenance');
+        return response.data || { enabled: false };
+    },
 };
 
 // Private Context API (โหมดส่วนตัว — เนื้อหาที่ผู้ใช้กรอกเอง เก็บระดับ user)
@@ -649,12 +661,15 @@ export const knowledgeAPI = {
         );
         return response.data;
     },
-    structureOcrWithAi: async (documentId, text) => {
+    structureOcrWithAi: async (documentId, text, model = '') => {
         const id = documentId != null ? String(documentId).trim() : '';
         if (!id) throw new Error('Invalid document ID');
         const response = await api.post(
             `/documents/${encodeURIComponent(id)}/files/ocr/structure-text`,
-            { text: typeof text === 'string' ? text : '' },
+            {
+              text: typeof text === 'string' ? text : '',
+              ...(model ? { model } : {}),
+            },
             { timeout: 600000 },
         );
         return response.data;

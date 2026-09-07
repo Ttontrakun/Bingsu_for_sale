@@ -14,6 +14,7 @@ function Knowledge({ userRole = 'support' }) {
   const canDeleteKnowledge = userRole === 'admin';
   const canEditKnowledge = userRole === 'admin';
   const [knowledgeList, setKnowledgeList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [editTarget, setEditTarget] = useState(null);
   const [editName, setEditName] = useState('');
@@ -30,6 +31,7 @@ function Knowledge({ userRole = 'support' }) {
 
   const loadKnowledge = useCallback(async () => {
     setLoadError(null);
+    setLoading(true);
     try {
       const list = await api.getAdminDocuments();
       const mapped = (list || []).map(mapDocumentToDisplay);
@@ -38,6 +40,8 @@ function Knowledge({ userRole = 'support' }) {
       setKnowledgeList([]);
       const msg = err?.message || '';
       setLoadError(msg === 'SESSION_EXPIRED' ? 'SESSION_EXPIRED' : (msg || 'โหลดรายการ Knowledge ไม่สำเร็จ — ตรวจสอบว่า backend รันอยู่'));
+    } finally {
+      setLoading(false);
     }
   }, [pinGuideFirst]);
 
@@ -183,13 +187,24 @@ function Knowledge({ userRole = 'support' }) {
       )}
 
       {/* Knowledge List — 12 กล่องต่อหน้า */}
-      {filteredKnowledgeList.length > 0 ? (
+      {loading ? (
+        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className='bg-white border border-gray-200 rounded-2xl p-5 shadow-sm animate-pulse'>
+              <div className='h-4 w-2/3 rounded bg-gray-200' />
+              <div className='mt-3 h-3 w-full rounded bg-gray-100' />
+              <div className='mt-2 h-3 w-4/5 rounded bg-gray-100' />
+              <div className='mt-6 h-9 w-full rounded-lg bg-gray-100' />
+            </div>
+          ))}
+        </div>
+      ) : filteredKnowledgeList.length > 0 ? (
         <>
           <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
             {paginatedKnowledgeList.map((knowledge) => (
               <div
                 key={knowledge.id}
-                className='bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col min-w-0 overflow-hidden'
+                className='bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all flex flex-col min-w-0 overflow-hidden'
               >
                 <div className='flex-1 min-w-0'>
                   <h3 title={knowledge.name} className='text-base font-semibold text-gray-800 mb-1 truncate'>{knowledge.name}</h3>
@@ -271,8 +286,12 @@ function Knowledge({ userRole = 'support' }) {
         </>
       ) : (
         <div className='text-center py-16'>
-          <p className='text-gray-500 text-lg mb-4'>No knowledge found</p>
-          <p className='text-gray-400 text-sm'>Try adjusting your search query</p>
+          <p className='text-gray-700 text-lg mb-1'>
+            {searchQuery.trim() ? 'ไม่พบ Knowledge ที่ค้นหา' : 'ยังไม่มี Knowledge'}
+          </p>
+          <p className='text-gray-500 text-sm'>
+            {searchQuery.trim() ? 'ลองเปลี่ยนคำค้นหา' : 'สร้าง Knowledge ใหม่เพื่อเริ่มใช้งาน'}
+          </p>
         </div>
       )}
 

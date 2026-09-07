@@ -66,7 +66,7 @@ function MyKnowledgeCreate() {
   };
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-[#f7f7f8]">
       <Sidebar />
       <main className="flex-1 overflow-auto px-6 py-6">
         <div className="max-w-2xl">
@@ -79,7 +79,7 @@ function MyKnowledgeCreate() {
             <span>Back</span>
           </button>
 
-          <h1 className="text-2xl font-semibold text-gray-800 mb-6">สร้าง Knowledge ใหม่</h1>
+          <h1 className="text-2xl font-bold text-gray-800 mb-6">สร้าง Knowledge ใหม่</h1>
 
           <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-6">
             {error && (

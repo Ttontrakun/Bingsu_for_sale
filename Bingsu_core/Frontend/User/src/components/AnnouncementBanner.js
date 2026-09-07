@@ -7,6 +7,8 @@ const DISMISSED_KEY = 'dismissedAnnouncements';
 const MARQUEE_ROUNDS = 2;
 /** ความเร็วพิกเซลต่อวินาที */
 const PX_PER_SEC = 42;
+/** ข้อความสั้นที่ไม่ต้องเลื่อน — ค้างไว้กี่มิลลิวินาทีก่อนปิดเอง */
+const STATIC_MS = 14000;
 
 const getDismissedIds = () => {
   try {
@@ -30,7 +32,7 @@ const persistDismiss = (id) => {
 /**
  * แถบประกาศฝั่งผู้ใช้
  * - แสดงแค่ประกาศล่าสุด 1 ข้อความ (ไม่ทำสำเนาให้ดูเหมือนหลายบรรทัด)
- * - เลื่อนด้วย rAF ทีละพิกเซล ครบ 2 รอบแล้วหาย (รีเซ็ตรอบนอกจอ ไม่กระตุก)
+ * - ข้อความยาวเกินกรอบจึงเลื่อนด้วย rAF ครบ 2 รอบแล้วหาย, สั้นกว่านั้นวางนิ่ง
  */
 const AnnouncementBanner = () => {
   const [item, setItem] = useState(null);
@@ -69,6 +71,16 @@ const AnnouncementBanner = () => {
     const wrap = wrapRef.current;
     const text = textRef.current;
     if (!wrap || !text) return undefined;
+
+    // อ่านจบในบรรทัดเดียวอยู่แล้ว — เลื่อนไปมาทำให้อ่านยากกว่าเดิม
+    if (text.offsetWidth <= wrap.clientWidth) {
+      text.style.transform = 'translate3d(0,0,0)';
+      const timer = window.setTimeout(() => {
+        const id = itemRef.current?.id;
+        if (id) dismiss(id);
+      }, STATIC_MS);
+      return () => window.clearTimeout(timer);
+    }
 
     let rafId = 0;
     let cancelled = false;
@@ -118,18 +130,31 @@ const AnnouncementBanner = () => {
   return (
     <div className='px-4 pt-3'>
       <div
-        className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2 text-sm overflow-hidden ${
+        className={`flex items-center gap-3 rounded-xl border-l-4 border-y border-r px-3 py-2.5 text-sm overflow-hidden shadow-sm ${
           isWarning
-            ? 'border-amber-200 bg-amber-50 text-amber-900'
-            : 'border-blue-200 bg-blue-50 text-blue-900'
+            ? 'border-red-500 border-y-red-200 border-r-red-200 bg-red-50'
+            : 'border-yellow-400 border-y-yellow-300 border-r-yellow-300 bg-yellow-50'
         }`}
         role='status'
       >
-        <HiSpeakerphone className='text-base flex-shrink-0 opacity-70' aria-hidden />
+        <span
+          className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${
+            isWarning ? 'bg-red-500 text-white' : 'bg-yellow-400 text-gray-900'
+          }`}
+        >
+          <HiSpeakerphone className='text-sm' aria-hidden />
+        </span>
+        <span
+          className={`flex-shrink-0 text-xs font-bold ${
+            isWarning ? 'text-red-700' : 'text-gray-700'
+          }`}
+        >
+          {isWarning ? 'ประกาศสำคัญ' : 'ประกาศ'}
+        </span>
         <div ref={wrapRef} className='flex-1 min-w-0 overflow-hidden relative h-5'>
           <p
             ref={textRef}
-            className='absolute left-0 top-0 whitespace-nowrap leading-relaxed will-change-transform'
+            className='absolute left-0 top-0 whitespace-nowrap leading-5 font-medium text-gray-900 will-change-transform'
             style={{ transform: 'translate3d(0,0,0)', backfaceVisibility: 'hidden' }}
           >
             {item.message}
@@ -138,7 +163,11 @@ const AnnouncementBanner = () => {
         <button
           type='button'
           onClick={() => dismiss(item.id)}
-          className='p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity flex-shrink-0'
+          className={`flex-shrink-0 rounded-md p-1 transition-colors ${
+            isWarning
+              ? 'text-red-400 hover:bg-red-100 hover:text-red-700'
+              : 'text-gray-500 hover:bg-yellow-200 hover:text-gray-800'
+          }`}
           aria-label='ปิดประกาศ'
         >
           <HiX className='text-base' />

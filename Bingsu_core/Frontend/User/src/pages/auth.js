@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
+import campusBg from '../assets/images/nt-hq-campus.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { authAPI, userAPI, getErrorMessage } from '../services/api';
 import { useSystemConfig } from '../context/SystemConfigContext';
@@ -140,14 +141,28 @@ function Auth() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#D9D9D9]">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-[#D9D9D9]">
+      <img
+        src={campusBg}
+        alt=""
+        className="pointer-events-none absolute inset-0 h-full w-full object-cover object-[center_32%] select-none"
+        draggable={false}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0.22) 36%, rgba(255,255,255,0.18) 62%, rgba(255,255,255,0.62) 100%), radial-gradient(ellipse 55% 42% at 50% 38%, rgba(255,255,255,0.42) 0%, transparent 70%)',
+        }}
+      />
       <NtBrandBar
         logoSrc={ntLogo}
         className="relative z-20 flex h-[55px] shrink-0 items-center justify-start bg-white px-4 shadow-sm md:px-6"
         logoClassName="h-9 w-auto max-w-[240px] object-contain object-left"
       />
 
-      <div className="relative flex flex-1 items-center justify-center px-4 py-8">
+      <div className="relative z-10 flex flex-1 items-center justify-center px-4 py-8">
       <div className="relative w-full max-w-[500px] rounded-[1.75rem] bg-white p-8 md:p-9 shadow-[0_10px_30px_rgba(0,0,0,0.08)] m-4"
       style={{
         border: '4px solid rgba(252,186,3,0.95)',

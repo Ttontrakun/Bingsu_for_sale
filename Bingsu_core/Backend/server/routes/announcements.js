@@ -11,6 +11,41 @@ import { logEvent } from "../lib/logging.js";
 export const announcementsRouter = express.Router();
 export const adminAnnouncementsRouter = express.Router();
 
+const MAINTENANCE_ID = "default";
+const MAINTENANCE_CONTACT_EMAIL = "aisupport@ntplc.co.th";
+const MAINTENANCE_DEFAULT_MESSAGE = "เว็บมีปัญหา กำลังแก้ไข กรุณาลองใหม่อีกครั้งในภายหลัง";
+
+export const toMaintenancePublic = (row) => ({
+  enabled: Boolean(row?.enabled),
+  message: String(row?.message || MAINTENANCE_DEFAULT_MESSAGE),
+  contactEmail: MAINTENANCE_CONTACT_EMAIL,
+  updatedAt: row?.updatedAt || null,
+});
+
+export async function getOrCreateMaintenance() {
+  return prisma.maintenanceMode.upsert({
+    where: { id: MAINTENANCE_ID },
+    create: {
+      id: MAINTENANCE_ID,
+      enabled: false,
+      message: MAINTENANCE_DEFAULT_MESSAGE,
+      contactEmail: MAINTENANCE_CONTACT_EMAIL,
+    },
+    update: {},
+  });
+}
+
+/** สาธารณะ — หน้า User ใช้ตรวจว่าต้องแสดง Maintenance page หรือไม่ */
+announcementsRouter.get("/maintenance", async (_req, res) => {
+  try {
+    const row = await getOrCreateMaintenance();
+    res.json(toMaintenancePublic(row));
+  } catch (err) {
+    console.error("[announcements/maintenance GET]", err?.message || err);
+    res.status(500).json({ error: "โหลดสถานะปิดปรับปรุงไม่สำเร็จ" });
+  }
+});
+
 announcementsRouter.get("/active", authenticate, async (_req, res) => {
   const items = await prisma.announcement.findMany({
     where: { active: true },
@@ -19,6 +54,59 @@ announcementsRouter.get("/active", authenticate, async (_req, res) => {
     select: { id: true, message: true, level: true, updatedAt: true },
   });
   res.json({ announcements: items });
+});
+
+adminAnnouncementsRouter.get("/maintenance", authenticate, requireRole("support", "admin"), async (_req, res) => {
+  try {
+    const row = await getOrCreateMaintenance();
+    res.json(toMaintenancePublic(row));
+  } catch (err) {
+    console.error("[admin/maintenance GET]", err?.message || err);
+    res.status(500).json({ error: "โหลดสถานะปิดปรับปรุงไม่สำเร็จ" });
+  }
+});
+
+adminAnnouncementsRouter.patch("/maintenance", authenticate, requireRole("support", "admin"), async (req, res) => {
+  try {
+    const existing = await getOrCreateMaintenance();
+    const hasEnabled = typeof req.body?.enabled === "boolean";
+    const hasMessage = typeof req.body?.message === "string";
+    if (!hasEnabled && !hasMessage) {
+      res.json(toMaintenancePublic(existing));
+      return;
+    }
+    const data = { contactEmail: MAINTENANCE_CONTACT_EMAIL, updatedBy: req.user?.id || null };
+    if (hasEnabled) data.enabled = req.body.enabled;
+    if (hasMessage) {
+      const message = req.body.message.trim().slice(0, 500);
+      data.message = message || MAINTENANCE_DEFAULT_MESSAGE;
+    }
+    const updated = await prisma.maintenanceMode.update({
+      where: { id: existing.id },
+      data,
+    });
+
+    const enabledChanged = typeof data.enabled === "boolean" && data.enabled !== existing.enabled;
+    const event = enabledChanged
+      ? (updated.enabled ? "admin.maintenance.enabled" : "admin.maintenance.disabled")
+      : "admin.maintenance.updated";
+    await logEvent({
+      event,
+      actorId: req.user.id,
+      targetType: "maintenance",
+      targetId: updated.id,
+      meta: {
+        enabled: updated.enabled,
+        message: String(updated.message || "").slice(0, 100),
+        contactEmail: MAINTENANCE_CONTACT_EMAIL,
+        changed: Object.keys(data).filter((k) => k !== "updatedBy" && k !== "contactEmail"),
+      },
+    });
+    res.json(toMaintenancePublic(updated));
+  } catch (err) {
+    console.error("[admin/maintenance PATCH]", err?.message || err);
+    res.status(500).json({ error: "อัปเดตโหมดปิดปรับปรุงไม่สำเร็จ" });
+  }
 });
 
 adminAnnouncementsRouter.get("/announcements", authenticate, requireRole("support", "admin"), async (_req, res) => {

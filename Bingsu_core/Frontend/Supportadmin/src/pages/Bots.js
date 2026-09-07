@@ -34,11 +34,13 @@ function Bots({ userRole = 'support' }) {
   ];
   
   const [botList, setBotList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [togglingBotIds, setTogglingBotIds] = useState([]);
 
   const loadBots = useCallback(async () => {
     setLoadError(null);
+    setLoading(true);
     try {
       const list = await api.getAdminBots();
       const mapped = (list || []).map((b, i) => mapBotToDisplay(b, i, avatarColors));
@@ -47,6 +49,8 @@ function Bots({ userRole = 'support' }) {
       setBotList([]);
       const msg = err?.message || '';
       setLoadError(msg === 'SESSION_EXPIRED' ? 'SESSION_EXPIRED' : (msg || 'โหลดรายการบอทไม่สำเร็จ — ตรวจสอบว่า backend รันอยู่'));
+    } finally {
+      setLoading(false);
     }
   // avatarColors is static, omit to avoid unnecessary refetch
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -189,14 +193,31 @@ function Bots({ userRole = 'support' }) {
 
       {/* Content - Bot List */}
       <div className='flex-1 flex flex-col'>
-        {filteredBots.length > 0 ? (
+        {loading ? (
+          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3'>
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className='bg-white border border-gray-200 rounded-2xl p-5 shadow-sm animate-pulse'>
+                <div className='flex items-center gap-3'>
+                  <div className='h-11 w-11 rounded-full bg-gray-200' />
+                  <div className='flex-1'>
+                    <div className='h-4 w-2/3 rounded bg-gray-200' />
+                    <div className='mt-2 h-3 w-1/3 rounded bg-gray-100' />
+                  </div>
+                </div>
+                <div className='mt-4 h-3 w-full rounded bg-gray-100' />
+                <div className='mt-2 h-3 w-4/5 rounded bg-gray-100' />
+                <div className='mt-6 h-9 w-full rounded-lg bg-gray-100' />
+              </div>
+            ))}
+          </div>
+        ) : filteredBots.length > 0 ? (
           <>
             <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3'>
               {paginatedBots.map(bot => {
               return (
                 <div 
                   key={bot.id} 
-                  className='bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col min-w-0 overflow-hidden'
+                  className='bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all flex flex-col min-w-0 overflow-hidden'
                 >
                   {/* Top row: Avatar/Name + Status Switch */}
                   <div className='flex items-start justify-between gap-4 mb-4'>
@@ -329,8 +350,12 @@ function Bots({ userRole = 'support' }) {
           </>
         ) : (
           <div className='text-center py-16'>
-            <p className='text-gray-500 text-lg mb-4'>No bots found</p>
-            <p className='text-gray-400 text-sm'>Try adjusting your search query</p>
+            <p className='text-gray-700 text-lg mb-1'>
+              {searchQuery.trim() ? 'ไม่พบบอทที่ค้นหา' : 'ยังไม่มีบอท'}
+            </p>
+            <p className='text-gray-500 text-sm'>
+              {searchQuery.trim() ? 'ลองเปลี่ยนคำค้นหา' : 'สร้างบอทใหม่เพื่อเริ่มใช้งาน'}
+            </p>
           </div>
         )}
       </div>

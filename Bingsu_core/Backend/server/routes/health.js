@@ -64,7 +64,57 @@ const checkPinecone = async () => {
 };
 
 const AI_HEALTH_TIMEOUT_MS = 8000;
-const aiHealthCheckEnabled = (process.env.ENABLE_AI_HEALTH_CHECK || "false").toLowerCase() === "true";
+const AI_GATEWAY_TIMEOUT_MS = 3000;
+/** เปิดเมื่อยอมจ่าย token เพื่อวัดเวลา inference จริง — ปกติปิดไว้ */
+const aiDeepCheckEnabled = (process.env.ENABLE_AI_HEALTH_CHECK || "false").toLowerCase() === "true";
+
+/**
+ * เช็ค LLM gateway ด้วย GET /models — เป็นแค่การอ่านรายการโมเดล
+ * ไม่มีการ inference จึงไม่คิด token และได้ผลพลอยได้คือรู้ว่าโมเดลที่ตั้งไว้มีอยู่จริงไหม
+ */
+const checkAiGateway = async () => {
+  const model = openaiModel || "—";
+  if (!openaiKey || !gatewayBaseUrl) {
+    return {
+      ok: false,
+      error: "Missing OPENAI_API_KEY or GATEWAY_BASE_URL",
+      responseTimeMs: null,
+      model,
+      modelAvailable: null,
+    };
+  }
+  const start = Date.now();
+  try {
+    const res = await withTimeout(
+      fetch(`${gatewayBaseUrl}/models`, {
+        headers: { Authorization: `Bearer ${openaiKey}` },
+      }),
+      AI_GATEWAY_TIMEOUT_MS
+    );
+    const responseTimeMs = Date.now() - start;
+    if (!res.ok) {
+      const text = await res.text();
+      return { ok: false, error: text || `HTTP ${res.status}`, responseTimeMs, model, modelAvailable: null };
+    }
+    let modelAvailable = null;
+    try {
+      const payload = await res.json();
+      const ids = Array.isArray(payload?.data) ? payload.data.map((m) => String(m?.id || "")) : [];
+      if (ids.length && openaiModel) modelAvailable = ids.includes(String(openaiModel));
+    } catch {
+      // ตอบ 200 แต่ body ไม่ใช่ JSON ที่คาด — gateway ยังถือว่าขึ้น แค่ไม่ยืนยันชื่อโมเดล
+    }
+    return { ok: true, responseTimeMs, model, modelAvailable };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      responseTimeMs: Date.now() - start,
+      model,
+      modelAvailable: null,
+    };
+  }
+};
 
 const checkAiService = async () => {
   if (!openaiKey || !gatewayBaseUrl) {
@@ -209,20 +259,14 @@ const buildDetailedHealth = async () => {
   const vectorCheck = vectorDb === "pinecone" ? await checkPinecone() : await checkQdrant();
   health.qdrant = vectorCheck.ok ? { ok: true } : { ok: false, error: "vector_unavailable" };
 
-  const aiCheck = aiHealthCheckEnabled
-    ? await checkAiService()
-    : {
-        ok: true,
-        skipped: true,
-        reason: "AI health check disabled (ENABLE_AI_HEALTH_CHECK=false)",
-        responseTimeMs: null,
-        model: openaiModel || "—",
-      };
+  const aiCheck = aiDeepCheckEnabled ? await checkAiService() : await checkAiGateway();
   health.ai = {
     ok: aiCheck.ok,
-    skipped: aiCheck.skipped || false,
+    mode: aiDeepCheckEnabled ? "completion" : "gateway",
     responseTimeMs: aiCheck.responseTimeMs ?? null,
     model: aiCheck.model || openaiModel || "—",
+    modelAvailable: aiCheck.modelAvailable ?? null,
+    error: aiCheck.error || undefined,
   };
   health.vectorDb = vectorDb;
 

@@ -2,222 +2,34 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import AnnouncementBanner from '../components/AnnouncementBanner';
-import BotMarkdown from '../components/chat/BotMarkdown';
-import { normalizeMarkdownTable } from '../utils/normalizeMarkdownTable';
-import TypingIndicator from '../components/chat/TypingIndicator';
-import ReferenceChips from '../components/chat/ReferenceChips';
 import { 
   HiArrowLeft, 
-  HiOutlinePaperAirplane, 
-  HiClipboardCopy,
-  HiCheck,
   HiX,
-  HiPencil,
-  HiThumbUp,
-  HiThumbDown,
   HiChevronDown,
-  HiRefresh,
-  HiPlus,
-  HiDownload,
-  HiEye,
-  HiDocumentText,
 } from 'react-icons/hi';
 import bingsuLogo from '../assets/images/หน่องบิงไม่มีพื้นละ.png';
-import avatarMale from '../assets/avatars/user_male.png';
-import avatarFemale from '../assets/avatars/user_female.png';
 import { showToast } from '../components/ToastNotification';
 import { chatMessageAPI, chatAPI, botAPI, userAPI, privateContextAPI, knowledgeAPI, getErrorMessage } from '../services/api';
-
-const AVATAR_SRC_BY_KEY = {
-  'preset:user_male': avatarMale,
-  'preset:user_female': avatarFemale,
-};
-const getUserAvatarSrc = (avatarUrl) => AVATAR_SRC_BY_KEY[String(avatarUrl || '')] || avatarMale;
-const DEFAULT_USER_AVATAR = 'preset:user_male';
-
-
-const formatToken = (n) => {
-  const x = Number(n || 0);
-  return Number.isFinite(x) ? x.toLocaleString('th-TH') : '0';
-};
-const OFFICIAL_BOT_DESCRIPTION = 'ค้นหาข้อมูลจากเอกสารที่มีในระบบ และตอบคำถามตามเนื้อหาในเอกสารนั้น พร้อมระบุแหล่งอ้างอิงให้ตรวจสอบได้';
-const LEGACY_OFFICIAL_BOT_DESCRIPTION = 'ระบบผู้ช่วยอัจฉริยะสำหรับตอบคำถามและวิเคราะห์ข้อมูลจากฐานความรู้อย่างเป็นระบบ โดยมุ่งเน้นความถูกต้อง รวดเร็ว และความน่าเชื่อถือของข้อมูล';
-const ENABLE_MESSAGE_EDIT_BUTTON = false;
-// ซ่อนปุ่มเลือกโหมด (Flash/Detail) ไว้ก่อน — ใช้ Detail (120B บน H100) เป็นหลักเสมอ
-const ENABLE_MODE_SELECTOR = false;
-const ENABLE_SOURCE_REFERENCES = true;
-const isCorruptedText = (value) => {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  const qCount = (text.match(/\?/g) || []).length;
-  return qCount >= 3 && qCount / Math.max(1, text.length) > 0.25;
-};
-const resolveBotDescription = (description) => {
-  const text = String(description || '').trim();
-  if (!text || text === LEGACY_OFFICIAL_BOT_DESCRIPTION || isCorruptedText(text)) {
-    return OFFICIAL_BOT_DESCRIPTION;
-  }
-  return text;
-};
-
-const normalizeReferenceQuote = (input) => {
-  const raw = String(input || '').replace(/\s+/g, ' ').trim();
-  if (!raw) return '';
-  const stripped = raw
-    .replace(/^(?:sheet|tab)\s*[^|]*\|\s*/i, '')
-    .replace(/^(?:row|line|column)\s*[_\d\s-]*:?\s*/i, '');
-  return (stripped || raw).slice(0, 220).trim();
-};
-
-// ส่วนในเอกสารที่เขียนไว้ "ให้ AI ค้นหาเจอง่าย" (machine-oriented) — ซ่อนตอนแสดงแหล่งที่มาให้ผู้ใช้
-// (AI ยังใช้เนื้อหาเต็มในการค้น/ตอบ เพียงแต่ไม่แสดงส่วนนี้ในหน้าอ้างอิง)
-const AI_HELPER_MARKER = /(ให้ระบบค้นเจอง่าย|ให้ค้นหาเจอง่าย|ให้ค้นเจอง่าย|ให้ระบบค้นหาเจอ|ให้ระบบค้นเจอ|ให้ระบบค้นหา|search[- ]?friendly|สรุปเป็นประโยค|แบบประโยค)/i;
-// บรรทัด "ประโยคช่วยค้นหา" (machine sentence) ที่ถูกตัด chunk แยกจากหัวข้อ — ตัดทิ้งตอนแสดง
-const AI_HELPER_LINE = /International\s+[\d,]+\s*\/\s*Local\s*Access\s+[\d,]+\s*Mbps\s*:\s*ราคาปกติรวม/i;
-
-const stripAiHelperSections = (raw) => {
-  const lines = String(raw || '').split('\n');
-  const out = [];
-  let skipping = false;
-  for (const line of lines) {
-    const isHeader = /^\s{0,3}#{1,6}\s/.test(line);
-    if (isHeader) {
-      skipping = AI_HELPER_MARKER.test(line);
-      if (!skipping) out.push(line);
-      continue;
-    }
-    if (!skipping && AI_HELPER_MARKER.test(line)) {
-      skipping = true;
-      continue;
-    }
-    if (AI_HELPER_LINE.test(line)) continue;
-    if (!skipping) out.push(line);
-  }
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-};
-
-const extractReferencePosition = (chunk) => {
-  const label = String(chunk?.payload?.label || '').trim();
-  const rawChunkIndex = chunk?.payload?.chunkIndex;
-  const chunkIndex = Number.isFinite(Number(rawChunkIndex)) ? Number(rawChunkIndex) : null;
-  const textRaw = String(chunk?.retrievedContext?.text ?? chunk?.payload?.text ?? '').trim();
-  const quote = normalizeReferenceQuote(textRaw);
-  const pageMatch = label.match(/page\s+(\d+)/i) || textRaw.match(/\bpage\s+(\d+)\b/i);
-  const page = pageMatch ? Number(pageMatch[1]) : null;
-  let lineHint = '';
-  const rowMatch = label.match(/row\s+(\d+)/i) || textRaw.match(/\brow\s+(\d+)\b/i);
-  const lineMatch = label.match(/line\s+(\d+)(?:\s*[-–]\s*(\d+))?/i) || textRaw.match(/\bline\s+(\d+)(?:\s*[-–]\s*(\d+))?\b/i);
-  if (rowMatch) lineHint = `แถว ${rowMatch[1]}`;
-  else if (lineMatch) lineHint = lineMatch[2] ? `บรรทัด ${lineMatch[1]}-${lineMatch[2]}` : `บรรทัด ${lineMatch[1]}`;
-  else if (pageMatch) lineHint = `หน้า ${pageMatch[1]}`;
-  else if (chunkIndex !== null) lineHint = `ช่วงที่ ${chunkIndex + 1}`;
-  const score = Number.isFinite(Number(chunk?.score)) ? Number(chunk.score) : 0;
-  return { chunkIndex, label, lineHint, page, quote, score };
-};
-
-const buildReferencesFromGroundingChunks = (chunks = []) => {
-  const docMap = new Map();
-  (Array.isArray(chunks) ? chunks : []).forEach((chunk) => {
-    const docId = chunk?.retrievedContext?.docId ?? chunk?.payload?.docId;
-    if (!docId) return;
-    const title = chunk?.retrievedContext?.title ?? chunk?.payload?.fileName ?? 'เอกสาร';
-    if (!docMap.has(docId)) {
-      docMap.set(docId, { docId, displayName: title, positions: [], bestScore: Number.NEGATIVE_INFINITY });
-    }
-    const ref = docMap.get(docId);
-    const pos = extractReferencePosition(chunk);
-    ref.bestScore = Math.max(ref.bestScore, pos.score || 0);
-    const key = `${pos.chunkIndex ?? 'n'}::${pos.label || ''}::${pos.lineHint || ''}`;
-    if (!ref.positions.some((item) => `${item.chunkIndex ?? 'n'}::${item.label || ''}::${item.lineHint || ''}` === key)) {
-      ref.positions.push(pos);
-    }
-    ref.positions.sort((a, b) => (b.score || 0) - (a.score || 0));
-  });
-  return Array.from(docMap.values())
-    .sort((a, b) => (b.bestScore || Number.NEGATIVE_INFINITY) - (a.bestScore || Number.NEGATIVE_INFINITY))
-    .map((ref) => ({ docId: ref.docId, displayName: ref.displayName, positions: ref.positions.slice(0, 3) }));
-};
-
-/** ค่าจาก Prisma Json / ระหว่างเดินสาย — normalize เป็น array */
-const parseStoredJsonArray = (raw) => {
-  if (raw == null) return [];
-  if (Array.isArray(raw)) return raw;
-  if (typeof raw === 'string') {
-    try {
-      const p = JSON.parse(raw);
-      return Array.isArray(p) ? p : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-};
-
-const isConversationNotFoundError = (error) => {
-  const status = Number(error?.response?.status);
-  const backendMessage = String(error?.response?.data?.error || '').toLowerCase();
-  const text = String(error?.message || '').toLowerCase();
-  return (status === 404 && backendMessage.includes('conversation'))
-    || text.includes('conversation not found');
-};
-
-const isAbortError = (error) => {
-  const name = String(error?.name || '');
-  const message = String(error?.message || '').toLowerCase();
-  return name === 'AbortError' || message.includes('aborted') || message.includes('abort');
-};
-
-const isGeneratedFollowUpPrompt = (text) => {
-  const t = String(text || '').trim();
-  if (!t) return false;
-  return /^จากคำตอบก่อนหน้า\s*ช่วย/i.test(t);
-};
-
-const parsePrivateCommand = (text) => {
-  const raw = String(text || '').trim();
-  const slash = raw.match(/^\/(จำ|สั่ง)\s*([\s\S]*)$/);
-  if (slash) {
-    return {
-      kind: slash[1] === 'จำ' ? 'remember' : 'instruction',
-      payload: String(slash[2] || '').trim(),
-    };
-  }
-  // ภาษาธรรมชาติในโหมดส่วนตัว: "จำว่า..." / "จำไว้ว่า..."
-  const soft = raw.match(/^(?:จำไว้ว่า|จำว่า|ขอให้จำ(?:ว่า)?|ให้จำว่า)\s+([\s\S]+)$/i);
-  if (soft && String(soft[1] || '').trim().length >= 4) {
-    return { kind: 'remember', payload: String(soft[1] || '').trim() };
-  }
-  return null;
-};
-
-const parseRememberedItems = (content) =>
-  String(content || '')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-/** เสนอ /สั่ง เบื้องต้นในโหมดส่วนตัว เมื่อยังไม่มีคำสั่ง AI */
-const PRIVATE_ORDER_STARTERS = [
-  '/สั่ง ตอบสั้น ตรงประเด็น เป็นข้อๆ',
-  '/สั่ง ตอบละเอียด อธิบายเงื่อนไขให้ครบ',
-  '/สั่ง ใช้ภาษาทางการ สุภาพ',
-];
-
-const isPrivateCommandSuggestion = (text) => /^\/(จำ|สั่ง)\b/.test(String(text || '').trim());
-
-const mergePrivateOrderStarters = (suggestions, { privateMode, hasInstructions }) => {
-  const base = Array.isArray(suggestions) ? suggestions.filter(Boolean) : [];
-  if (!privateMode || hasInstructions) return base.slice(0, 5);
-  const starters = PRIVATE_ORDER_STARTERS.filter((s) => !base.includes(s));
-  return [...starters.slice(0, 2), ...base].slice(0, 5);
-};
-
-
-// สวิตช์: คำตอบบอท "บับเบิลขาวแบบเต็มความกว้าง" (มีบับเบิล แต่กว้างเต็ม ไม่ใช่ 80%)
-// อยากกลับไปบับเบิลแบบเดิม (แคบ 80%) → เปลี่ยนบรรทัดนี้เป็น false บรรทัดเดียวจบ
-const BOT_FULL_WIDTH = true;
-// ถ้าคำตอบบอทสั้นมาก ให้ย่อบับเบิลตามข้อความ (แต่ความกว้างสูงสุดยังเท่าเดิม)
-const SHORT_BOT_BUBBLE_CHAR_LIMIT = 120;
+import {
+  DEFAULT_USER_AVATAR,
+  formatToken,
+  ENABLE_MODE_SELECTOR,
+  ENABLE_SOURCE_REFERENCES,
+  buildReferencesFromGroundingChunks,
+  parseStoredJsonArray,
+  isConversationNotFoundError,
+  isAbortError,
+  isGeneratedFollowUpPrompt,
+  parsePrivateCommand,
+  parseRememberedItems,
+  mergePrivateOrderStarters,
+  stripAiHelperSections,
+  extractReferencePosition,
+  PRIVATE_ORDER_STARTERS,
+} from './chat/chatHelpers';
+import ChatMessageList from './chat/ChatMessageList';
+import ChatComposer from './chat/ChatComposer';
+import CitationModal from './chat/CitationModal';
 
 function Chat() {
   const { chatId } = useParams();
@@ -550,6 +362,8 @@ function Chat() {
   
   const [messages, setMessages] = useState([]);
   const [hasInitialized, setHasInitialized] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesError, setMessagesError] = useState('');
   const getDraftKey = useCallback((id) => {
     const chatKey = id != null ? String(id).trim() : '';
     return chatKey ? `chat:draft:${chatKey}` : null;
@@ -601,6 +415,7 @@ function Chat() {
     }
     setMessages([]);
     setHasInitialized(false);
+    setMessagesError('');
     setIsTyping(false);
     setEditingMessageId(null);
     setEditingText('');
@@ -661,10 +476,13 @@ function Chat() {
     }
     
     isLoadingMessagesRef.current = true;
+    setMessagesLoading(true);
+    setMessagesError('');
     try {
       const id = chatId != null ? String(chatId).trim() : '';
       if (!id || id === 'undefined' || id === 'null') {
         console.error('Invalid chat ID');
+        setHasInitialized(true);
         return;
       }
       const messagesData = await chatMessageAPI.getMessages(id);
@@ -730,9 +548,13 @@ function Chat() {
       }
       console.error('Error loading messages:', error);
       setMessages([]);
+      setMessagesError(
+        'โหลดข้อความในแชทนี้ไม่สำเร็จ ข้อความยังอยู่ในระบบ แต่ตอนนี้ดึงมาแสดงไม่ได้',
+      );
       setHasInitialized(true);
     } finally {
       isLoadingMessagesRef.current = false;
+      setMessagesLoading(false);
     }
   }, [chatId, navigate]);
 
@@ -1014,38 +836,6 @@ function Chat() {
     ];
     return () => timers.forEach(clearTimeout);
   }, [isTyping]);
-
-  // Format timestamp (สำหรับแสดงใน timestamp badge)
-  const formatTime = (date) => {
-    const now = new Date();
-    const diff = now - date;
-    const minutes = Math.floor(diff / 60000);
-    
-    if (minutes < 1) return 'เมื่อสักครู่';
-    if (minutes < 60) return `${minutes} นาทีที่แล้ว`;
-    
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours} ชั่วโมงที่แล้ว`;
-    
-    return date.toLocaleDateString('th-TH', { 
-      day: 'numeric', 
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  // Format timestamp แบบละเอียด (สำหรับแสดงใน tooltip)
-  const formatDetailedTime = (date) => {
-    return date.toLocaleString('th-TH', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
-  };
 
   /** ตรวจว่าเป็นคำสั่งแก้คำผิด: "X เปลี่ยนเป็น Y", "X เปลี่ยน Y", "ช่วยเปลี่ยน X เป็น Y" */
   const tryApplyReplaceCommand = (text) => {
@@ -1767,8 +1557,12 @@ function Chat() {
           return aHit - bHit;
         });
 
+      // การ์ดที่ไม่มีช่วงข้อความ (เช่น คำถาม "มีเอกสารอะไรบ้าง") = ตั้งใจดูรายชื่อไฟล์ จึงโชว์ครบ
+      // ส่วนคำตอบปกติโชว์แค่ไฟล์ที่เกี่ยวข้องต้นๆ กันรายการยาวบังช่วงข้อความที่ใช้ตอบ
+      const isDocumentOverview =
+        relatedChunks.length === 0 && !(Array.isArray(ref.positions) && ref.positions.length > 0);
       // รายการอย่างเดียว — ไม่โหลดพรีวิวจนผู้ใช้กด Preview
-      const listed = originals.slice(0, 3).map((item) => ({
+      const listed = originals.slice(0, isDocumentOverview ? 50 : 3).map((item) => ({
         ...item,
         isPdf: /\.pdf$/i.test(item.name) || /pdf/i.test(item.type),
       }));
@@ -1985,7 +1779,8 @@ function Chat() {
       />
 
       {/* Main Content */}
-      <main className={`flex-1 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16' : ''}`}>
+      {/* จอเล็ก sidebar ที่หุบเป็น overlay (w-0) จึงต้องเว้นที่ให้ปุ่มขยายลอย ส่วนจอ md ขึ้นไป rail กินพื้นที่จริงอยู่แล้ว */}
+      <main className={`flex-1 min-w-0 flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16 md:pl-0' : ''}`}>
         <AnnouncementBanner />
         {/* Error Message Toast */}
         {errorMessage && (
@@ -2114,948 +1909,86 @@ function Chat() {
           </div>
         </div>
 
-        {/* Messages Area - Centered like ChatGPT/Gemini */}
-        <div ref={messagesContainerRef} className='relative flex-1 overflow-y-auto bg-[#f7f7f8]'>
-          <div className='max-w-3xl mx-auto px-4 sm:px-6 py-6'>
-            {messages.length === 0 ? (
-              // Empty state — ใช้ชื่อและคำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท)
-              <div className='flex flex-col items-center justify-center h-full min-h-[60vh]'>
-                <div className='mb-6'>
-                  <img src={bingsuLogo} alt="Enterprise AI Chatbot" className='w-20 h-20 rounded-full object-cover shadow-lg' />
-                </div>
-                <h2 className='text-2xl font-semibold text-gray-800 mb-2'>
-                  Welcome to {selectedBot?.name || 'Enterprise AI Chatbot Chat'}
-                </h2>
-                <p className='text-gray-500 text-center mb-8 max-w-2xl'>
-                  {resolveBotDescription(selectedBot?.description)}
-                </p>
-              </div>
-            ) : (
-              <div className='space-y-8'>
-                {messages.map((message, index) => {
-                  const showTimestamp = index === 0 || 
-                    new Date(message.timestamp) - new Date(messages[index - 1].timestamp) > 300000;
-                  
-                  const isUser = message.sender === 'user';
-                  const botFullWidth = BOT_FULL_WIDTH && !isUser;
-                  // บอทกำลังคิด (ยังไม่มีข้อความ) — โชว์แค่จุด ไม่ต้องมีกล่องบับเบิลเปล่า
-                  const isBotThinking = message.sender === 'bot' && isTyping && index === messages.length - 1 && !(streamTextRef.current || message.text);
-                  const plainBotText = !isUser
-                    ? String(message.text || '')
-                        .replace(/<br\s*\/?>/gi, '\n')
-                        .trim()
-                    : '';
-                  const isShortBotReply =
-                    botFullWidth &&
-                    !isBotThinking &&
-                    !!plainBotText &&
-                    plainBotText.length <= SHORT_BOT_BUBBLE_CHAR_LIMIT &&
-                    !plainBotText.includes('\n');
-                  const bubbleClass = isBotThinking
-                    ? 'block w-full bg-transparent px-2 py-1 relative group/timestamp'
-                    : botFullWidth
-                      ? `${isShortBotReply ? 'inline-block w-auto max-w-full' : 'block w-full'} bg-white text-gray-900 border border-gray-200 shadow-sm rounded-2xl rounded-tl-md px-4 py-2.5 relative group/timestamp`
-                      : `inline-block max-w-full px-4 py-2.5 rounded-2xl relative group/timestamp ${isUser ? 'bg-gradient-to-r from-yellow-400 to-amber-400 text-gray-900 border border-amber-500/40 shadow-sm rounded-tr-md' : 'bg-white text-gray-900 border border-gray-200 shadow-sm rounded-tl-md'}`;
+        <ChatMessageList
+          messagesContainerRef={messagesContainerRef}
+          messagesEndRef={messagesEndRef}
+          messages={messages}
+          selectedBot={selectedBot}
+          messagesLoading={messagesLoading || !hasInitialized}
+          messagesError={messagesError}
+          onRetryLoadMessages={loadMessages}
+          isTyping={isTyping}
+          typingStage={typingStage}
+          streamTextRef={streamTextRef}
+          streamBotIdRef={streamBotIdRef}
+          userAvatarUrl={userAvatarUrl}
+          isSelectingText={isSelectingText}
+          setIsSelectingText={setIsSelectingText}
+          hoveredMessageId={hoveredMessageId}
+          setHoveredMessageId={setHoveredMessageId}
+          tooltipPosition={tooltipPosition}
+          setTooltipPosition={setTooltipPosition}
+          editingUserMsgId={editingUserMsgId}
+          editingUserText={editingUserText}
+          setEditingUserText={setEditingUserText}
+          handleResendEditedUserMessage={handleResendEditedUserMessage}
+          handleCancelUserEdit={handleCancelUserEdit}
+          handleStartEdit={handleStartEdit}
+          handleFeedback={handleFeedback}
+          handleRegenerate={handleRegenerate}
+          handleStartUserEdit={handleStartUserEdit}
+          handleCopyMessage={handleCopyMessage}
+          feedbackByMessageId={feedbackByMessageId}
+          copiedMessageId={copiedMessageId}
+          isHelpChat={isHelpChat}
+          getPreviousUserQuestion={getPreviousUserQuestion}
+          getSuggestedFollowUps={getSuggestedFollowUps}
+          aiFollowUps={aiFollowUps}
+          followUpsLoading={followUpsLoading}
+          followUpsReady={followUpsReady}
+          privateMode={privateMode}
+          hasPrivateInstructions={hasPrivateInstructions}
+          handleSendMessage={handleSendMessage}
+          handleSuggestedFollowUpClick={handleSuggestedFollowUpClick}
+          handleEditFollowUp={handleEditFollowUp}
+          openSourceReference={openSourceReference}
+        />
 
-                  return (
-                    <div key={message.id} className='group'>
-                      {showTimestamp && (
-                        <div className='flex justify-center my-4'>
-                          <span className='text-xs text-gray-400 bg-white px-3 py-1.5 rounded-full shadow-sm'>
-                            {formatTime(message.timestamp)}
-                          </span>
-                        </div>
-                      )}
-                      
-                      <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-                        {/* Avatar — โหมดเต็มความกว้าง: จอใหญ่ดัน avatar ไปช่องว่างซ้าย (lg:-ml-11) ให้บับเบิลกว้างเต็มตรงช่องพิมพ์; จอเล็กซ่อน avatar กันโดนขอบจอตัด (บับเบิลก็ยังเต็มความกว้าง) */}
-                        <div className={`flex-shrink-0 w-8 h-8 mt-1 ${botFullWidth ? 'hidden lg:block lg:-ml-11' : ''}`}>
-                          {isUser ? (
-                            <img
-                              src={getUserAvatarSrc(userAvatarUrl)}
-                              alt="คุณ"
-                              className="w-8 h-8 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
-                            />
-                          ) : (
-                            <img
-                              src={bingsuLogo}
-                              alt="บอท"
-                              className="w-8 h-8 rounded-full object-cover shadow-sm ring-1 ring-gray-200"
-                            />
-                          )}
-                        </div>
-                        
-                        {/* Message Content — min-w-0 ให้ flex อนุญาตให้หดตาม max-w-[80%] ได้ */}
-                        <div className={`flex-1 min-w-0 ${isUser ? 'flex justify-end' : 'flex justify-start'}`}>
-                          <div className={`${botFullWidth ? (isShortBotReply ? 'max-w-full pr-11' : 'w-full pr-11') : 'max-w-[80%]'} min-w-0 text-left relative group/message`}>
-                            <div
-                              className={bubbleClass}
-                              style={{
-                                maxWidth: '100%',
-                                overflowWrap: 'anywhere',
-                                wordBreak: 'normal',
-                              }}
-                              onMouseMove={(e) => {
-                                // ปิด hover tracking สำหรับข้อความบอท เพื่อลด rerender ระหว่างลากเลือกข้อความ
-                                if (message.sender === 'bot' || isSelectingText) return;
-                                if (hoveredMessageId !== message.id) {
-                                  setHoveredMessageId(message.id);
-                                }
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const mouseY = e.clientY - rect.top;
-                                setTooltipPosition(prev => ({
-                                  ...prev,
-                                  [message.id]: mouseY
-                                }));
-                              }}
-                              onMouseLeave={() => {
-                                if (message.sender === 'bot' || isSelectingText) return;
-                                setHoveredMessageId(null);
-                                setTooltipPosition(prev => {
-                                  const newPos = { ...prev };
-                                  delete newPos[message.id];
-                                  return newPos;
-                                });
-                              }}
-                              onMouseDown={(e) => {
-                                if (e.button === 0 && isSelectingText) {
-                                  // คลิกใหม่ขณะมี selection เดิม ให้ปลดโหมด selection ได้ทันที
-                                  setIsSelectingText(false);
-                                }
-                              }}
-                            >
-                              {(
-                                <>
-                                  <div
-                                    className='text-[15px] leading-relaxed break-words chat-message-content max-w-full min-w-0 select-text cursor-text'
-                                    style={{
-                                      // ใช้ anywhere เพื่อกันข้อความยาวมากล้นกรอบ แต่ไม่ "หั่นทุกตัวอักษร" แบบ break-all
-                                      overflowWrap: 'anywhere',
-                                      wordBreak: 'normal',
-                                      maxWidth: '100%',
-                                    }}
-                                  >
-                                    {(() => {
-                                      if (isUser && editingUserMsgId === message.id) {
-                                        return (
-                                          <div className='min-w-[240px] sm:min-w-[320px]'>
-                                            <textarea
-                                              autoFocus
-                                              value={editingUserText}
-                                              onChange={(e) => setEditingUserText(e.target.value)}
-                                              onKeyDown={(e) => {
-                                                if (e.key === 'Enter' && !e.shiftKey) {
-                                                  e.preventDefault();
-                                                  handleResendEditedUserMessage();
-                                                } else if (e.key === 'Escape') {
-                                                  handleCancelUserEdit();
-                                                }
-                                              }}
-                                              rows={2}
-                                              className='w-full resize-none rounded-lg bg-white/85 text-gray-900 text-[15px] leading-relaxed px-3 py-2 outline-none border border-amber-500/50 focus:border-amber-600'
-                                            />
-                                            <div className='flex justify-end gap-2 mt-2'>
-                                              <button type='button' onClick={handleCancelUserEdit} className='px-3 py-1 text-sm rounded-full bg-white/70 text-gray-800 hover:bg-white transition-colors'>ยกเลิก</button>
-                                              <button type='button' onClick={handleResendEditedUserMessage} disabled={!editingUserText.trim()} className='px-3 py-1 text-sm rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors'>ส่ง</button>
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-                                      const isStreamingThis = message.sender === 'bot' && message.id === streamBotIdRef.current;
-                                      const displayText = isStreamingThis ? (streamTextRef.current || message.text) : message.text;
-                                      const showDots = message.sender === 'bot' && !displayText && isTyping && index === messages.length - 1;
-                                      if (showDots) {
-                                        return (
-                                          <span className='inline-flex items-center gap-1.5 text-gray-500' aria-label='กำลังคิด'>
-                                            <span className='w-3 h-3 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '0ms' }} />
-                                            <span className='w-3 h-3 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '150ms' }} />
-                                            <span className='w-3 h-3 bg-gray-400 rounded-full animate-bounce' style={{ animationDelay: '300ms' }} />
-                                          </span>
-                                        );
-                                      }
-                                      if (message.sender === 'bot' && displayText) {
-                                        // normalize ตารางก่อน (กู้ <br> ในเซลล์) แล้วค่อยแปลง <br> ที่เหลือเป็นขึ้นบรรทัดใหม่
-                                        const textNormalized = normalizeMarkdownTable(displayText)
-                                          .replace(/<br\s*\/?>/gi, '\n');
-                                        return (
-                                          <BotMarkdown
-                                            text={textNormalized}
-                                            citationCount={Array.isArray(message.references) ? message.references.length : 0}
-                                            references={Array.isArray(message.references) ? message.references : null}
-                                          />
-                                        );
-                                      }
-                                      return (
-                                        <span
-                                          className='whitespace-pre-wrap break-words'
-                                          style={{ overflowWrap: 'anywhere', wordBreak: 'normal' }}
-                                        >
-                                          {displayText || ''}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                              {/* Timestamp Tooltip - แสดงเมื่อ hover ติดตาม cursor */}
-                              {!isSelectingText && message.sender !== 'bot' && hoveredMessageId === message.id && tooltipPosition[message.id] !== undefined && (
-                                <div className={`absolute ${
-                                  isUser ? 'right-full mr-2' : 'left-full ml-2'
-                                } opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap`}
-                                style={{ 
-                                  top: `${tooltipPosition[message.id]}px`, 
-                                  transform: 'translateY(-50%)' 
-                                }}
-                                >
-                                  <div className="bg-gray-900 text-white text-xs rounded-lg px-2 py-1.5 shadow-lg relative">
-                                    {formatDetailedTime(message.timestamp)}
-                                    <div className={`absolute ${
-                                      isUser ? 'right-0' : 'left-0'
-                                    } top-1/2 -translate-y-1/2 ${
-                                      isUser ? '-mr-1' : '-ml-1'
-                                    } w-0 h-0 border-t-4 border-b-4 ${
-                                      isUser ? 'border-r-4 border-r-gray-900 border-l-0' : 'border-l-4 border-l-gray-900 border-r-0'
-                                    } border-transparent`}></div>
-                                  </div>
-                                </div>
-                              )}
-                                </>
-                              )}
-                            </div>
-
-                            {/* แหล่งอ้างอิง — การ์ดเอกสารใต้คำตอบ */}
-                            {ENABLE_SOURCE_REFERENCES && !isUser && message.sender === 'bot' && (
-                              <ReferenceChips
-                                references={message.references}
-                                onOpenReference={(ref) => openSourceReference(message, ref)}
-                              />
-                            )}
-                            
-                            {/* Copy, แก้ไข, โหวต (บอท) + แนะนำคำถามถัดไป */}
-                            <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} items-center gap-1 mt-1 flex-wrap`}>
-                              {message.sender === 'bot' && !String(message.id).startsWith('temp-') && (
-                                <>
-                                  {ENABLE_MESSAGE_EDIT_BUTTON && (
-                                    <button
-                                      type='button'
-                                      onClick={(e) => { e.stopPropagation(); handleStartEdit(message); }}
-                                      className='opacity-70 hover:opacity-100 text-gray-600 hover:text-gray-900 rounded p-1.5 hover:bg-gray-100'
-                                      title='แก้ไขข้อความ'
-                                    >
-                                      <HiPencil className='text-base' />
-                                    </button>
-                                  )}
-                                  <button
-                                    type='button'
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      await handleFeedback(message, 'up');
-                                    }}
-                                    className={`rounded p-1.5 hover:bg-gray-100 ${(feedbackByMessageId[message.id] || message.feedback) === 'up' ? 'text-green-600' : 'opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700'}`}
-                                    title='มีประโยชน์'
-                                  >
-                                    <HiThumbUp className='text-base' />
-                                  </button>
-                                  <button
-                                    type='button'
-                                    onClick={async (e) => {
-                                      e.stopPropagation();
-                                      await handleFeedback(message, 'down');
-                                    }}
-                                    className={`rounded p-1.5 hover:bg-gray-100 ${(feedbackByMessageId[message.id] || message.feedback) === 'down' ? 'text-red-600' : 'opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700'}`}
-                                    title='ไม่มีประโยชน์'
-                                  >
-                                    <HiThumbDown className='text-base' />
-                                  </button>
-                                  <button
-                                    type='button'
-                                    onClick={(e) => { e.stopPropagation(); handleRegenerate(message); }}
-                                    disabled={isTyping}
-                                    className='rounded p-1.5 hover:bg-gray-100 opacity-70 hover:opacity-100 text-gray-500 hover:text-gray-700 disabled:opacity-40'
-                                    title='ทำซ้ำ (สร้างคำตอบใหม่)'
-                                  >
-                                    <HiRefresh className='text-base' />
-                                  </button>
-                                </>
-                              )}
-                              {isUser && !String(message.id).startsWith('temp-') && editingUserMsgId !== message.id && (
-                                <button
-                                  type='button'
-                                  onClick={(e) => { e.stopPropagation(); handleStartUserEdit(message); }}
-                                  disabled={isTyping}
-                                  className='opacity-70 hover:opacity-100 transition-all duration-150 text-yellow-800 hover:text-yellow-900 rounded p-1.5 hover:bg-gray-100 disabled:opacity-40'
-                                  title='แก้ไขและส่งใหม่'
-                                >
-                                  <HiPencil className='text-base' />
-                                </button>
-                              )}
-                              <div className="relative group/copy inline-block">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleCopyMessage(message.text, message.id);
-                                  }}
-                                  className={`opacity-70 hover:opacity-100 transition-all duration-150 border border-transparent ${
-                                    isUser
-                                      ? 'text-yellow-800 hover:text-yellow-900'
-                                      : 'text-gray-700 hover:text-gray-900'
-                                  } rounded p-1.5 hover:bg-gray-100 hover:border-gray-300 flex items-center gap-1`}
-                                >
-                                  {copiedMessageId === message.id ? (
-                                    <HiCheck className='text-base' />
-                                  ) : (
-                                    <HiClipboardCopy className='text-base' />
-                                  )}
-                                </button>
-                                
-                                {/* Tooltip - ใช้ absolute positioning และ pointer-events-none เพื่อไม่กระทบ layout */}
-                                <div className={`absolute ${
-                                  isUser ? 'right-0' : 'left-0'
-                                } top-full mt-2 opacity-0 group-hover/copy:opacity-100 transition-opacity duration-150 pointer-events-none z-50 whitespace-nowrap`}>
-                                  <div className="bg-gray-900 text-white text-xs rounded-lg px-2 py-1.5 shadow-lg relative">
-                                    {copiedMessageId === message.id ? 'คัดลอกแล้ว' : 'คัดลอกข้อความ'}
-                                    <div className={`absolute ${
-                                      isUser ? 'right-2' : 'left-2'
-                                    } bottom-full w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-gray-900`}></div>
-                                  </div>
-                                </div>
-                              </div>
-                              {/* แนะนำคำถามถัดไป — แสดงใต้ข้อความบอทล่าสุดเท่านั้น */}
-                              {!isHelpChat && message.sender === 'bot' && (() => {
-                                let lastBotIdx = -1;
-                                for (let i = messages.length - 1; i >= 0; i--) if (messages[i].sender === 'bot') { lastBotIdx = i; break; }
-                                const isLastBot = index === lastBotIdx && !(isTyping && index === messages.length - 1);
-                                if (!isLastBot) return null;
-                                const previousQuestion = getPreviousUserQuestion(index);
-                                const storedSuggestions = Array.isArray(message.suggestions)
-                                  ? message.suggestions.filter(Boolean)
-                                  : [];
-                                const resolved = storedSuggestions.length > 0
-                                  ? storedSuggestions
-                                  : (aiFollowUps.length > 0 ? aiFollowUps : null);
-                                // รอ AI เสร็จก่อน — ไม่โชว์ปุ่มกลางๆ แล้วสลับคำ (กระพริบ)
-                                if (!resolved && (followUpsLoading || !followUpsReady)) {
-                                  return (
-                                    <div className='flex flex-col items-start gap-1.5 mt-2' aria-hidden>
-                                      {[0, 1].map((i) => (
-                                        <div
-                                          key={`fu-skel-${i}`}
-                                          className='h-8 rounded-full bg-gray-100 animate-pulse'
-                                          style={{ width: i === 0 ? 168 : 132 }}
-                                        />
-                                      ))}
-                                    </div>
-                                  );
-                                }
-                                const suggestions = mergePrivateOrderStarters(
-                                  resolved || getSuggestedFollowUps(message.text, previousQuestion),
-                                  { privateMode, hasInstructions: hasPrivateInstructions },
-                                );
-                                if (!suggestions.length) return null;
-                                const usingAiFollowUps = Boolean(resolved);
-                                const suggestDisabled = isTyping || (selectedBot && selectedBot.enabled === false);
-                                return (
-                                  <div className='flex flex-col items-start gap-1.5 mt-2'>
-                                    {suggestions.map((q) => (
-                                      <div key={q} className='group flex items-center gap-1 max-w-full'>
-                                        <button
-                                          type='button'
-                                          onClick={() => {
-                                            if (isPrivateCommandSuggestion(q) || usingAiFollowUps) {
-                                              handleSendMessage({ preventDefault: () => {} }, q);
-                                            } else {
-                                              handleSuggestedFollowUpClick(q, message, index);
-                                            }
-                                          }}
-                                          disabled={suggestDisabled}
-                                          title={isPrivateCommandSuggestion(q) ? 'บันทึกคำสั่งนี้' : 'ส่งคำถามนี้'}
-                                          className={`inline-flex items-center gap-2 max-w-full rounded-full border px-3 py-1.5 text-xs shadow-sm transition-colors disabled:opacity-50 text-left ${
-                                            isPrivateCommandSuggestion(q)
-                                              ? 'border-blue-200 bg-blue-50 text-blue-800 hover:border-blue-300 hover:bg-blue-100 font-medium'
-                                              : 'border-gray-200 bg-white text-gray-700 hover:border-amber-300 hover:bg-amber-50/70'
-                                          }`}
-                                        >
-                                          <span className='truncate'>{q}</span>
-                                          <HiOutlinePaperAirplane className={`rotate-90 text-sm flex-shrink-0 ${isPrivateCommandSuggestion(q) ? 'text-blue-400' : 'text-gray-400'}`} />
-                                        </button>
-                                        {usingAiFollowUps && (
-                                          <button
-                                            type='button'
-                                            onClick={() => handleEditFollowUp(q)}
-                                            disabled={suggestDisabled}
-                                            title='แก้ไขก่อนส่ง'
-                                            className='p-1.5 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity flex-shrink-0 disabled:opacity-0'
-                                          >
-                                            <HiPencil className='text-sm' />
-                                          </button>
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                );
-                              })()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                
-                {/* Typing Indicator — แยกเป็น component TypingIndicator */}
-                <TypingIndicator isTyping={isTyping} messages={messages} typingStage={typingStage} />
-                
-                <div ref={messagesEndRef} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Chat Input - ChatGPT/Gemini style */}
-        <div className='relative border-t border-gray-200 bg-white'>
-          {showScrollDown && (
-            <button
-              type='button'
-              onClick={() => { scrollToBottom('smooth'); setShowScrollDown(false); }}
-              aria-label='เลื่อนลงล่างสุด'
-              title='เลื่อนลงล่างสุด'
-              className='absolute -top-12 left-1/2 -translate-x-1/2 z-10 w-10 h-10 flex items-center justify-center rounded-full bg-white border border-gray-300 shadow-md text-gray-600 hover:bg-gray-50 hover:text-gray-800 transition-all'
-            >
-              <HiArrowLeft className='text-lg -rotate-90' />
-            </button>
-          )}
-          <div className='max-w-3xl mx-auto px-4 sm:px-6 py-4'>
-            {/* Warning message if bot is inactive */}
-            {selectedBot && selectedBot.enabled === false && (
-              <div className='mb-4 p-3 bg-red-50 border-2 border-red-200 rounded-lg'>
-                <div className='flex items-start gap-2'>
-                  <span className='text-red-600 font-bold text-lg'>⚠️</span>
-                  <div className='flex-1'>
-                    <p className='text-red-800 text-sm font-semibold mb-1'>Bot นี้ถูก inactive แล้ว</p>
-                    <p className='text-red-700 text-xs mb-2'>คุณไม่สามารถส่งข้อความได้จนกว่าจะไปเปิด Bot เป็น active ในหน้า Bots</p>
-                    <button
-                      onClick={() => navigate('/homepage')}
-                      className='px-3 py-1.5 text-xs bg-yellow-400 hover:bg-yellow-500 text-gray-800 font-semibold rounded-lg shadow-sm hover:shadow-md transition-all'
-                    >
-                      ไปเปิด Bot เป็น Active
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {/* แจ้งเตือนเมื่อบอทยังไม่มีเอกสารความรู้ในระบบ */}
-            {selectedBot && selectedBot.enabled !== false && !isHelpChat && !privateMode
-              && Array.isArray(selectedBot.documentIds) && selectedBot.documentIds.length === 0 && (
-              <div className='mb-4 p-3 bg-amber-50 border-2 border-amber-300 rounded-lg'>
-                <div className='flex items-start gap-2'>
-                  <span className='text-amber-600 text-lg'>⚠️</span>
-                  <div className='flex-1'>
-                    <p className='text-amber-900 text-sm font-bold mb-0.5'>ยังไม่มีเอกสารความรู้ในระบบ</p>
-                    <p className='text-amber-800 text-xs'>
-                      บอทนี้ยังไม่มี Knowledge ให้ใช้อ้างอิง คำตอบอาจไม่ครบถ้วนหรือไม่อ้างอิงจากเอกสาร — แนะนำให้เพิ่มเอกสารก่อนใช้งาน
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-            {privateMode && (
-            <div className='mb-2'>
-              <div className='flex items-center gap-2 flex-wrap'>
-                <button
-                  type='button'
-                  role='switch'
-                  aria-checked={usePrivateContent}
-                  onClick={() => setUsePrivateContent((v) => !v)}
-                  className='flex items-center gap-2 px-2.5 py-1.5 rounded-full border border-gray-300 bg-white hover:border-yellow-400 transition-colors'
-                  title='เปิด = ใช้หน่วยความจำส่วนตัวร่วมกับเอกสารระบบ, ปิด = ปิดเฉพาะส่วนตัว (ยังใช้เอกสารระบบ)'
-                >
-                  <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${usePrivateContent ? 'bg-yellow-400' : 'bg-gray-300'}`}>
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${usePrivateContent ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                  </span>
-                  <span className='text-xs font-semibold text-gray-800'>ใช้หน่วยความจำส่วนตัว {usePrivateContent ? '(เปิด)' : '(ปิด)'}</span>
-                </button>
-              </div>
-            </div>
-            )}
-            <form onSubmit={handleSendMessage} className='relative'>
-              <div className={`flex items-end gap-2 bg-white border-2 rounded-2xl shadow-sm transition-colors ${
-                selectedBot && selectedBot.enabled === false
-                  ? 'border-red-300 bg-red-50'
-                  : 'border-gray-300 hover:border-yellow-400 focus-within:border-yellow-400'
-              }`}>
-                {privateMode && (
-                  <div className='relative self-center ml-2 mb-1 flex-shrink-0'>
-                    <button
-                      type='button'
-                      onClick={() => setPrivateCmdMenuOpen((v) => !v)}
-                      className={`inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors ${
-                        privateCmdMenuOpen || composerPrivateCommand
-                          ? 'border-blue-300 bg-blue-50 text-blue-700'
-                          : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
-                      }`}
-                      title='เลือกคำสั่ง /จำ หรือ /สั่ง'
-                      aria-label='เลือกคำสั่งส่วนตัว'
-                      aria-expanded={privateCmdMenuOpen}
-                    >
-                      <HiPlus className={`text-lg transition-transform ${privateCmdMenuOpen ? 'rotate-45' : ''}`} />
-                    </button>
-                    {privateCmdMenuOpen && (
-                      <>
-                        <button
-                          type='button'
-                          className='fixed inset-0 z-40 cursor-default'
-                          aria-label='ปิดเมนู'
-                          onClick={() => setPrivateCmdMenuOpen(false)}
-                        />
-                        <div className='absolute left-0 bottom-full mb-2 z-50 w-56 rounded-xl border border-gray-200 bg-white shadow-lg overflow-hidden'>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              setComposerPrivateCommand('remember');
-                              setPrivateCmdMenuOpen(false);
-                              requestAnimationFrame(() => textareaRef.current?.focus());
-                            }}
-                            className='w-full px-3 py-2.5 text-left hover:bg-blue-50 transition-colors'
-                          >
-                            <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/จำ</span>
-                            <span className='block text-[11px] text-gray-500 mt-1'>บอกข้อมูลให้ระบบจำไว้ใช้ตอบ</span>
-                          </button>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              setComposerPrivateCommand('instruction');
-                              setPrivateCmdMenuOpen(false);
-                              requestAnimationFrame(() => textareaRef.current?.focus());
-                            }}
-                            className='w-full px-3 py-2.5 text-left border-t border-gray-100 hover:bg-blue-50 transition-colors'
-                          >
-                            <span className='inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700'>/สั่ง</span>
-                            <span className='block text-[11px] text-gray-500 mt-1'>บอกว่าระบบควรตอบแบบไหน เช่น ตอบสั้น เป็นข้อๆ</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-                {privateMode && composerPrivateCommand && (
-                  <button
-                    type='button'
-                    onClick={() => setComposerPrivateCommand(null)}
-                    className='self-center mb-1 inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-700'
-                    title='ปิดโหมดคำสั่ง'
-                  >
-                    <span className='font-semibold'>{composerPrivateCommand === 'remember' ? '/จำ' : '/สั่ง'}</span>
-                    <HiX className='text-xs' />
-                  </button>
-                )}
-                <textarea
-                  ref={textareaRef}
-                  value={chatInput}
-                  onChange={(e) => {
-                    const next = e.target.value;
-                    if (privateMode && !composerPrivateCommand) {
-                      const cmd = parsePrivateCommand(next);
-                      if (cmd) {
-                        setComposerPrivateCommand(cmd.kind);
-                        setChatInput(cmd.payload || '');
-                        adjustTextareaHeight();
-                        return;
-                      }
-                    }
-                    setChatInput(next);
-                    adjustTextareaHeight();
-                  }}
-                  onKeyDown={(e) => {
-                    if (privateMode && composerPrivateCommand && e.key === 'Backspace' && !chatInput) {
-                      setComposerPrivateCommand(null);
-                      return;
-                    }
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      const hasMultipleLines = String(chatInput || '').includes('\n');
-                      const explicitSend = e.ctrlKey || e.metaKey;
-                      // Safety for long multi-line test text:
-                      // - Enter keeps editing
-                      // - Ctrl/Cmd+Enter sends
-                      if (hasMultipleLines && !explicitSend) {
-                        return;
-                      }
-                      e.preventDefault();
-                      handleSendMessage(e);
-                    } else {
-                      adjustTextareaHeight();
-                    }
-                  }}
-                  placeholder={
-                    selectedBot && selectedBot.enabled === false
-                      ? 'Bot นี้ถูก inactive แล้ว...'
-                      : privateMode
-                        ? (composerPrivateCommand
-                          ? (composerPrivateCommand === 'remember' ? 'พิมพ์ข้อมูลที่ต้องการให้ระบบจำ...' : 'พิมพ์คำสั่งการตอบของ AI...')
-                          : 'พิมพ์ข้อความ... หรือใช้ /จำ ข้อมูล และ /สั่ง คำสั่ง AI')
-                        : 'พิมพ์ข้อความ...'
-                  }
-                  rows={1}
-                  disabled={selectedBot && selectedBot.enabled === false}
-                  className={`flex-1 outline-none text-[15px] placeholder-gray-400 bg-transparent resize-none overflow-x-hidden overflow-y-auto min-h-[52px] max-h-[200px] px-4 py-3.5 ${
-                    selectedBot && selectedBot.enabled === false
-                      ? 'text-gray-400 cursor-not-allowed'
-                      : 'text-gray-700'
-                  }`}
-                />
-                
-                {/* โหมดคำตอบ (Flash/Detail) — ซ่อนไว้ก่อน ใช้ Detail เป็นหลัก (เปิดคืนได้ที่ ENABLE_MODE_SELECTOR) */}
-                {ENABLE_MODE_SELECTOR && (
-                <div className='relative self-end mb-2 flex-shrink-0'>
-                  <button
-                    type='button'
-                    onClick={() => setModeMenuOpen((o) => !o)}
-                    className='flex items-center gap-1 px-2 py-1.5 rounded-full text-xs text-gray-600 hover:bg-gray-100 transition-colors'
-                    title='เลือกโหมดคำตอบ'
-                  >
-                    <span>{answerMode === 'fast' ? '⚡' : '🎯'}</span>
-                    <span className='font-medium'>{answerMode === 'fast' ? 'Flash' : 'Detail'}</span>
-                    <HiChevronDown className={`text-sm text-gray-400 transition-transform ${modeMenuOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {modeMenuOpen && (
-                    <>
-                      <div className='fixed inset-0 z-10' onClick={() => setModeMenuOpen(false)} aria-hidden='true' />
-                      <div className='absolute bottom-full right-0 mb-2 w-80 max-w-[85vw] bg-white rounded-xl shadow-xl border border-gray-200 z-20 py-1'>
-                        <button
-                          type='button'
-                          onClick={() => selectAnswerMode('fast')}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-start gap-2.5 ${answerMode === 'fast' ? 'bg-yellow-50' : ''}`}
-                        >
-                          <span className='text-lg leading-none mt-0.5'>⚡</span>
-                          <span className='flex-1 min-w-0'>
-                            <span className='block text-sm font-medium text-gray-800'>Flash · เร็ว</span>
-                            <span className='block text-xs text-gray-500'>ตอบไวขึ้น เหมาะกับถาม-ตอบทั่วไป หาข้อมูลตรงๆ</span>
-                          </span>
-                          {answerMode === 'fast' && <HiCheck className='text-yellow-500 text-base mt-0.5 flex-shrink-0' />}
-                        </button>
-                        <button
-                          type='button'
-                          onClick={() => selectAnswerMode('detailed')}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-gray-50 flex items-start gap-2.5 ${answerMode === 'detailed' ? 'bg-yellow-50' : ''}`}
-                        >
-                          <span className='text-lg leading-none mt-0.5'>🎯</span>
-                          <span className='flex-1 min-w-0'>
-                            <span className='block text-sm font-medium text-gray-800'>Detail · ละเอียด</span>
-                            <span className='block text-xs text-gray-500'>วิเคราะห์ลึก เปรียบเทียบ สรุปหลายเงื่อนไข/หลายเอกสาร</span>
-                          </span>
-                          {answerMode === 'detailed' && <HiCheck className='text-yellow-500 text-base mt-0.5 flex-shrink-0' />}
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                )}
-                <div className='pr-2 pb-2 flex items-center justify-center'>
-                  {isTyping ? (
-                    <button
-                      type='button'
-                      onClick={handleStopStreaming}
-                      className='rounded-lg p-2.5 transition-all flex items-center justify-center bg-red-500 text-white hover:bg-red-600 shadow-sm hover:shadow-md'
-                      title='หยุดการตอบ'
-                    >
-                      <HiX className='text-lg' />
-                    </button>
-                  ) : (
-                    <button
-                      type='submit'
-                      disabled={!chatInput.trim() || (selectedBot && selectedBot.enabled === false)}
-                      className={`rounded-lg p-2.5 transition-all flex items-center justify-center ${
-                        chatInput.trim() && (!selectedBot || selectedBot.enabled !== false)
-                          ? 'bg-gradient-to-br from-yellow-400 to-yellow-500 text-gray-900 hover:from-yellow-500 hover:to-yellow-600 shadow-sm hover:shadow-md'
-                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      }`}
-                    >
-                      <HiOutlinePaperAirplane className='text-lg transform rotate-90' />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </form>
-            <p className='text-xs text-gray-400 text-center mt-2'>
-              Enterprise AI Chatbot อาจทำผิดพลาดได้ กรุณาตรวจสอบข้อมูลสำคัญ
-            </p>
-          </div>
-        </div>
+        <ChatComposer
+          showScrollDown={showScrollDown}
+          scrollToBottom={scrollToBottom}
+          setShowScrollDown={setShowScrollDown}
+          selectedBot={selectedBot}
+          isHelpChat={isHelpChat}
+          privateMode={privateMode}
+          usePrivateContent={usePrivateContent}
+          setUsePrivateContent={setUsePrivateContent}
+          navigate={navigate}
+          handleSendMessage={handleSendMessage}
+          privateCmdMenuOpen={privateCmdMenuOpen}
+          setPrivateCmdMenuOpen={setPrivateCmdMenuOpen}
+          composerPrivateCommand={composerPrivateCommand}
+          setComposerPrivateCommand={setComposerPrivateCommand}
+          textareaRef={textareaRef}
+          chatInput={chatInput}
+          setChatInput={setChatInput}
+          adjustTextareaHeight={adjustTextareaHeight}
+          answerMode={answerMode}
+          modeMenuOpen={modeMenuOpen}
+          setModeMenuOpen={setModeMenuOpen}
+          selectAnswerMode={selectAnswerMode}
+          isTyping={isTyping}
+          handleStopStreaming={handleStopStreaming}
+        />
       </main>
 
-      {ENABLE_SOURCE_REFERENCES && isSourceModalOpen && sourceModalData && (
-        <div
-          className='fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50'
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              if (originalPreviewPopup?.url) URL.revokeObjectURL(originalPreviewPopup.url);
-              setOriginalPreviewPopup(null);
-              setIsSourceModalOpen(false);
-            }
-          }}
-          role='dialog'
-          aria-modal='true'
-        >
-          <div className='bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[85vh] flex flex-col overflow-hidden'>
-            <div className='h-1 bg-gradient-to-r from-yellow-400 to-amber-400' />
-            <div className='px-5 sm:px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-3'>
-              <div className='min-w-0 flex items-start gap-3'>
-                <div className='mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-yellow-50 text-amber-600'>
-                  <HiDocumentText className='text-lg' aria-hidden />
-                </div>
-                <div className='min-w-0'>
-                  <h2 className='text-base font-semibold text-gray-900'>แหล่งอ้างอิงคำตอบ</h2>
-                  <p className='mt-0.5 text-sm text-gray-500 truncate' title={sourceModalData.displayName}>
-                    {sourceModalData.displayName}
-                  </p>
-                </div>
-              </div>
-              <button
-                type='button'
-                onClick={() => {
-                  if (originalPreviewPopup?.url) URL.revokeObjectURL(originalPreviewPopup.url);
-                  setOriginalPreviewPopup(null);
-                  setIsSourceModalOpen(false);
-                }}
-                className='rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700'
-                aria-label='ปิด'
-              >
-                <HiX className='text-lg' />
-              </button>
-            </div>
-            <div className='flex-1 overflow-auto bg-[#f7f7f8] p-4 sm:p-5 space-y-4 text-sm'>
-              {!sourceModalData.isPrivate && (
-                <section className='rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden'>
-                  <div className='px-4 py-2.5 border-b border-gray-100'>
-                    <p className='text-xs font-semibold text-gray-500'>เอกสารต้นฉบับ</p>
-                  </div>
-                  {sourceModalData.originalsLoading ? (
-                    <p className='px-4 py-3 text-xs text-gray-500'>กำลังโหลดต้นฉบับ...</p>
-                  ) : Array.isArray(sourceModalData.originals) && sourceModalData.originals.length > 0 ? (
-                    <ul className='divide-y divide-gray-100'>
-                      {sourceModalData.originals.map((orig) => (
-                        <li key={`orig-${orig.index}`} className='flex items-center justify-between gap-3 px-4 py-3'>
-                          <div className='min-w-0 flex items-center gap-2.5'>
-                            <HiDocumentText className='flex-shrink-0 text-base text-amber-500' aria-hidden />
-                            <p className='text-sm font-medium text-gray-800 truncate' title={orig.name}>{orig.name}</p>
-                          </div>
-                          <div className='flex items-center gap-1.5 flex-shrink-0'>
-                            {orig.isPdf ? (
-                              <button
-                                type='button'
-                                onClick={async () => {
-                                  setOriginalPreviewPopup({
-                                    name: orig.name,
-                                    url: null,
-                                    loading: true,
-                                  });
-                                  try {
-                                    const blob = await knowledgeAPI.fetchOriginalBlob(
-                                      sourceModalData.docId,
-                                      orig.index,
-                                      { inline: true }
-                                    );
-                                    const url = URL.createObjectURL(blob);
-                                    setOriginalPreviewPopup({
-                                      name: orig.name,
-                                      url,
-                                      loading: false,
-                                    });
-                                  } catch (err) {
-                                    setOriginalPreviewPopup(null);
-                                    showToast(getErrorMessage(err) || 'เปิดพรีวิวไม่สำเร็จ', 'error');
-                                  }
-                                }}
-                                className='inline-flex items-center gap-1.5 rounded-full bg-yellow-400 px-3 py-1.5 text-xs font-semibold text-gray-900 hover:bg-yellow-500'
-                              >
-                                <HiEye className='text-sm' />
-                                พรีวิว
-                              </button>
-                            ) : null}
-                            <button
-                              type='button'
-                              onClick={async () => {
-                                try {
-                                  const blob = await knowledgeAPI.fetchOriginalBlob(sourceModalData.docId, orig.index, { inline: false });
-                                  const url = URL.createObjectURL(blob);
-                                  const a = window.document.createElement('a');
-                                  a.href = url;
-                                  a.download = orig.name || 'document';
-                                  window.document.body.appendChild(a);
-                                  a.click();
-                                  a.remove();
-                                  URL.revokeObjectURL(url);
-                                } catch (err) {
-                                  showToast(getErrorMessage(err) || 'ดาวน์โหลดไม่สำเร็จ', 'error');
-                                }
-                              }}
-                              className='inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50'
-                            >
-                              <HiDownload className='text-sm' />
-                              ดาวน์โหลด
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className='px-4 py-3 text-xs text-gray-500 leading-relaxed'>
-                      ยังไม่มีไฟล์ต้นฉบับในชุดความรู้นี้ — แสดงช่วงข้อความที่ใช้ตอบด้านล่าง
-                    </p>
-                  )}
-                </section>
-              )}
-              {Array.isArray(sourceModalData.positions) && sourceModalData.positions.length > 0 && (
-                <div className='flex flex-wrap items-center gap-1.5 px-0.5'>
-                  <span className='text-xs font-medium text-gray-500 mr-0.5'>ตำแหน่ง</span>
-                  {sourceModalData.positions.map((pos, idx) => (
-                    <span
-                      key={`${pos.chunkIndex ?? 'n'}-${idx}`}
-                      className='inline-flex items-center rounded-full bg-white border border-gray-200 px-2.5 py-0.5 text-[11px] text-gray-600'
-                    >
-                      {pos.lineHint || pos.label || `ช่วงที่ ${(pos.chunkIndex ?? idx) + 1}`}
-                    </span>
-                  ))}
-                </div>
-              )}
-              {sourceModalData.isPrivate ? (
-                <div className='space-y-3'>
-                  <div className='rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 space-y-1'>
-                    <p className='text-sm font-medium text-violet-900'>อ้างอิงจากเนื้อหาส่วนตัวของคุณ</p>
-                    <p className='text-xs text-violet-800/80 leading-relaxed'>
-                      คำตอบส่วนนี้อ้างอิงจากข้อมูลที่คุณตั้งในโหมดส่วนตัว — แก้ไขด้วย /จำ หรือ /สั่ง
-                    </p>
-                  </div>
-                  {sourceModalData.privateLoading ? (
-                    <p className='text-sm text-gray-500 px-1'>กำลังโหลดเนื้อหาส่วนตัว...</p>
-                  ) : sourceModalData.privateLoadError ? (
-                    <p className='text-sm text-red-600 px-1'>โหลดเนื้อหาส่วนตัวไม่สำเร็จ ลองเปิดใหม่อีกครั้ง</p>
-                  ) : (
-                    <>
-                      {sourceModalData.privateInstructions ? (
-                        <div className='rounded-xl border border-violet-200 bg-white px-4 py-3'>
-                          <p className='text-xs font-semibold text-violet-800 mb-1'>คำสั่ง AI (/สั่ง)</p>
-                          <p className='text-sm text-gray-800 whitespace-pre-wrap leading-relaxed'>
-                            {sourceModalData.privateInstructions}
-                          </p>
-                        </div>
-                      ) : null}
-                      {Array.isArray(sourceModalData.privateItems) && sourceModalData.privateItems.length > 0 ? (
-                        <div className='space-y-2'>
-                          <p className='text-xs font-semibold text-gray-500 px-0.5'>
-                            ความจำที่บันทึกไว้ ({sourceModalData.privateItems.length})
-                          </p>
-                          {sourceModalData.privateItems.map((item, idx) => (
-                            <div
-                              key={`priv-${idx}`}
-                              className='rounded-xl border border-violet-200 bg-white px-4 py-3'
-                            >
-                              <p className='text-xs font-semibold text-violet-800 mb-1'>รายการที่ {idx + 1}</p>
-                              <p className='text-sm text-gray-900 whitespace-pre-wrap leading-relaxed'>
-                                {item}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className='rounded-xl border border-dashed border-gray-200 bg-white px-4 py-3 text-gray-600 text-sm'>
-                          ยังไม่พบข้อความในคลังส่วนตัว — ลองพิมพ์ <code className='text-xs'>/จำ ...</code> ในโหมดส่วนตัว
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              ) : Array.isArray(sourceModalData.chunks) && sourceModalData.chunks.length > 0 ? (
-                <section className='space-y-2.5'>
-                  <p className='text-xs font-semibold text-gray-500 px-0.5'>ช่วงข้อความที่ใช้ตอบ</p>
-                  {sourceModalData.chunks.map((chunk, idx) => {
-                    const displayText = stripAiHelperSections(
-                      normalizeMarkdownTable(String(chunk.text || '')).replace(/<br\s*\/?>/gi, '\n')
-                    );
-                    const helperOnly = !displayText;
-                    return (
-                    <div key={chunk.id || idx} className='rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden'>
-                      <div className='flex items-center gap-2 px-4 py-2 border-b border-gray-100 bg-gray-50/80'>
-                        <span className='inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-yellow-400 px-1.5 text-[10px] font-bold text-gray-900'>
-                          {idx + 1}
-                        </span>
-                        <p className='text-xs font-semibold text-gray-700'>
-                          {chunk.lineHint || (Number.isFinite(chunk.page) ? `หน้า ${chunk.page}` : `ช่วงที่ ${idx + 1}`)}
-                        </p>
-                      </div>
-                      <div className='px-4 py-3 border-l-[3px] border-yellow-400'>
-                        {chunk.quote && !helperOnly ? (
-                          <p className='text-xs text-gray-500 italic mb-2'>“{chunk.quote}”</p>
-                        ) : null}
-                        <div className='text-sm text-gray-800 leading-relaxed'>
-                          {displayText ? (
-                            <BotMarkdown text={displayText} />
-                          ) : (
-                            <p className='text-xs text-gray-500 italic'>อ้างอิงจากเอกสารนี้ — ดูต้นฉบับสำหรับรายละเอียด</p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })}
-                </section>
-              ) : (
-                <div className='rounded-xl border border-dashed border-gray-200 bg-white px-4 py-4 text-gray-600 space-y-1'>
-                  <p className='text-sm font-medium text-gray-800'>ยังไม่มีช่วงข้อความย่อย</p>
-                  <p className='text-xs leading-relaxed'>
-                    เปิดต้นฉบับด้านบนได้ หรือถามต่อแบบเจาะจงเพื่อให้ระบบดึงบริบทเพิ่ม
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {originalPreviewPopup && (
-        <div
-          className='fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60'
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              if (originalPreviewPopup.url) URL.revokeObjectURL(originalPreviewPopup.url);
-              setOriginalPreviewPopup(null);
-            }
-          }}
-          role='dialog'
-          aria-modal='true'
-          aria-label='พรีวิวเอกสารต้นฉบับ'
-        >
-          <div className='bg-white rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden'>
-            <div className='px-5 py-3 border-b border-gray-200 flex items-center justify-between gap-3'>
-              <div className='min-w-0'>
-                <p className='text-sm font-semibold text-gray-900 truncate' title={originalPreviewPopup.name}>
-                  {originalPreviewPopup.name || 'เอกสารต้นฉบับ'}
-                </p>
-                <p className='text-xs text-gray-500'>พรีวิวต้นฉบับ</p>
-              </div>
-              <button
-                type='button'
-                onClick={() => {
-                  if (originalPreviewPopup.url) URL.revokeObjectURL(originalPreviewPopup.url);
-                  setOriginalPreviewPopup(null);
-                }}
-                className='rounded-lg p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-800'
-                aria-label='ปิดพรีวิว'
-              >
-                <HiX className='text-lg' />
-              </button>
-            </div>
-            <div className='flex-1 bg-gray-100 min-h-0'>
-              {originalPreviewPopup.loading || !originalPreviewPopup.url ? (
-                <div className='h-full flex items-center justify-center text-sm text-gray-600'>กำลังโหลดพรีวิว...</div>
-              ) : (
-                <iframe
-                  title={`popup-preview-${originalPreviewPopup.name}`}
-                  src={originalPreviewPopup.url}
-                  className='w-full h-full border-0 bg-white'
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <CitationModal
+        isSourceModalOpen={isSourceModalOpen}
+        sourceModalData={sourceModalData}
+        originalPreviewPopup={originalPreviewPopup}
+        setOriginalPreviewPopup={setOriginalPreviewPopup}
+        setIsSourceModalOpen={setIsSourceModalOpen}
+      />
 
       {/* Popup แก้ไขข้อความบอท — ใหญ่ อ่าน/แก้สะดวก */}
       {editingMessageId && (

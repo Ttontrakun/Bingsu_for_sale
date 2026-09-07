@@ -56,10 +56,17 @@ export function AdminSystemConfigProvider({ children }) {
   const reload = useCallback(async () => {
     try {
       const data = await api.getPublicConfig();
-      setMenus({
-        admin: Array.isArray(data?.menus?.admin) ? data.menus.admin : [],
-        systemTabs: Array.isArray(data?.menus?.systemTabs) ? data.menus.systemTabs : [],
-      });
+      let staffMenus = { admin: [], systemTabs: [] };
+      try {
+        const staff = await api.getStaffConfig();
+        staffMenus = {
+          admin: Array.isArray(staff?.menus?.admin) ? staff.menus.admin : [],
+          systemTabs: Array.isArray(staff?.menus?.systemTabs) ? staff.menus.systemTabs : [],
+        };
+      } catch {
+        /* หน้าล็อกอินยังไม่มี cookie — เมนูแอดมินโหลดหลังเข้าสู่ระบบ */
+      }
+      setMenus(staffMenus);
       setFeatures(data?.features && typeof data.features === 'object' ? data.features : {});
       setCopy(data?.copy && typeof data.copy === 'object' ? data.copy : {});
       setStyles(data?.styles && typeof data.styles === 'object' ? data.styles : {});

@@ -271,6 +271,20 @@ export function toPublicConfig(cfg) {
     features: cfg.features,
     menus: {
       user: cfg.menus.user,
+    },
+    copy: cfg.copy,
+    styles: cfg.styles || {},
+    branding: cfg.branding,
+    updatedAt: cfg.updatedAt,
+  };
+}
+
+export function toStaffConfig(cfg) {
+  return {
+    packageId: cfg.packageId,
+    features: cfg.features,
+    menus: {
+      user: cfg.menus.user,
       admin: cfg.menus.admin,
       systemTabs: cfg.menus.systemTabs,
     },

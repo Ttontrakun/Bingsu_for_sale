@@ -8,10 +8,18 @@ cookies.txt
 **/cookies.txt
 backups/
 **/backups/
+**/.files/
+**/.uploads/
+*.snapshot
+*.pem
+*.key
+**/credentials.json
+**/secrets.json
 
 _tmp_rb7/
 
 *.docx
+*.doc
 Bingsu_core/Backend/knowledge_*.md
 Bingsu_core/docs/
 
@@ -24,6 +32,7 @@ Bingsu_core/docs/
 **/*.xlsx
 **/*.xls
 **/*.pptx
+**/*.csv
 
 # Unused leftover brand dumps (not used by UI)
 Bingsu_core/Frontend/User/src/assets/images/nt-logo-national-telecom.png

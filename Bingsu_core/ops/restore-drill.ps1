@@ -9,6 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-PostgresPassword {
+  $envFile = Join-Path $PSScriptRoot "..\Backend\.env"
+  if (Test-Path $envFile) {
+    $line = Get-Content $envFile | Where-Object { $_ -match '^\s*POSTGRES_PASSWORD=(.+)$' } | Select-Object -First 1
+    if ($line -match '^\s*POSTGRES_PASSWORD=(.+)$') {
+      $value = $Matches[1].Trim().Trim('"').Trim("'")
+      if ($value) { return $value }
+    }
+  }
+  if ($env:POSTGRES_PASSWORD) { return $env:POSTGRES_PASSWORD }
+  throw "POSTGRES_PASSWORD not found in Backend/.env"
+}
+
 function Write-Step([string]$message) {
   Write-Host "[restore-drill] $message"
 }
@@ -60,10 +73,11 @@ if (-not (Test-Path $postgresDumpPath)) {
   throw "postgres.sql(.enc) not found in backup path: $BackupPath"
 }
 $postgresRestorePath = Unprotect-FileAes -Path $postgresDumpPath -KeyMaterial $EncryptionKey
+$pgPassword = Get-PostgresPassword
 
 Write-Step "Preparing temporary database: $RestoreDbName"
-docker compose -f $ComposeFile exec -T postgres sh -lc "PGPASSWORD=postgres dropdb -U $DbUser --if-exists $RestoreDbName"
-docker compose -f $ComposeFile exec -T postgres sh -lc "PGPASSWORD=postgres createdb -U $DbUser $RestoreDbName"
+docker compose -f $ComposeFile exec -T -e "PGPASSWORD=$pgPassword" postgres dropdb -U $DbUser --if-exists $RestoreDbName
+docker compose -f $ComposeFile exec -T -e "PGPASSWORD=$pgPassword" postgres createdb -U $DbUser $RestoreDbName
 
 Write-Step "Restoring PostgreSQL dump"
 Get-Content -Path $postgresRestorePath -Raw |
@@ -77,7 +91,7 @@ Write-Host "[restore-drill] User rows:$($userCount.Trim())"
 Write-Host "[restore-drill] Chat rows:$($chatCount.Trim())"
 
 Write-Step "Dropping temporary restore database"
-docker compose -f $ComposeFile exec -T postgres sh -lc "PGPASSWORD=postgres dropdb -U $DbUser --if-exists $RestoreDbName"
+docker compose -f $ComposeFile exec -T -e "PGPASSWORD=$pgPassword" postgres dropdb -U $DbUser --if-exists $RestoreDbName
 
 if ($postgresRestorePath -and $postgresRestorePath -ne $postgresDumpPath -and (Test-Path $postgresRestorePath)) {
   Remove-Item -Path $postgresRestorePath -Force

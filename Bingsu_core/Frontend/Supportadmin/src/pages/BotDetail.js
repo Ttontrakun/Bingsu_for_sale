@@ -249,7 +249,7 @@ function BotDetail() {
       <div className='flex items-center gap-4 mb-8'>
         <div className={`w-20 h-20 rounded-full ${botData.avatar} flex-shrink-0`}></div>
         <div>
-          <h1 className='text-2xl font-semibold text-gray-800'>{isCreateMode ? 'สร้างบอทใหม่' : botData.name}</h1>
+          <h1 className='text-2xl font-bold text-gray-800'>{isCreateMode ? 'สร้างบอทใหม่' : botData.name}</h1>
           <p className='text-gray-500'>{botData.supportId}</p>
         </div>
       </div>

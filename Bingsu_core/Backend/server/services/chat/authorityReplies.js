@@ -571,12 +571,30 @@ export const shouldForceNoDataReply = (message) => isUndergroundDarkFiberPriceQu
 
 export const getUnintelligibleReply = () => "ขออภัยครับ ข้อความที่ส่งมายังอ่านไม่ชัดเจน รบกวนพิมพ์ใหม่อีกครั้งให้ชัดเจนขึ้นครับ";
 
+/** กันไฟล์ล้นจอเวลาชุดความรู้ใหญ่มาก */
+const MAX_LISTED_FILES = 40;
+
+/** sourceFiles เป็น Json — บางเรคคอร์ดเก็บมาเป็นสตริง */
+const parseSourceFiles = (doc) => {
+  const raw = doc?.sourceFiles;
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
 /** รายการไฟล์เอกสารทั้งหมดแบบแบน (ไม่แยกชุดหลัก/ย่อย กันชื่อซ้ำ) */
 const getDocumentListReply = (contextDocuments = []) => {
   const docs = (contextDocuments || []).filter(Boolean);
   const names = [];
   for (const doc of docs) {
-    const files = Array.isArray(doc?.sourceFiles) ? doc.sourceFiles : [];
+    const files = parseSourceFiles(doc);
     let added = 0;
     for (const file of files) {
       const name = String(file?.fileName || file?.name || file?.displayName || "").trim();
@@ -594,9 +612,13 @@ const getDocumentListReply = (contextDocuments = []) => {
   if (uniqueDocs.length === 0) {
     return "ตอนนี้ยังไม่พบเอกสารในชุดความรู้ที่เลือกครับ ลองเลือกชุดความรู้ หรืออัปโหลดไฟล์ก่อนแล้วถามใหม่ได้ครับ";
   }
+  const shown = uniqueDocs.slice(0, MAX_LISTED_FILES);
+  const hidden = uniqueDocs.length - shown.length;
   return [
     `เอกสารที่ใช้งานได้ตอนนี้มี ${uniqueDocs.length} รายการ:`,
-    ...uniqueDocs.map((name, index) => `${index + 1}. ${name}`),
+    "",
+    ...shown.map((name, index) => `${index + 1}. ${name}`),
+    ...(hidden > 0 ? [`_และอีก ${hidden} ไฟล์_`] : []),
     "",
     "ถามต่อได้เลยครับ เช่น สรุปเอกสาร ราคา ส่วนลด หรืออำนาจอนุมัติ",
     "ถ้าต้องการเนื้อหาเฉพาะ เช่น เอกสารแนบตอนขอใช้บริการ ให้ระบุบริการ/หัวข้อให้ชัดเจนครับ",

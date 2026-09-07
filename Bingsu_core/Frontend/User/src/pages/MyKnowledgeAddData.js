@@ -7,6 +7,11 @@ import { showToast } from '../components/ToastNotification';
 import { knowledgeAPI, getErrorMessage } from '../services/api';
 import { useSystemConfig } from '../context/SystemConfigContext';
 
+const OCR_STRUCTURE_MODEL_OPTIONS = [
+  { id: 'Qwen3.8-27B', label: 'Qwen3.8-27B' },
+  { id: '', label: 'โมเดลเริ่มต้นระบบ' },
+];
+
 const parseMarkdownTableSheets = (inputText = '') => {
   const text = String(inputText || '');
   if (!text.trim()) return [];
@@ -157,6 +162,7 @@ function MyKnowledgeAddData() {
   const [previewContent, setPreviewContent] = useState('');
   const [previewEditMode, setPreviewEditMode] = useState(false);
   const [previewAiStructuring, setPreviewAiStructuring] = useState(false);
+  const [structureAiModel, setStructureAiModel] = useState('Qwen3.8-27B');
   const [selectedPreviewChunks, setSelectedPreviewChunks] = useState([]);
   const [showChunkSelector, setShowChunkSelector] = useState(false); // ยุบ/กาง ตัวเลือก chunk ในโหมดแก้ไขข้อความ
   const [previewTableSheets, setPreviewTableSheets] = useState([]);
@@ -169,11 +175,13 @@ function MyKnowledgeAddData() {
   const [document, setDocument] = useState(null);
   const [attachingFileId, setAttachingFileId] = useState(null);
   const [originalPreview, setOriginalPreview] = useState(null); // { url, name, loading }
+  const [documentLoading, setDocumentLoading] = useState(Boolean(id));
   const attachOriginalInputRef = useRef(null);
 
   const loadDocument = useCallback(async () => {
     if (!id) return;
 
+    setDocumentLoading(true);
     try {
       const doc = await knowledgeAPI.get(id);
       setDocument(doc);
@@ -234,6 +242,8 @@ function MyKnowledgeAddData() {
       showToast(getErrorMessage(err), 'error');
       setError(getErrorMessage(err));
       setUploadedFiles([]);
+    } finally {
+      setDocumentLoading(false);
     }
   }, [id]);
 
@@ -241,6 +251,7 @@ function MyKnowledgeAddData() {
   useEffect(() => {
     if (id) {
       // Clear all state when switching to different knowledge
+      setDocumentLoading(true);
       setUploadedFiles([]);
       setDataContent('');
       setTextFileName('');
@@ -672,15 +683,26 @@ function MyKnowledgeAddData() {
 
   // บันทึกชื่อไฟล์ใหม่
   const handleSaveEdit = () => {
-    const newName = (editName || '').trim();
-    if (!newName) {
+    const rawName = (editName || '').trim();
+    if (!rawName) {
       setFileError('กรุณากรอกชื่อไฟล์');
       return;
     }
     if (!editingFile) return;
-    setUploadedFiles(uploadedFiles.map(f => (
-      f.id === editingFile.id ? { ...f, name: newName } : f
-    )));
+    const oldName = editingFile.name || editingFile.fileName || '';
+    const ext = (String(oldName).match(/(\.[A-Za-z0-9]{1,8})$/) || [])[1] || '';
+    const newName = ext && !/\.[A-Za-z0-9]{1,8}$/.test(rawName) ? `${rawName}${ext}` : rawName;
+    setUploadedFiles(uploadedFiles.map((f) => {
+      if (f.id !== editingFile.id) return f;
+      return {
+        ...f,
+        name: newName,
+        fileName: newName,
+        originalSourceFile: f.originalSourceFile
+          ? { ...f.originalSourceFile, name: newName, fileName: newName }
+          : f.originalSourceFile,
+      };
+    }));
     setIsEditModalOpen(false);
     setEditingFile(null);
     setEditName('');
@@ -1086,7 +1108,7 @@ function MyKnowledgeAddData() {
           const rawChunk = String(block.text ?? block.content ?? '').trim();
           if (!rawChunk) continue;
 
-          const data = await knowledgeAPI.structureOcrWithAi(id, rawChunk);
+          const data = await knowledgeAPI.structureOcrWithAi(id, rawChunk, structureAiModel);
           if (!data?.ok || typeof data.text !== 'string') {
             throw new Error(data?.error || `จัดเรียง chunk ${rowIdx} ไม่สำเร็จ`);
           }
@@ -1150,7 +1172,7 @@ function MyKnowledgeAddData() {
         showToast('ไม่มีข้อความให้จัดเรียง', 'error');
         return;
       }
-      const data = await knowledgeAPI.structureOcrWithAi(id, raw);
+      const data = await knowledgeAPI.structureOcrWithAi(id, raw, structureAiModel);
       if (!data?.ok || typeof data.text !== 'string') {
         throw new Error(data?.error || 'จัดเรียงไม่สำเร็จ');
       }
@@ -1363,6 +1385,11 @@ function MyKnowledgeAddData() {
               : (typeof file.content === 'string' ? file.content : '');
           const nextText = nextTextRaw.trim();
           original.text = nextText;
+          const nextName = String(file.name || file.fileName || original.name || original.fileName || '').trim();
+          if (nextName) {
+            original.name = nextName;
+            original.fileName = nextName;
+          }
           if (Array.isArray(file.blocks)) {
             original.blocks = file.blocks
               .map((block) => {
@@ -1497,9 +1524,9 @@ function MyKnowledgeAddData() {
   };
 
   return (
-    <div className='flex h-screen bg-white relative'>
+    <div className='flex h-screen bg-[#f7f7f8] relative'>
       <Sidebar />
-      <main className='flex-1 bg-white px-6 sm:px-8 py-6 overflow-auto flex flex-col transition-all duration-300'>
+      <main className='flex-1 bg-[#f7f7f8] px-6 sm:px-8 py-6 overflow-auto flex flex-col transition-all duration-300'>
         {/* Back Button */}
         <button
           type='button'
@@ -1540,8 +1567,8 @@ function MyKnowledgeAddData() {
 
           {/* Header */}
           <div className='mb-8'>
-            <h1 className='text-3xl font-bold text-gray-800 mb-2'>Add Data to Knowledge</h1>
-            <p className='text-gray-600'>
+            <h1 className='text-2xl font-bold text-gray-800 mb-2'>Add Data to Knowledge</h1>
+            <p className='text-sm text-gray-600'>
               {document ? `Knowledge: ${document.displayName}` : `Knowledge ID: ${id}`}
             </p>
             <p className='text-sm text-gray-500 mt-1'>
@@ -1814,7 +1841,7 @@ function MyKnowledgeAddData() {
                               <button
                                 type='button'
                                 onClick={() => handleViewOriginal(file)}
-                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-colors'
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 transition-colors'
                                 title={file.originalName ? `เปิด ${file.originalName}` : 'เปิดต้นฉบับ'}
                               >
                                 <HiEye className='text-base flex-shrink-0' />
@@ -1823,7 +1850,7 @@ function MyKnowledgeAddData() {
                               <button
                                 type='button'
                                 onClick={() => handleDownloadOriginal(file)}
-                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 transition-colors'
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 transition-colors'
                               >
                                 <HiDownload className='text-base flex-shrink-0' />
                                 <span>ดาวน์โหลด</span>
@@ -1833,7 +1860,7 @@ function MyKnowledgeAddData() {
                             <button
                               type='button'
                               onClick={() => handleAttachOriginalClick(file)}
-                              className='w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-zinc-400 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors'
+                              className='w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors'
                               title='แนบ PDF/Excel ต้นฉบับทีหลัง โดยไม่ทับข้อความ OCR'
                             >
                               <HiPaperClip className='text-lg flex-shrink-0' />
@@ -1884,8 +1911,17 @@ function MyKnowledgeAddData() {
                         </div>
                       );
                     })
+                  ) : documentLoading ? (
+                    <div className='space-y-2'>
+                      {[0, 1, 2].map((i) => (
+                        <div
+                          key={i}
+                          className='h-16 animate-pulse rounded-lg border border-gray-200 bg-gray-100'
+                        />
+                      ))}
+                    </div>
                   ) : (
-                    <div className='text-center py-8 text-gray-400'>
+                    <div className='text-center py-8 text-gray-500'>
                       <p className='text-sm'>ยังไม่มีไฟล์ที่อัปโหลด</p>
                     </div>
                   )}
@@ -1932,7 +1968,7 @@ function MyKnowledgeAddData() {
                           originalName: originalPreview.name,
                           name: originalPreview.name,
                         })}
-                        className='inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50'
+                        className='inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50'
                       >
                         <HiDownload className='text-sm' />
                         ดาวน์โหลด
@@ -2006,6 +2042,7 @@ function MyKnowledgeAddData() {
                       title={originalPreview.name}
                       src={originalPreview.url}
                       className='w-full h-full border-0'
+                      sandbox='allow-same-origin'
                     />
                   ) : (
                     <div className='h-full flex items-center justify-center text-sm text-red-600'>โหลดต้นฉบับไม่สำเร็จ</div>
@@ -2164,10 +2201,10 @@ function MyKnowledgeAddData() {
                                 key={`${sheet?.name || 'sheet'}-${sheetIdx}`}
                                 type='button'
                                 onClick={() => setPreviewActiveSheetIdx(sheetIdx)}
-                                className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                                className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
                                   previewActiveSheetIdx === sheetIdx
-                                    ? 'bg-teal-50 border-teal-400 text-teal-800'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                    ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                                 }`}
                               >
                                 {sheet?.name || `Sheet ${sheetIdx + 1}`}
@@ -2177,7 +2214,7 @@ function MyKnowledgeAddData() {
                           <button
                             type='button'
                             onClick={() => addPreviewTableRow(previewActiveSheetIdx)}
-                            className='px-3 py-1.5 rounded-md text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors'
+                            className='px-3 py-1.5 rounded-lg text-sm border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors'
                           >
                             + เพิ่มแถว
                           </button>
@@ -2222,7 +2259,7 @@ function MyKnowledgeAddData() {
                                           <button
                                             type='button'
                                             onClick={() => removePreviewTableRow(previewActiveSheetIdx, rowIdx)}
-                                            className='px-2.5 py-1.5 text-xs rounded border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors'
+                                            className='px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors'
                                           >
                                             ลบแถว
                                           </button>
@@ -2262,21 +2299,21 @@ function MyKnowledgeAddData() {
                                   <button
                                     type='button'
                                     onClick={() => setSelectedPreviewChunks(ocrRows.map((row) => row.idx))}
-                                    className='px-2.5 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors'
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors'
                                   >
                                     เลือกทั้งหมด
                                   </button>
                                   <button
                                     type='button'
                                     onClick={() => setSelectedPreviewChunks([])}
-                                    className='px-2.5 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors'
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors'
                                   >
                                     ล้าง
                                   </button>
                                   <button
                                     type='button'
                                     onClick={removeSelectedPreviewChunks}
-                                    className='px-2.5 py-1 text-xs rounded border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-colors'
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors'
                                   >
                                     ลบ chunk ที่เลือก
                                   </button>
@@ -2297,15 +2334,15 @@ function MyKnowledgeAddData() {
                                       }
                                       className={`text-left rounded-lg border px-3 py-2 transition-colors ${
                                         selected
-                                          ? 'border-teal-400 bg-teal-50'
-                                          : 'border-slate-200 bg-white hover:bg-slate-50'
+                                          ? 'border-yellow-400 bg-yellow-50'
+                                          : 'border-gray-200 bg-white hover:bg-gray-50'
                                       }`}
                                     >
                                       <div className='flex items-start justify-between gap-2'>
                                         <p className='text-xs font-semibold text-slate-700'>
                                           Chunk {row.idx}{row.page ? ` (หน้า ${row.page})` : ''}
                                         </p>
-                                        <span className={`text-[11px] font-semibold ${selected ? 'text-teal-700' : 'text-slate-400'}`}>
+                                        <span className={`text-[11px] font-semibold ${selected ? 'text-yellow-800' : 'text-gray-400'}`}>
                                           {selected ? 'เลือกแล้ว' : 'คลิกเพื่อเลือก'}
                                         </span>
                                       </div>
@@ -2322,11 +2359,22 @@ function MyKnowledgeAddData() {
                           );
                         })()}
                         <div className='flex flex-wrap items-center justify-end gap-2'>
+                          <select
+                            value={structureAiModel}
+                            onChange={(e) => setStructureAiModel(e.target.value)}
+                            disabled={previewAiStructuring}
+                            className='px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white text-gray-800 disabled:opacity-50'
+                            title='โมเดลที่ใช้จัดรูปแบบและแก้คำ'
+                          >
+                            {OCR_STRUCTURE_MODEL_OPTIONS.map((opt) => (
+                              <option key={opt.id || 'default'} value={opt.id}>{opt.label}</option>
+                            ))}
+                          </select>
                           <button
                             type='button'
                             onClick={handleStructureOcrWithAi}
                             disabled={previewAiStructuring}
-                            className='px-3 py-1.5 text-sm border border-purple-700/30 rounded-lg bg-purple-50 text-purple-900 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0'
+                            className='px-3 py-1.5 text-sm font-medium rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0'
                           >
                             {previewAiStructuring ? 'กำลังจัดเรียง…' : 'จัดเรียงด้วย AI'}
                           </button>
@@ -2452,7 +2500,7 @@ function MyKnowledgeAddData() {
                       if (structuredText) {
                         return (
                           <div className='space-y-4'>
-                            <div className='inline-flex items-center gap-2 rounded-full bg-purple-50 text-purple-900 text-xs font-semibold px-3 py-1 border border-purple-200'>
+                            <div className='inline-flex items-center gap-2 rounded-full bg-yellow-50 text-yellow-900 text-xs font-semibold px-3 py-1 border border-yellow-200'>
                               ผลลัพธ์จัดเรียงด้วย AI
                             </div>
                             {(() => {
@@ -2589,14 +2637,14 @@ function MyKnowledgeAddData() {
                 <button
                   type='button'
                   onClick={closeExpandedCellEditor}
-                  className='px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  className='px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50'
                 >
                   ยกเลิก
                 </button>
                 <button
                   type='button'
                   onClick={saveExpandedCellEditor}
-                  className='px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700'
+                  className='px-3 py-1.5 text-sm rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 font-medium'
                 >
                   บันทึกช่องนี้
                 </button>

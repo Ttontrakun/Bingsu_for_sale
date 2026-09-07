@@ -107,6 +107,27 @@ export function buildReferences(groundingChunks, contextDocuments, primaryDocume
 
 export const PRIVATE_REFERENCE = { docId: "__private__", displayName: "เนื้อหาส่วนตัวของคุณ", positions: [] };
 
+/**
+ * การ์ดอ้างอิงสำหรับคำถามแนว "มีเอกสารอะไรบ้าง" — 1 ชิปต่อชุดความรู้
+ * ไม่ผ่านการกรองด้วยคะแนน retrieval เพราะคำถามนี้ตั้งใจอ้างถึงทุกชุดที่บอทใช้ได้
+ * (กดชิปแล้วในโมดัลจะเห็นไฟล์ต้นฉบับทุกไฟล์ของชุดนั้นให้เปิด/ดาวน์โหลด)
+ */
+export function buildDocumentListReferences(contextDocuments = []) {
+  const refs = [];
+  const seen = new Set();
+  for (const doc of contextDocuments || []) {
+    const docId = doc?.id;
+    if (!docId || seen.has(docId)) continue;
+    seen.add(docId);
+    refs.push({
+      docId,
+      displayName: doc?.displayName || doc?.fileName || "เอกสาร",
+      positions: [],
+    });
+  }
+  return refs;
+}
+
 /** จำนวนแหล่งอ้างอิงสูงสุดต่อคำตอบ — กันแถบชิปยาวเกิน */
 export const MAX_CITATION_SOURCES = 8;
 

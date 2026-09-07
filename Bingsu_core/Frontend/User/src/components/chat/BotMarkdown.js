@@ -46,6 +46,18 @@ const BOT_MARKDOWN_COMPONENTS = {
   blockquote: ({ node, ...props }) => (
     <blockquote className='border-l-4 border-yellow-300 bg-yellow-50/60 rounded-r-md px-3 py-2 my-2 text-gray-700' {...props} />
   ),
+  a: ({ node, href, children, ...props }) => {
+    const raw = String(href || '').trim();
+    const safe = /^https?:\/\//i.test(raw) ? raw : null;
+    if (!safe) {
+      return <span {...props}>{children}</span>;
+    }
+    return (
+      <a href={safe} target='_blank' rel='noopener noreferrer' className='text-yellow-700 underline underline-offset-2' {...props}>
+        {children}
+      </a>
+    );
+  },
   code: ({ inline, children, ...props }) =>
     inline ? (
       <code className='px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 text-[13px]' {...props}>

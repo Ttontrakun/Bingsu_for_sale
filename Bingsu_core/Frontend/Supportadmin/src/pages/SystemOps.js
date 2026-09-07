@@ -9,6 +9,7 @@ import {
   HiCurrencyDollar,
   HiBadgeCheck,
   HiUserGroup,
+  HiExclamation,
 } from 'react-icons/hi';
 import { api } from '../services/api';
 import { useAdminSystemConfig } from '../context/AdminSystemConfigContext';
@@ -75,6 +76,11 @@ function SystemOps({ userRole }) {
   const [annMessage, setAnnMessage] = useState('');
   const [annLevel, setAnnLevel] = useState('info');
   const [annSaving, setAnnSaving] = useState(false);
+  const [maintenance, setMaintenance] = useState({ enabled: false });
+  const [maintLoading, setMaintLoading] = useState(false);
+  const [maintSaving, setMaintSaving] = useState(false);
+  const [maintConfirm, setMaintConfirm] = useState(null);
+
   const loadAnnouncements = useCallback(async () => {
     if (!canManage) return;
     setAnnLoading(true);
@@ -88,10 +94,26 @@ function SystemOps({ userRole }) {
     }
   }, [canManage]);
 
+  const loadMaintenance = useCallback(async () => {
+    if (!canManage) return;
+    setMaintLoading(true);
+    try {
+      const data = await api.getMaintenance();
+      setMaintenance({ enabled: Boolean(data?.enabled) });
+    } catch {
+      showToast('โหลดโหมดปิดปรับปรุงไม่สำเร็จ');
+    } finally {
+      setMaintLoading(false);
+    }
+  }, [canManage]);
+
   useEffect(() => {
     if (!canView) return;
-    if (tab === 'announce') loadAnnouncements();
-  }, [canView, tab, loadAnnouncements]);
+    if (tab === 'announce') {
+      loadAnnouncements();
+      loadMaintenance();
+    }
+  }, [canView, tab, loadAnnouncements, loadMaintenance]);
 
   if (!canView || tabs.length === 0) return <Navigate to="/knowledge" replace />;
 
@@ -119,6 +141,22 @@ function SystemOps({ userRole }) {
       loadAnnouncements();
     } catch {
       showToast('อัปเดตไม่สำเร็จ');
+    }
+  };
+
+  const handleConfirmMaintenance = async () => {
+    if (!maintConfirm) return;
+    const nextEnabled = maintConfirm === 'enable';
+    setMaintSaving(true);
+    try {
+      const data = await api.updateMaintenance({ enabled: nextEnabled });
+      setMaintenance({ enabled: Boolean(data?.enabled) });
+      setMaintConfirm(null);
+      showToast(nextEnabled ? 'เปิดโหมดปิดปรับปรุงแล้ว' : 'ปิดโหมดปิดปรับปรุงแล้ว');
+    } catch {
+      showToast('อัปเดตโหมดปิดปรับปรุงไม่สำเร็จ');
+    } finally {
+      setMaintSaving(false);
     }
   };
 
@@ -156,7 +194,10 @@ function SystemOps({ userRole }) {
         {tab === 'announce' && (
           <button
             type="button"
-            onClick={loadAnnouncements}
+            onClick={() => {
+              loadAnnouncements();
+              loadMaintenance();
+            }}
             className="inline-flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 self-start"
           >
             <HiRefresh />
@@ -183,30 +224,76 @@ function SystemOps({ userRole }) {
       </div>
 
       {tab === 'announce' && canManage && (
-        <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-4 flex flex-col gap-3">
-            <p className="text-sm font-medium text-gray-700">สร้างประกาศใหม่ (แสดงเป็นแถบในหน้าแชทของผู้ใช้)</p>
+        <div className="flex flex-col gap-5">
+          <div
+            className={`rounded-xl border bg-white px-5 py-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
+              maintenance.enabled ? 'border-yellow-400' : 'border-gray-200'
+            }`}
+          >
+            <div className="flex items-start gap-3 min-w-0 flex-1">
+              <div
+                className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                  maintenance.enabled ? 'bg-yellow-400 text-gray-900' : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                <HiExclamation className="text-lg" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-800">โหมดปิดปรับปรุง</p>
+                <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                  {maintenance.enabled
+                    ? 'กำลังปิดเว็บผู้ใช้อยู่ — ผู้ใช้เห็นหน้าแจ้งปิดปรับปรุง และใช้ระบบไม่ได้'
+                    : 'ปิดเว็บผู้ใช้ทั้งระบบชั่วคราวเมื่อมีปัญหา ผู้ใช้จะใช้ระบบไม่ได้จนกว่าจะกดปิด'}
+                </p>
+              </div>
+            </div>
+            {!maintenance.enabled ? (
+              <button
+                type="button"
+                onClick={() => setMaintConfirm('enable')}
+                disabled={maintSaving || maintLoading}
+                className="shrink-0 self-start sm:self-center px-4 py-2 rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 text-sm font-semibold transition-colors disabled:opacity-50"
+              >
+                เปิดโหมดปิดปรับปรุง
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setMaintConfirm('disable')}
+                disabled={maintSaving || maintLoading}
+                className="shrink-0 self-start sm:self-center px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 text-sm font-semibold hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                ปิดโหมดปิดปรับปรุง
+              </button>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white px-5 py-4 flex flex-col gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">ประกาศถึงผู้ใช้</p>
+              <p className="text-xs text-gray-500 mt-0.5">แสดงเป็นแถบข้อความในหน้าแชท</p>
+            </div>
             <textarea
               value={annMessage}
               onChange={(e) => setAnnMessage(e.target.value)}
               placeholder="เช่น ระบบจะปิดปรับปรุงวันเสาร์ 22:00-24:00 น."
               rows={2}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 bg-white"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-transparent bg-white"
             />
             <div className="flex items-center gap-3">
               <select
                 value={annLevel}
                 onChange={(e) => setAnnLevel(e.target.value)}
-                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white"
+                className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm bg-white text-gray-800"
               >
-                <option value="info">ทั่วไป (ฟ้า)</option>
-                <option value="warning">สำคัญ (เหลือง)</option>
+                <option value="info">ทั่วไป</option>
+                <option value="warning">สำคัญ</option>
               </select>
               <button
                 type="button"
                 onClick={handleCreateAnnouncement}
                 disabled={annSaving}
-                className="ml-auto px-4 py-1.5 rounded-lg bg-[#F5C200] text-gray-900 text-sm font-semibold hover:bg-[#e0b000] disabled:opacity-50"
+                className="ml-auto px-4 py-2 rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 text-sm font-semibold transition-colors disabled:opacity-50"
               >
                 {annSaving ? 'กำลังสร้าง...' : 'สร้างประกาศ'}
               </button>
@@ -216,7 +303,7 @@ function SystemOps({ userRole }) {
           {annLoading && annList.length === 0 ? (
             <p className="text-sm text-gray-500 py-6">กำลังโหลด...</p>
           ) : annList.length === 0 ? (
-            <div className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl p-8 text-center">
+            <div className="text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl p-8 text-center bg-white">
               ยังไม่มีประกาศ
             </div>
           ) : (
@@ -229,7 +316,7 @@ function SystemOps({ userRole }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-800 whitespace-pre-wrap break-words">{item.message}</p>
                     <p className="text-xs text-gray-400 mt-1">
-                      {item.level} · {fmtDate(item.createdAt)}
+                      {item.level === 'warning' ? 'สำคัญ' : 'ทั่วไป'} · {fmtDate(item.createdAt)}
                       {item.active ? ' · กำลังแสดง' : ' · ปิดอยู่'}
                     </p>
                   </div>
@@ -237,13 +324,13 @@ function SystemOps({ userRole }) {
                     <button
                       type="button"
                       onClick={() => handleToggleAnnouncement(item)}
-                      className={`px-2.5 py-1 text-xs rounded-lg border ${
+                      className={`px-2.5 py-1 text-xs font-medium rounded-lg border ${
                         item.active
-                          ? 'border-green-300 text-green-800 bg-green-50'
-                          : 'border-gray-300 text-gray-600 bg-gray-50'
+                          ? 'border-yellow-400 bg-yellow-50 text-yellow-900'
+                          : 'border-gray-300 text-gray-600 bg-white hover:bg-gray-50'
                       }`}
                     >
-                      {item.active ? 'เปิดอยู่' : 'ปิดอยู่'}
+                      {item.active ? 'กำลังแสดง' : 'ปิดอยู่'}
                     </button>
                     <button
                       type="button"
@@ -275,6 +362,39 @@ function SystemOps({ userRole }) {
 
       {tab === 'pm' && isAdmin && (
         <ProductManagersPanel showHeader={false} />
+      )}
+
+      {maintConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4 shadow-xl border border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">
+              {maintConfirm === 'enable' ? 'ยืนยันการเปิดโหมดปิดปรับปรุง' : 'ยืนยันการปิดโหมดปิดปรับปรุง'}
+            </h3>
+            <p className="text-gray-600 mb-6">
+              {maintConfirm === 'enable'
+                ? 'ผู้ใช้จะไม่สามารถใช้เว็บได้จนกว่าจะปิดโหมดนี้ ต้องการเปิดหรือไม่?'
+                : 'ผู้ใช้จะกลับมาใช้เว็บได้ตามปกติ ต้องการปิดหรือไม่?'}
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setMaintConfirm(null)}
+                disabled={maintSaving}
+                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors disabled:opacity-50"
+              >
+                ไม่
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMaintenance}
+                disabled={maintSaving}
+                className="px-4 py-2 bg-yellow-400 text-gray-900 rounded-lg hover:bg-yellow-500 transition-colors disabled:opacity-50"
+              >
+                {maintSaving ? 'กำลังบันทึก...' : 'ใช่'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {toast && (

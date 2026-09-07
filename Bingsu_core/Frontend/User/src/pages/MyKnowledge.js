@@ -97,7 +97,7 @@ function MyKnowledge() {
   };
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-[#f7f7f8]">
       <Sidebar />
       <main className="flex-1 overflow-auto thin-scrollbar px-6 py-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -156,8 +156,26 @@ function MyKnowledge() {
           <p className="text-sm text-gray-400 py-10 text-center">กำลังโหลด...</p>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16">
-            <p className="text-gray-500 text-lg mb-2">ยังไม่มี Knowledge</p>
-            <p className="text-gray-400 text-sm">กด “สร้าง Knowledge” เพื่อเริ่มต้น</p>
+            {searchQuery.trim() ? (
+              <>
+                <p className="text-gray-500 text-lg mb-2">
+                  ไม่พบ Knowledge ที่ตรงกับ “{searchQuery.trim()}”
+                </p>
+                <p className="text-gray-500 text-sm mb-4">ลองใช้คำค้นหาสั้นลง หรือล้างคำค้นหา</p>
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  ล้างคำค้นหา
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 text-lg mb-2">ยังไม่มี Knowledge</p>
+                <p className="text-gray-500 text-sm">กด “สร้าง Knowledge” เพื่อเริ่มต้น</p>
+              </>
+            )}
           </div>
         ) : (
           <>
@@ -170,7 +188,7 @@ function MyKnowledge() {
                 return (
                   <div
                     key={knowledge.id}
-                    className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col min-w-0 overflow-hidden"
+                    className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all flex flex-col min-w-0 overflow-hidden"
                   >
                     <div className="flex-1 min-w-0">
                       <h3 title={name} className="text-base font-semibold text-gray-800 mb-1 truncate">

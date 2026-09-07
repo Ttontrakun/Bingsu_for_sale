@@ -18,13 +18,13 @@ import Login from './pages/Login';
 import Navbar from './components/Navbar';
 import NotificationBell from './components/NotificationBell';
 import { api, getStoredUser, mapAdminUserToDisplay, normalizeDashboardRole } from './services/api';
-import { AdminSystemConfigProvider } from './context/AdminSystemConfigContext';
+import { AdminSystemConfigProvider, useAdminSystemConfig } from './context/AdminSystemConfigContext';
 
 function AppContent() {
   const USERS_POLL_MS = 60000;
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [sessionUser, setSessionUser] = useState(null);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const { reload: reloadAdminConfig } = useAdminSystemConfig();
   const userRole = normalizeDashboardRole(sessionUser?.role || getStoredUser()?.role || 'support');
   const [users, setUsers] = useState([]);
 
@@ -56,11 +56,10 @@ function AppContent() {
         if (!user?.id) throw new Error('no session');
         if (!cancelled) {
           setSessionUser(user);
+          reloadAdminConfig();
           try {
             localStorage.setItem('supportadmin_user', JSON.stringify({
               id: user.id,
-              email: user.email,
-              name: user.name,
               role: user.role,
             }));
           } catch (_) {}
@@ -78,7 +77,7 @@ function AppContent() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadAdminConfig]);
 
   useEffect(() => {
     if (sessionUser) loadUsers();
@@ -92,10 +91,6 @@ function AppContent() {
     }, USERS_POLL_MS);
     return () => clearInterval(timer);
   }, [loadUsers, sessionUser]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') window.userRole = userRole;
-  }, [userRole]);
 
   const location = useLocation();
   const isLoginPage = location.pathname === '/login' || location.pathname === '/auth';
@@ -120,14 +115,12 @@ function AppContent() {
   const isKnowledgePage = location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/');
 
   return (
-    <div className="flex h-screen bg-white relative">
-      <Navbar
-        onCollapseChange={setIsSidebarCollapsed}
-        userRole={userRole}
-      />
-      <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 relative ${isSidebarCollapsed ? 'pl-16' : ''} ${isKnowledgePage ? 'thin-scrollbar' : ''}`}>
+    <div className="flex h-screen bg-[#f7f7f8] relative">
+      <Navbar userRole={userRole} />
+      {/* rail ที่หุบแล้วยังกินพื้นที่จริงใน flex อยู่ ห้ามเว้น padding ซ้ำ ไม่งั้นจะเกิดช่องว่างข้างเมนู */}
+      <main className={`flex-1 min-w-0 bg-[#f7f7f8] px-5 sm:px-8 py-5 overflow-auto flex flex-col transition-all duration-300 relative ${isKnowledgePage ? 'thin-scrollbar' : ''}`}>
           {!isAdminDev && (
-            <div className="flex justify-end mb-3 shrink-0">
+            <div className="flex justify-end mb-4 shrink-0">
               <NotificationBell users={users} />
             </div>
           )}

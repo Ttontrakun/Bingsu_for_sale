@@ -273,6 +273,8 @@ export const s3PublicUrl = process.env.S3_PUBLIC_URL || "";
 export const s3ForcePathStyle = (process.env.S3_FORCE_PATH_STYLE || "true") === "true";
 
 export const isProduction = isProductionEnv;
+export const allowDevAuthTokens = !isProductionEnv && process.env.ALLOW_DEV_AUTH_TOKENS === "true";
+export const bcryptRounds = 12;
 // CORS allow-list (comma-separated in env) — safer than reflecting any origin.
 const fallbackCorsOrigins = [
   "http://localhost:3000",

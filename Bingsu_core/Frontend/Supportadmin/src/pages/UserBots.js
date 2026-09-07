@@ -14,12 +14,14 @@ function UserBots() {
   const [searchQuery, setSearchQuery] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [botList, setBotList] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selected, setSelected] = useState(null);
   const itemsPerPage = 12;
 
   const loadBots = useCallback(async () => {
     setLoadError(null);
+    setLoading(true);
     try {
       const list = await api.getAdminBots({ ownerRole: 'user' });
       setBotList((list || []).map((b, i) => mapBotToDisplay(b, i, AVATAR_COLORS)));
@@ -31,6 +33,8 @@ function UserBots() {
           ? 'SESSION_EXPIRED'
           : msg || 'โหลดบอทของผู้ใช้ไม่สำเร็จ',
       );
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -88,7 +92,7 @@ function UserBots() {
         <div className="flex items-center gap-4 mb-8">
           <div className={`w-20 h-20 rounded-full ${selected.color || 'bg-gray-300'} flex-shrink-0`} />
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold text-gray-800 truncate">{selected.name}</h1>
+            <h1 className="text-2xl font-bold text-gray-800 truncate">{selected.name}</h1>
             <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-1 min-w-0">
               <HiUser className="shrink-0" />
               <span className="truncate">
@@ -199,10 +203,30 @@ function UserBots() {
         </div>
       )}
 
-      {filteredBots.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="h-11 w-11 rounded-full bg-gray-200" />
+                <div className="flex-1">
+                  <div className="h-4 w-2/3 rounded bg-gray-200" />
+                  <div className="mt-2 h-3 w-1/3 rounded bg-gray-100" />
+                </div>
+              </div>
+              <div className="mt-4 h-3 w-full rounded bg-gray-100" />
+              <div className="mt-2 h-3 w-4/5 rounded bg-gray-100" />
+            </div>
+          ))}
+        </div>
+      ) : filteredBots.length === 0 ? (
         <div className="text-center py-16">
-          <p className="text-gray-500 text-lg mb-2">ยังไม่มีบอทของผู้ใช้</p>
-          <p className="text-gray-400 text-sm">เมื่อผู้ใช้สร้างบอท จะแสดงที่นี่</p>
+          <p className="text-gray-700 text-lg mb-1">
+            {searchQuery.trim() ? 'ไม่พบบอทที่ค้นหา' : 'ยังไม่มีบอทของผู้ใช้'}
+          </p>
+          <p className="text-gray-500 text-sm">
+            {searchQuery.trim() ? 'ลองเปลี่ยนคำค้นหา' : 'เมื่อผู้ใช้สร้างบอท จะแสดงที่นี่'}
+          </p>
         </div>
       ) : (
         <>
@@ -214,7 +238,7 @@ function UserBots() {
                   key={bot.id}
                   type="button"
                   onClick={() => setSelected(bot)}
-                  className="text-left bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all flex flex-col min-w-0"
+                  className="text-left bg-white border border-gray-200 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-yellow-300 transition-all flex flex-col min-w-0"
                 >
                   <div className="flex items-start gap-4 mb-3">
                     <div

@@ -12,8 +12,10 @@ import { isFeatureEnabled } from "../lib/systemConfig.js";
 import {
   allowedUploadExtensions,
   allowedUploadMimeTypes,
+  isAllowedChatModel,
   ocrLlmApiKey,
   ocrLlmProvider,
+  resolveChatTargetForModel,
   qdrantCollectionName,
   storeRawFiles,
 } from "../config.js";
@@ -65,6 +67,44 @@ const stripSourceFiles = (sourceFiles) => {
     return rest;
   });
 };
+
+/**
+ * ไฟล์เก่าบางไฟล์ถูกบันทึกชื่อไว้ตอนที่ยังไม่ decode multipart เป็น UTF-8
+ * ชื่อไทยเลยกลายเป็น mojibake (à¸„à¹ˆà¸²...) — ซ่อมตอนส่งออก API ให้ทุกหน้าเห็นชื่อที่ถูก
+ */
+const FILE_NAME_FIELDS = ["name", "fileName", "originalName", "displayName"];
+const repairSourceFileNames = (sourceFiles) => {
+  const repairOne = (file) => {
+    if (!file || typeof file !== "object") return file;
+    let changed = false;
+    const next = { ...file };
+    for (const key of FILE_NAME_FIELDS) {
+      const value = next[key];
+      if (typeof value !== "string" || !value) continue;
+      const repaired = repairStoredFileName(value, value);
+      if (repaired !== value) {
+        next[key] = repaired;
+        changed = true;
+      }
+    }
+    return changed ? next : file;
+  };
+  if (Array.isArray(sourceFiles)) return sourceFiles.map(repairOne);
+  if (typeof sourceFiles === "string") {
+    try {
+      const parsed = JSON.parse(sourceFiles);
+      if (Array.isArray(parsed)) return JSON.stringify(parsed.map(repairOne));
+    } catch {
+      /* keep as-is */
+    }
+  }
+  return sourceFiles;
+};
+const withRepairedFileNames = (document) => (
+  document && typeof document === "object"
+    ? { ...document, sourceFiles: repairSourceFileNames(document.sourceFiles) }
+    : document
+);
 
 const normalizeExtension = (name = "") => {
   const normalizedName = String(name || "").trim().replace(/["']+$/g, "");
@@ -235,12 +275,12 @@ documentsRouter.get("/", authenticate, async (req, res) => {
     res.json(
       filtered.map((doc) => ({
         ...doc,
-        sourceFiles: stripSourceFiles(doc.sourceFiles),
+        sourceFiles: stripSourceFiles(repairSourceFileNames(doc.sourceFiles)),
       })),
     );
     return;
   }
-  res.json(filtered);
+  res.json(filtered.map(withRepairedFileNames));
 });
 
 documentsRouter.post("/", authenticate, async (req, res) => {
@@ -746,21 +786,26 @@ documentsRouter.post("/:id/files/ocr/structure-text", authenticate, async (req, 
       res.status(400).json({ ok: false, error: `ข้อความยาวเกิน ${maxLen} ตัวอักษร` });
       return;
     }
-    if (ocrLlmProvider !== "ollama" && !ocrLlmApiKey) {
+    const modelId = typeof req.body?.model === "string" ? req.body.model.trim() : "";
+    if (modelId && !isAllowedChatModel(modelId)) {
+      res.status(400).json({ ok: false, error: "โมเดลที่เลือกใช้ไม่ได้" });
+      return;
+    }
+    if (ocrLlmProvider !== "ollama" && !ocrLlmApiKey && !resolveChatTargetForModel(modelId)) {
       res.status(503).json({
         ok: false,
         error: "ยังไม่ได้ตั้งค่า API สำหรับจัดเรียงด้วย AI — ตั้ง OCR_LLM_API_KEY หรือ OPENAI_API_KEY ใน Backend/.env",
       });
       return;
     }
-    const structured = await structureOcrTextWithLlm(text.trim());
+    const structured = await structureOcrTextWithLlm(text.trim(), { modelId });
     // Log แบบ action-level: มีผู้ใช้สั่งจัดเรียงข้อความด้วย AI (เก็บเฉพาะ metadata ไม่เก็บเนื้อหา)
     logEvent({
       event: "document.ocr.structured",
       actorId: req.user?.id,
       targetType: "document",
       targetId: document.id,
-      meta: { displayName: document.displayName, inputChars: text.trim().length, ...getRequestContext(req) },
+      meta: { displayName: document.displayName, inputChars: text.trim().length, model: modelId || "default", ...getRequestContext(req) },
     }).catch(() => {});
     res.json({ ok: true, text: structured });
   } catch (e) {
@@ -789,7 +834,7 @@ documentsRouter.get("/:id", authenticate, async (req, res) => {
     return;
   }
 
-  res.json(document);
+  res.json(withRepairedFileNames(document));
 });
 
 documentsRouter.get("/:id/files/:index/download", authenticate, async (req, res) => {

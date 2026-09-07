@@ -137,9 +137,9 @@ function Navbar({ onCollapseChange, userRole }) {
             }`}
             onClick={() => navigate('/dev')}
           >
-            <img src={logoSrc} alt="logo" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+            <img src={logoSrc} alt="logo" className="w-10 h-10 rounded-full object-cover flex-shrink-0 ring-2 ring-yellow-300" />
             {!isCollapsed && (
-              <span className="text-orange-500 font-bold text-lg leading-tight">
+              <span className="text-amber-600 font-bold text-lg leading-tight">
                 <span className="block">{brandLine1}</span>
                 {brandLine2 ? <span className="block">{brandLine2}</span> : null}
               </span>
@@ -217,8 +217,8 @@ function Navbar({ onCollapseChange, userRole }) {
 
   return (
     <>
-    <aside className={`bg-gray-200 flex flex-col py-6 transition-all duration-500 ease-in-out relative ${
-      isCollapsed ? 'w-16 px-2 overflow-visible' : 'w-52 px-6 overflow-visible'
+    <aside className={`bg-white border-r border-gray-200 flex flex-col py-6 transition-all duration-500 ease-in-out relative shadow-sm ${
+      isCollapsed ? 'w-16 px-2 overflow-visible' : 'w-56 px-4 overflow-visible'
     }`}>
       {/* Toggle Button */}
       <button
@@ -244,14 +244,14 @@ function Navbar({ onCollapseChange, userRole }) {
 
       {/* Logo */}
       <div 
-        className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-300 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
+        className={`flex items-center gap-2 mb-5 pb-5 border-b border-gray-100 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'opacity-100 justify-center' : 'opacity-100'
         }`}
         onClick={() => navigate(isAdminDev ? '/dev' : '/homepage')}
       >
-        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
+        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0 ring-2 ring-yellow-300' />
         {!isCollapsed && (
-          <span className='text-orange-500 font-bold text-lg leading-tight'>
+          <span className='text-amber-600 font-bold text-lg leading-tight'>
             <span className='block'>{brandLine1}</span>
             {brandLine2 ? <span className='block'>{brandLine2}</span> : null}
           </span>
@@ -259,88 +259,88 @@ function Navbar({ onCollapseChange, userRole }) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex flex-col gap-6 flex-1 min-h-0 transition-all duration-300 ease-in-out opacity-100">
+      <nav className="flex flex-col gap-1 flex-1 min-h-0 transition-all duration-300 ease-in-out opacity-100">
         {/* Fixed Navigation Items */}
-        <div className='flex flex-col gap-6 flex-shrink-0'>
+        <div className='flex flex-col gap-1 flex-shrink-0'>
           {canSeeDashboard && (
             <div 
               onClick={() => navigate('/dashboard')}
-              className={`nav-item ${isActive('/dashboard') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/dashboard') ? 'nav-item-active' : 'nav-item-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiViewGrid className='text-xl flex-shrink-0' />
+              <HiViewGrid className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>Dashboard</span>}
             </div>
           )}
           {canSeeManual && (
             <div 
               onClick={() => navigate('/homepage')}
-              className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/homepage') ? 'nav-item-active' : 'nav-item-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiHome className='text-xl flex-shrink-0' />
+              <HiHome className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>Manual</span>}
             </div>
           )}
           {canSeeBots && (
             <div 
               onClick={() => navigate('/bots')}
-              className={`nav-item ${location.pathname === '/bots' || location.pathname.startsWith('/bots/') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${location.pathname === '/bots' || location.pathname.startsWith('/bots/') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiDesktopComputer className='text-xl flex-shrink-0' />
+              <HiDesktopComputer className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>Bots</span>}
             </div>
           )}
           {canSeeKnowledge && (
             <div 
               onClick={() => navigate('/knowledge')}
-              className={`nav-item ${location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${location.pathname === '/knowledge' || location.pathname.startsWith('/knowledge/') ? 'nav-item-knowledge-active' : 'nav-item-knowledge-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiBookOpen className='text-xl flex-shrink-0' />
+              <HiBookOpen className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>Knowledge</span>}
             </div>
           )}
           {canSeeUserBots && (
             <div
               onClick={() => navigate('/user-bots')}
-              className={`nav-item ${isActive('/user-bots') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/user-bots') ? 'nav-item-bots-active' : 'nav-item-bots-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
               title="User Bots"
             >
-              <HiUsers className="text-xl flex-shrink-0" />
+              <HiUsers className="text-lg flex-shrink-0" />
               {!isCollapsed && <span>User Bots</span>}
             </div>
           )}
           {canSeeSupportPanel && (
             <div 
               onClick={() => navigate('/support-panel')}
-              className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/support-panel') || location.pathname.includes('/support-panel') ? 'nav-item-integration-active' : 'nav-item-integration-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiSupport className='text-xl flex-shrink-0' />
+              <HiSupport className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>Support Panel</span>}
             </div>
           )}
           {canSeeFeedback && (
             <div
               onClick={() => navigate('/feedback')}
-              className={`nav-item ${isActive('/feedback') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/feedback') ? 'nav-item-active' : 'nav-item-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiThumbUp className="text-xl flex-shrink-0" />
+              <HiThumbUp className="text-lg flex-shrink-0" />
               {!isCollapsed && <span>Feedback</span>}
             </div>
           )}
           {canSeeSystem && (
             <div
               onClick={() => navigate('/system')}
-              className={`nav-item ${isActive('/system') || location.pathname.startsWith('/system') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/system') || location.pathname.startsWith('/system') ? 'nav-item-active' : 'nav-item-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiCog className='text-xl flex-shrink-0' />
+              <HiCog className='text-lg flex-shrink-0' />
               {!isCollapsed && <span>System</span>}
             </div>
           )}
           {canSeeLogs && (
             <div
               onClick={() => navigate('/logs')}
-              className={`nav-item ${isActive('/logs') ? 'nav-item-active' : 'nav-item-inactive'} hover:bg-gray-300 active:bg-gray-400 cursor-pointer rounded-lg transition-colors w-full py-1 px-2 ${isCollapsed ? 'justify-center' : ''}`}
+              className={`nav-item ${isActive('/logs') ? 'nav-item-active' : 'nav-item-inactive'} cursor-pointer w-full ${isCollapsed ? 'justify-center' : ''}`}
             >
-              <HiClipboardList className="text-xl flex-shrink-0" />
+              <HiClipboardList className="text-lg flex-shrink-0" />
               {!isCollapsed && <span>Logs</span>}
             </div>
           )}
@@ -349,12 +349,12 @@ function Navbar({ onCollapseChange, userRole }) {
 
       {/* Profile */}
       <div 
-        className={`flex items-center gap-3 pt-4 border-t border-gray-300 cursor-pointer hover:bg-gray-100 rounded-lg p-2 transition-all duration-300 ease-in-out ${
+        className={`flex items-center gap-3 pt-4 border-t border-gray-100 cursor-pointer hover:bg-gray-50 rounded-xl p-2 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'opacity-100 justify-center' : 'opacity-100'
         }`}
         onClick={() => setIsProfileModalOpen(true)}
       >
-        <div className='w-10 h-10 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0 text-xl overflow-hidden'>
+        <div className='w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0 text-xl overflow-hidden ring-1 ring-yellow-200'>
           {AVATAR_SRC_BY_KEY[selectedAvatar] ? (
             <img
               src={AVATAR_SRC_BY_KEY[selectedAvatar]}

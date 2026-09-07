@@ -61,11 +61,10 @@ export const deleteDocumentVectors = async (documentId) => {
  */
 export const searchQdrant = async (vector, { docIds = [], limit } = {}) => {
   if (!vector || !vector.length) return [];
+  if (!Array.isArray(docIds) || docIds.length === 0) return [];
   const index = await getIndex();
   const topK = limit || qdrantTopK;
-  const filter = docIds.length
-    ? { docId: { $in: docIds.map(String) } }
-    : undefined;
+  const filter = { docId: { $in: docIds.map(String) } };
   const response = await index.query({
     vector,
     topK,

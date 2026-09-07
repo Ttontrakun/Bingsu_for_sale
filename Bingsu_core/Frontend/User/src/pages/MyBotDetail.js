@@ -234,7 +234,7 @@ function MyBotDetail() {
   };
 
   return (
-    <div className="flex h-screen bg-white">
+    <div className="flex h-screen bg-[#f7f7f8]">
       <Sidebar />
       <main className="flex-1 overflow-auto px-6 py-6 pb-10">
         <button
@@ -248,7 +248,7 @@ function MyBotDetail() {
         <div className="flex items-center gap-4 mb-8">
           <div className={`w-20 h-20 rounded-full ${botData.avatar} flex-shrink-0`} />
           <div>
-            <h1 className="text-2xl font-semibold text-gray-800">
+            <h1 className="text-2xl font-bold text-gray-800">
               {isCreateMode ? 'สร้างบอทใหม่' : botData.name}
             </h1>
             <p className="text-gray-500">{botData.supportId}</p>

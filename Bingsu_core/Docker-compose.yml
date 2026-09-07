@@ -1,6 +1,7 @@
 # bb - รันทั้ง Backend + Supportadmin ใน Docker (Postgres, Qdrant, Redis, Legacy, Supportadmin)
 # ใช้: cd Bingsu_core && docker compose --profile app up -d --build
-# Supportadmin: http://localhost:3014  |  API (legacy): http://localhost:5052
+# Supportadmin: http://localhost:3014  |  User: http://localhost:8083
+# API (legacy) ฟังเฉพาะ 127.0.0.1:5052 — เข้าจากภายนอกผ่าน nginx ของ web/supportadmin เท่านั้น
 #
 # Data-plane (postgres/redis/qdrant/ocr) bind 127.0.0.1 เท่านั้น — โดเมนผู้ใช้ไม่กระทบ
 
@@ -10,7 +11,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ask_the_manual
     ports:
       - "127.0.0.1:5436:5432"
@@ -75,7 +76,7 @@ services:
       NODE_ENV: production
       SESSION_COOKIE_SECURE: "true"
       # บังคับ host ภายใน Docker (ค่าใน .env อาจชี้ localhost สำหรับ dev บนโฮสต์)
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ask_the_manual?schema=public
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/ask_the_manual?schema=public
       QDRANT_URL: http://qdrant:6333
       OCR_API_URL: http://ocr:8001
       UPLOAD_QUEUE_MODE: redis
@@ -91,7 +92,7 @@ services:
       ocr:
         condition: service_started
     ports:
-      - "5052:5052"
+      - "127.0.0.1:5052:5052"
     volumes:
       - bb_uploads:/app/uploads
       - bb_files:/app/.files

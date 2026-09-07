@@ -5,6 +5,11 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supportDocuments, getErrorMessage } from '../services/api';
 import { useToast } from '../components/Toast';
 
+const OCR_STRUCTURE_MODEL_OPTIONS = [
+  { id: 'Qwen3.8-27B', label: 'Qwen3.8-27B' },
+  { id: '', label: 'โมเดลเริ่มต้นระบบ' },
+];
+
 const parseMarkdownTableSheets = (inputText = '') => {
   const text = String(inputText || '');
   if (!text.trim()) return [];
@@ -153,11 +158,13 @@ function SupportAddKnowledgeData() {
   const [previewContent, setPreviewContent] = useState('');
   const [previewEditMode, setPreviewEditMode] = useState(false);
   const [previewAiStructuring, setPreviewAiStructuring] = useState(false);
+  const [structureAiModel, setStructureAiModel] = useState('Qwen3.8-27B');
   const [selectedPreviewChunks, setSelectedPreviewChunks] = useState([]);
   const [showChunkSelector, setShowChunkSelector] = useState(false); // ยุบ/กาง ตัวเลือก chunk ในโหมดแก้ไขข้อความ
   const [previewTableSheets, setPreviewTableSheets] = useState([]);
   const [previewActiveSheetIdx, setPreviewActiveSheetIdx] = useState(0);
   const [expandedCellEditor, setExpandedCellEditor] = useState(null);
+  const [destructiveConfirm, setDestructiveConfirm] = useState(null);
   const [fileError, setFileError] = useState('');
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -668,15 +675,26 @@ function SupportAddKnowledgeData() {
 
   // บันทึกชื่อไฟล์ใหม่
   const handleSaveEdit = () => {
-    const newName = (editName || '').trim();
-    if (!newName) {
+    const rawName = (editName || '').trim();
+    if (!rawName) {
       setFileError('กรุณากรอกชื่อไฟล์');
       return;
     }
     if (!editingFile) return;
-    setUploadedFiles(uploadedFiles.map(f => (
-      f.id === editingFile.id ? { ...f, name: newName } : f
-    )));
+    const oldName = editingFile.name || editingFile.fileName || '';
+    const ext = (String(oldName).match(/(\.[A-Za-z0-9]{1,8})$/) || [])[1] || '';
+    const newName = ext && !/\.[A-Za-z0-9]{1,8}$/.test(rawName) ? `${rawName}${ext}` : rawName;
+    setUploadedFiles(uploadedFiles.map((f) => {
+      if (f.id !== editingFile.id) return f;
+      return {
+        ...f,
+        name: newName,
+        fileName: newName,
+        originalSourceFile: f.originalSourceFile
+          ? { ...f.originalSourceFile, name: newName, fileName: newName }
+          : f.originalSourceFile,
+      };
+    }));
     setIsEditModalOpen(false);
     setEditingFile(null);
     setEditName('');
@@ -925,6 +943,15 @@ function SupportAddKnowledgeData() {
     setPreviewEditMode(false);
   };
 
+  const requestRemoveSelectedPreviewChunks = () => {
+    if (!previewFile) return;
+    if (!selectedPreviewChunks.length) {
+      showToast('กรุณาเลือก chunk ที่ต้องการลบก่อน', 'warning');
+      return;
+    }
+    setDestructiveConfirm({ type: 'chunks', count: selectedPreviewChunks.length });
+  };
+
   const removeSelectedPreviewChunks = () => {
     if (!previewFile) return;
     const selectedSet = new Set(selectedPreviewChunks);
@@ -1019,6 +1046,10 @@ function SupportAddKnowledgeData() {
     );
   };
 
+  const requestRemovePreviewTableRow = (sheetIdx, rowIdx) => {
+    setDestructiveConfirm({ type: 'row', sheetIdx, rowIdx });
+  };
+
   const removePreviewTableRow = (sheetIdx, rowIdx) => {
     setPreviewTableSheets((prev) =>
       prev.map((sheet, sIdx) => {
@@ -1029,6 +1060,17 @@ function SupportAddKnowledgeData() {
         };
       })
     );
+  };
+
+  const handleConfirmDestructive = () => {
+    if (!destructiveConfirm) return;
+    if (destructiveConfirm.type === 'chunks') {
+      removeSelectedPreviewChunks();
+    } else if (destructiveConfirm.type === 'row') {
+      removePreviewTableRow(destructiveConfirm.sheetIdx, destructiveConfirm.rowIdx);
+      showToast('ลบแถวแล้ว', 'success');
+    }
+    setDestructiveConfirm(null);
   };
 
   const openExpandedCellEditor = (sheetIdx, rowIdx, columnName, value) => {
@@ -1082,7 +1124,7 @@ function SupportAddKnowledgeData() {
           const rawChunk = String(block.text ?? block.content ?? '').trim();
           if (!rawChunk) continue;
 
-          const data = await supportDocuments.structureOcrWithAi(id, rawChunk);
+          const data = await supportDocuments.structureOcrWithAi(id, rawChunk, structureAiModel);
           if (!data?.ok || typeof data.text !== 'string') {
             throw new Error(data?.error || `จัดเรียง chunk ${rowIdx} ไม่สำเร็จ`);
           }
@@ -1146,7 +1188,7 @@ function SupportAddKnowledgeData() {
         showToast('ไม่มีข้อความให้จัดเรียง', 'error');
         return;
       }
-      const data = await supportDocuments.structureOcrWithAi(id, raw);
+      const data = await supportDocuments.structureOcrWithAi(id, raw, structureAiModel);
       if (!data?.ok || typeof data.text !== 'string') {
         throw new Error(data?.error || 'จัดเรียงไม่สำเร็จ');
       }
@@ -1359,6 +1401,11 @@ function SupportAddKnowledgeData() {
               : (typeof file.content === 'string' ? file.content : '');
           const nextText = nextTextRaw.trim();
           original.text = nextText;
+          const nextName = String(file.name || file.fileName || original.name || original.fileName || '').trim();
+          if (nextName) {
+            original.name = nextName;
+            original.fileName = nextName;
+          }
           if (Array.isArray(file.blocks)) {
             original.blocks = file.blocks
               .map((block) => {
@@ -1534,8 +1581,8 @@ function SupportAddKnowledgeData() {
 
           {/* Header */}
           <div className='mb-8'>
-            <h1 className='text-3xl font-bold text-gray-800 mb-2'>Add Data to Knowledge</h1>
-            <p className='text-gray-600'>
+            <h1 className='text-2xl font-bold text-gray-800 mb-2'>Add Data to Knowledge</h1>
+            <p className='text-sm text-gray-600'>
               {document ? `Knowledge: ${document.displayName}` : `Knowledge ID: ${id}`}
             </p>
             <p className='text-sm text-gray-500 mt-1'>
@@ -1808,7 +1855,7 @@ function SupportAddKnowledgeData() {
                               <button
                                 type='button'
                                 onClick={() => handleViewOriginal(file)}
-                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 transition-colors'
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 transition-colors'
                                 title={file.originalName ? `เปิด ${file.originalName}` : 'เปิดต้นฉบับ'}
                               >
                                 <HiEye className='text-base flex-shrink-0' />
@@ -1817,7 +1864,7 @@ function SupportAddKnowledgeData() {
                               <button
                                 type='button'
                                 onClick={() => handleDownloadOriginal(file)}
-                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 transition-colors'
+                                className='inline-flex items-center justify-center gap-1.5 px-2.5 py-2 text-xs font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 transition-colors'
                               >
                                 <HiDownload className='text-base flex-shrink-0' />
                                 <span>ดาวน์โหลด</span>
@@ -1827,7 +1874,7 @@ function SupportAddKnowledgeData() {
                             <button
                               type='button'
                               onClick={() => handleAttachOriginalClick(file)}
-                              className='w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-zinc-400 bg-white text-zinc-700 hover:bg-zinc-50 transition-colors'
+                              className='w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-dashed border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors'
                               title='แนบ PDF/Excel ต้นฉบับทีหลัง โดยไม่ทับข้อความ OCR'
                             >
                               <HiPaperClip className='text-lg flex-shrink-0' />
@@ -1926,7 +1973,7 @@ function SupportAddKnowledgeData() {
                           originalName: originalPreview.name,
                           name: originalPreview.name,
                         })}
-                        className='inline-flex items-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50'
+                        className='inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50'
                       >
                         <HiDownload className='text-sm' />
                         ดาวน์โหลด
@@ -2008,6 +2055,41 @@ function SupportAddKnowledgeData() {
               </div>
             </div>
           </>
+        )}
+
+        {/* ยืนยันก่อนลบของที่กู้คืนไม่ได้ในหน้าตรวจผล OCR — z สูงกว่า modal ตรวจผล */}
+        {destructiveConfirm && (
+          <div className='fixed inset-0 z-[60] flex items-center justify-center p-4'>
+            <div className='absolute inset-0 bg-black bg-opacity-50' onClick={() => setDestructiveConfirm(null)} />
+            <div className='relative bg-white rounded-xl shadow-2xl w-full max-w-sm p-6'>
+              <h3 className='text-lg font-semibold text-gray-800 mb-2'>
+                {destructiveConfirm.type === 'chunks'
+                  ? `ลบ ${destructiveConfirm.count} chunk ที่เลือกหรือไม่?`
+                  : 'ลบแถวนี้หรือไม่?'}
+              </h3>
+              <p className='text-sm text-gray-600 mb-6'>
+                {destructiveConfirm.type === 'chunks'
+                  ? 'เนื้อหาใน chunk ที่เลือกจะถูกตัดออกจากไฟล์นี้ และกู้คืนไม่ได้'
+                  : 'ข้อมูลในแถวนี้จะถูกลบออกจากตาราง และกู้คืนไม่ได้'}
+              </p>
+              <div className='flex gap-3 justify-end'>
+                <button
+                  type='button'
+                  onClick={() => setDestructiveConfirm(null)}
+                  className='px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors'
+                >
+                  ยกเลิก
+                </button>
+                <button
+                  type='button'
+                  onClick={handleConfirmDestructive}
+                  className='px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition-colors'
+                >
+                  ลบ
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {isDeleteConfirmOpen && (
@@ -2158,10 +2240,10 @@ function SupportAddKnowledgeData() {
                                 key={`${sheet?.name || 'sheet'}-${sheetIdx}`}
                                 type='button'
                                 onClick={() => setPreviewActiveSheetIdx(sheetIdx)}
-                                className={`px-3 py-1.5 rounded-md text-sm border transition-colors ${
+                                className={`px-3 py-1.5 rounded-lg text-sm border transition-colors ${
                                   previewActiveSheetIdx === sheetIdx
-                                    ? 'bg-teal-50 border-teal-400 text-teal-800'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                                    ? 'bg-yellow-50 border-yellow-400 text-yellow-800'
+                                    : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                                 }`}
                               >
                                 {sheet?.name || `Sheet ${sheetIdx + 1}`}
@@ -2171,7 +2253,7 @@ function SupportAddKnowledgeData() {
                           <button
                             type='button'
                             onClick={() => addPreviewTableRow(previewActiveSheetIdx)}
-                            className='px-3 py-1.5 rounded-md text-sm border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 transition-colors'
+                            className='px-3 py-1.5 rounded-lg text-sm border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-colors'
                           >
                             + เพิ่มแถว
                           </button>
@@ -2215,8 +2297,8 @@ function SupportAddKnowledgeData() {
                                         <td className='px-3 py-2'>
                                           <button
                                             type='button'
-                                            onClick={() => removePreviewTableRow(previewActiveSheetIdx, rowIdx)}
-                                            className='px-2.5 py-1.5 text-xs rounded border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 transition-colors'
+                                            onClick={() => requestRemovePreviewTableRow(previewActiveSheetIdx, rowIdx)}
+                                            className='px-2.5 py-1.5 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors'
                                           >
                                             ลบแถว
                                           </button>
@@ -2256,21 +2338,21 @@ function SupportAddKnowledgeData() {
                                   <button
                                     type='button'
                                     onClick={() => setSelectedPreviewChunks(ocrRows.map((row) => row.idx))}
-                                    className='px-2.5 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors'
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors'
                                   >
                                     เลือกทั้งหมด
                                   </button>
                                   <button
                                     type='button'
                                     onClick={() => setSelectedPreviewChunks([])}
-                                    className='px-2.5 py-1 text-xs rounded border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors'
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors'
                                   >
                                     ล้าง
                                   </button>
                                   <button
                                     type='button'
-                                    onClick={removeSelectedPreviewChunks}
-                                    className='px-2.5 py-1 text-xs rounded border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-colors'
+                                    onClick={requestRemoveSelectedPreviewChunks}
+                                    className='px-2.5 py-1 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors'
                                   >
                                     ลบ chunk ที่เลือก
                                   </button>
@@ -2291,15 +2373,15 @@ function SupportAddKnowledgeData() {
                                       }
                                       className={`text-left rounded-lg border px-3 py-2 transition-colors ${
                                         selected
-                                          ? 'border-teal-400 bg-teal-50'
-                                          : 'border-slate-200 bg-white hover:bg-slate-50'
+                                          ? 'border-yellow-400 bg-yellow-50'
+                                          : 'border-gray-200 bg-white hover:bg-gray-50'
                                       }`}
                                     >
                                       <div className='flex items-start justify-between gap-2'>
                                         <p className='text-xs font-semibold text-slate-700'>
                                           Chunk {row.idx}{row.page ? ` (หน้า ${row.page})` : ''}
                                         </p>
-                                        <span className={`text-[11px] font-semibold ${selected ? 'text-teal-700' : 'text-slate-400'}`}>
+                                        <span className={`text-[11px] font-semibold ${selected ? 'text-yellow-800' : 'text-gray-400'}`}>
                                           {selected ? 'เลือกแล้ว' : 'คลิกเพื่อเลือก'}
                                         </span>
                                       </div>
@@ -2316,11 +2398,22 @@ function SupportAddKnowledgeData() {
                           );
                         })()}
                         <div className='flex flex-wrap items-center justify-end gap-2'>
+                          <select
+                            value={structureAiModel}
+                            onChange={(e) => setStructureAiModel(e.target.value)}
+                            disabled={previewAiStructuring}
+                            className='px-2.5 py-1.5 text-sm border border-gray-300 rounded-lg bg-white text-gray-800 disabled:opacity-50'
+                            title='โมเดลที่ใช้จัดรูปแบบและแก้คำ'
+                          >
+                            {OCR_STRUCTURE_MODEL_OPTIONS.map((opt) => (
+                              <option key={opt.id || 'default'} value={opt.id}>{opt.label}</option>
+                            ))}
+                          </select>
                           <button
                             type='button'
                             onClick={handleStructureOcrWithAi}
                             disabled={previewAiStructuring}
-                            className='px-3 py-1.5 text-sm border border-purple-700/30 rounded-lg bg-purple-50 text-purple-900 hover:bg-purple-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0'
+                            className='px-3 py-1.5 text-sm font-medium rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0'
                           >
                             {previewAiStructuring ? 'กำลังจัดเรียง…' : 'จัดเรียงด้วย AI'}
                           </button>
@@ -2446,7 +2539,7 @@ function SupportAddKnowledgeData() {
                       if (structuredText) {
                         return (
                           <div className='space-y-4'>
-                            <div className='inline-flex items-center gap-2 rounded-full bg-purple-50 text-purple-900 text-xs font-semibold px-3 py-1 border border-purple-200'>
+                            <div className='inline-flex items-center gap-2 rounded-full bg-yellow-50 text-yellow-900 text-xs font-semibold px-3 py-1 border border-yellow-200'>
                               ผลลัพธ์จัดเรียงด้วย AI
                             </div>
                             {(() => {
@@ -2583,14 +2676,14 @@ function SupportAddKnowledgeData() {
                 <button
                   type='button'
                   onClick={closeExpandedCellEditor}
-                  className='px-3 py-1.5 text-sm rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  className='px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50'
                 >
                   ยกเลิก
                 </button>
                 <button
                   type='button'
                   onClick={saveExpandedCellEditor}
-                  className='px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white hover:bg-teal-700'
+                  className='px-3 py-1.5 text-sm rounded-lg bg-yellow-400 hover:bg-yellow-500 text-gray-800 font-medium'
                 >
                   บันทึกช่องนี้
                 </button>

@@ -403,6 +403,10 @@ adminRouter.delete("/documents/:id", authenticate, requireRole("support", "admin
     res.status(404).json({ error: "Document not found" });
     return;
   }
+  if (req.user.role !== "admin" && document.ownerId !== req.user.id) {
+    res.status(403).json({ error: "ลบได้เฉพาะเอกสารที่ตัวเองเป็นเจ้าของ" });
+    return;
+  }
   await logEvent({
     event: "document.deleted",
     actorId: req.user.id,

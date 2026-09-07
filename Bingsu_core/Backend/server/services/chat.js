@@ -543,23 +543,85 @@ export function postProcessOcrText(text) {
   return s.trim();
 }
 
+function resolveOcrLlmCallTarget(modelId) {
+  const raw = String(modelId || "").trim();
+  if (raw) {
+    const resolved = resolveChatTargetForModel(raw);
+    if (!resolved) {
+      throw new Error(`โมเดล ${raw} ยังไม่พร้อม — ตั้ง CHAT_NT_QWEN_API_KEY หรือ OPENAI_API_KEY ใน Backend/.env`);
+    }
+    return resolved;
+  }
+  return {
+    model: ocrLlmModel,
+    baseUrl: ocrLlmBaseUrl,
+    apiKey: ocrLlmApiKey,
+    label: "ocr-llm-default",
+  };
+}
+
+async function callOcrLlmChat({ systemPrompt, userText, signal, modelId }) {
+  const requestedModel = String(modelId || "").trim();
+  const useOllama = ocrLlmProvider === "ollama" && !requestedModel;
+  if (useOllama) {
+    return callOllamaChat(systemPrompt, sanitizeTextForProvider(userText), signal);
+  }
+  const target = resolveOcrLlmCallTarget(requestedModel);
+  if (!target.apiKey || !target.baseUrl) {
+    throw new Error("ยังไม่ได้ตั้งค่า API สำหรับจัดเรียงด้วย AI — ตั้ง OCR_LLM_API_KEY หรือ OPENAI_API_KEY ใน Backend/.env");
+  }
+  const isQwenModel = /qwen/i.test(String(target.model || ""));
+  const response = await fetch(`${target.baseUrl}/chat/completions`, {
+    method: "POST",
+    dispatcher: gatewayDispatcher,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${target.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: target.model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: sanitizeTextForProvider(userText) },
+      ],
+      temperature: 0.1,
+      max_tokens: 16000,
+      ...(isQwenModel
+        ? {
+            enable_thinking: false,
+            chat_template_kwargs: { enable_thinking: false },
+          }
+        : {}),
+    }),
+    signal,
+  });
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(errText || `OCR LLM ${response.status}`);
+  }
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
+}
+
 /**
  * ส่งข้อความจาก OCR ไปให้ LLM จัดรูปแบบและแก้คำผิด (ใช้กับ PaddleOCR ก่อน embed).
  * มี post-process ด้วยกฎรันก่อนเสมอ จึงได้อย่างน้อยคำที่แบ่งผิด/ช่องว่าง/ตัวเลขแก้แล้วแม้ LLM ไม่รัน
  * คืนค่า { text, cleaned }: text = ข้อความที่ใช้ได้, cleaned = true เมื่อ LLM ประมวลผลสำเร็จจริง
  */
-export const cleanOcrTextWithLlm = async (rawText) => {
+export const cleanOcrTextWithLlm = async (rawText, options = {}) => {
   if (!rawText || String(rawText).trim().length === 0) return { text: rawText || "", cleaned: false };
   const afterRules = postProcessOcrText(String(rawText));
   const fallback = () => ({ text: afterRules, cleaned: false });
-  const useOllama = ocrLlmProvider === "ollama";
-  if (!useOllama && !ocrLlmApiKey) {
+  const modelId = options.modelId;
+  const useOllama = ocrLlmProvider === "ollama" && !String(modelId || "").trim();
+  if (!useOllama && !ocrLlmApiKey && !resolveChatTargetForModel(modelId)) {
     console.warn("OCR LLM cleanup skipped: OCR_LLM_PROVIDER=openai but OCR_LLM_API_KEY/OPENAI_API_KEY is not set. Set key in .env or use OCR_LLM_PROVIDER=ollama with Ollama running.");
     return fallback();
   }
 
   const controller = new AbortController();
-  const timeoutMs = Number(process.env.OCR_LLM_CLEANUP_TIMEOUT_MS || 60000);
+  const timeoutMs = Number(process.env.OCR_LLM_CLEANUP_TIMEOUT_MS || (/qwen/i.test(String(modelId || "")) ? 120000 : 60000));
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const systemPrompt =
     `You are a text cleaner. งานของคุณ: แก้แค่คำผิดและจัดย่อหน้า/ช่องว่างเท่านั้น
@@ -574,43 +636,16 @@ export const cleanOcrTextWithLlm = async (rawText) => {
 - ส่งกลับเฉพาะข้อความที่แก้แล้ว ไม่มีคำอธิบาย ไม่มีหัวข้อเพิ่ม`;
 
   try {
-    if (useOllama) {
-      const content = await callOllamaChat(systemPrompt, sanitizeTextForProvider(afterRules), controller.signal);
-      clearTimeout(timeoutId);
-      if (content) return { text: postProcessOcrText(content), cleaned: true };
-      console.warn("OCR LLM cleanup: Ollama returned empty. Check ollama serve and OLLAMA_OCR_MODEL. Using rule-cleaned text.");
-      return fallback();
-    }
-    const response = await fetch(`${ocrLlmBaseUrl}/chat/completions`, {
-      method: "POST",
-      dispatcher: gatewayDispatcher,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ocrLlmApiKey}`,
-      },
-      body: JSON.stringify({
-        model: ocrLlmModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: sanitizeTextForProvider(afterRules) },
-        ],
-        temperature: 0.1,
-        max_tokens: 16000,
-      }),
+    const content = await callOcrLlmChat({
+      systemPrompt,
+      userText: afterRules,
       signal: controller.signal,
+      modelId,
     });
     clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      console.warn("OCR LLM cleanup failed:", response.status, await response.text());
-      return fallback();
-    }
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (content && typeof content === "string" && content.trim()) {
-      return { text: postProcessOcrText(content.trim()), cleaned: true };
-    }
+    if (content) return { text: postProcessOcrText(content), cleaned: true };
+    console.warn("OCR LLM cleanup: empty response. Using rule-cleaned text.");
+    return fallback();
   } catch (err) {
     if (err?.name === "AbortError") {
       console.warn("OCR LLM cleanup timed out, using rule-cleaned text");
@@ -623,14 +658,15 @@ export const cleanOcrTextWithLlm = async (rawText) => {
 };
 
 /** ส่งข้อความ (หลัง OCR/clean) ไปให้ LLM เรียบเรียงจัดโครงสร้าง: หัวข้อ ย่อหน้า รายการ (ใช้ก่อน embed) — รองรับ OpenAI หรือ Ollama */
-export const structureOcrTextWithLlm = async (text) => {
+export const structureOcrTextWithLlm = async (text, options = {}) => {
   if (!text || String(text).trim().length === 0) return text;
+  const modelId = options.modelId;
   const baseText = postProcessOcrText(String(text));
   // ทำ pre-clean ก่อน 1 รอบ เพื่อให้คำผิด OCR ทั่วไปถูกแก้ก่อนเข้าโหมดจัดรูปแบบ
   // (ช่วยให้ปุ่ม "จัดเรียงด้วย AI" เห็นผลเรื่องแก้คำผิดชัดขึ้น)
   let sourceText = baseText;
   try {
-    const cleaned = await cleanOcrTextWithLlm(baseText);
+    const cleaned = await cleanOcrTextWithLlm(baseText, { modelId });
     const cleanedText = typeof cleaned === "object" && cleaned?.text != null ? cleaned.text : cleaned;
     if (cleanedText && String(cleanedText).trim()) {
       sourceText = postProcessOcrText(String(cleanedText).trim());
@@ -639,11 +675,11 @@ export const structureOcrTextWithLlm = async (text) => {
     // ถ้า clean ไม่สำเร็จ ให้ใช้ baseText ต่อได้
     sourceText = baseText;
   }
-  const useOllama = ocrLlmProvider === "ollama";
-  if (!useOllama && !ocrLlmApiKey) return sourceText;
+  const useOllama = ocrLlmProvider === "ollama" && !String(modelId || "").trim();
+  if (!useOllama && !ocrLlmApiKey && !resolveChatTargetForModel(modelId)) return sourceText;
 
   const controller = new AbortController();
-  const timeoutMs = Number(process.env.OCR_LLM_STRUCTURE_TIMEOUT_MS || 60000);
+  const timeoutMs = Number(process.env.OCR_LLM_STRUCTURE_TIMEOUT_MS || (/qwen/i.test(String(modelId || "")) ? 120000 : 60000));
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const systemPrompt =
     `You are a Thai OCR text cleaner + formatter (conservative mode).
@@ -663,42 +699,14 @@ export const structureOcrTextWithLlm = async (text) => {
 - ส่งกลับเฉพาะข้อความผลลัพธ์ ไม่มีคำอธิบาย`;
 
   try {
-    if (useOllama) {
-      const content = await callOllamaChat(systemPrompt, sanitizeTextForProvider(sourceText), controller.signal);
-      clearTimeout(timeoutId);
-      if (content) return postProcessOcrText(content.trim());
-      return sourceText;
-    }
-    const response = await fetch(`${ocrLlmBaseUrl}/chat/completions`, {
-      method: "POST",
-      dispatcher: gatewayDispatcher,
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${ocrLlmApiKey}`,
-      },
-      body: JSON.stringify({
-        model: ocrLlmModel,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: sanitizeTextForProvider(sourceText) },
-        ],
-        temperature: 0.1,
-        max_tokens: 16000,
-      }),
+    const content = await callOcrLlmChat({
+      systemPrompt,
+      userText: sourceText,
       signal: controller.signal,
+      modelId,
     });
     clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      console.warn("OCR LLM structure failed:", response.status, await response.text());
-      return sourceText;
-    }
-
-    const data = await response.json();
-    const content = data?.choices?.[0]?.message?.content;
-    if (content && typeof content === "string" && content.trim()) {
-      return postProcessOcrText(content.trim());
-    }
+    if (content) return postProcessOcrText(content.trim());
   } catch (err) {
     if (err?.name === "AbortError") {
       console.warn("OCR LLM structure timed out, using original text");

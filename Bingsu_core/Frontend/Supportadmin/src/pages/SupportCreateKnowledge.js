@@ -90,7 +90,7 @@ function SupportCreateKnowledge() {
         <span>Back</span>
       </button>
 
-      <h1 className='text-2xl font-semibold text-gray-800 mb-6'>
+      <h1 className='text-2xl font-bold text-gray-800 mb-6'>
         {isEditMode ? 'แก้ไข Knowledge' : 'สร้าง Knowledge ใหม่'}
       </h1>
 

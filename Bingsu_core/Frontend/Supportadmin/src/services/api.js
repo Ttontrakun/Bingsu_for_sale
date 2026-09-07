@@ -2,10 +2,9 @@
  * API client สำหรับ Supportadmin ต่อ backend bb
  * ใช้ REACT_APP_API_BASE_URL ใน .env (เช่น http://localhost:5052 หรือ http://localhost:8080)
  */
-const SESSION_KEY = 'supportadmin_token';
 const USER_KEY = 'supportadmin_user';
 
-export const getStoredToken = () => localStorage.getItem(SESSION_KEY);
+export const getStoredToken = () => null;
 const normalizeSessionRole = (role) => {
   const raw = String(role ?? '').trim();
   if (!raw) return '';
@@ -32,11 +31,16 @@ export const getStoredUser = () => {
     return null;
   }
 };
-const setSession = (token, user) => {
-  if (token) localStorage.setItem(SESSION_KEY, token);
-  else localStorage.removeItem(SESSION_KEY);
-  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
-  else localStorage.removeItem(USER_KEY);
+const setSession = (_token, user) => {
+  try { localStorage.removeItem('supportadmin_token'); } catch (_) { /* ignore */ }
+  if (user?.id) {
+    localStorage.setItem(USER_KEY, JSON.stringify({
+      id: user.id,
+      role: normalizeSessionRole(user.role),
+    }));
+  } else {
+    localStorage.removeItem(USER_KEY);
+  }
 };
 
 export const getApiBaseURL = () => {
@@ -56,8 +60,8 @@ export const getApiBaseURL = () => {
     return browserOrigin.replace(/\/$/, '');
   }
   if (envBase) return envBase.replace(/\/$/, '');
-  if (isBrowserLocal) return 'http://localhost:5052';
-  return browserOrigin ? browserOrigin.replace(/\/$/, '') : 'http://localhost:5052';
+  if (isBrowserLocal) return browserOrigin ? browserOrigin.replace(/\/$/, '') : '';
+  return browserOrigin ? browserOrigin.replace(/\/$/, '') : '';
 };
 
 /** ข้อความสั้นเมื่อเชื่อมต่อ backend ไม่ได้ (ลงทะเบียน/ล็อกอิน) */
@@ -84,13 +88,11 @@ const getResponseErrorText = (data) => {
 };
 
 const request = async (path, options = {}) => {
-  const token = getStoredToken();
   const url = `${getApiBaseURL()}${path}`;
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {}),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
   let res;
   try {
     res = await fetch(url, { ...options, headers, credentials: 'include' });
@@ -127,14 +129,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
-    setSession(data.token ?? null, data.user ?? null);
-    return data;
-  },
-  signup: async (name, email, password) => {
-    const data = await request('/api/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ name, email, password }),
-    });
+    setSession(null, data.user ?? null);
     return data;
   },
   logout: async () => {
@@ -147,6 +142,7 @@ export const api = {
   },
   getMe: () => request('/api/auth/me'),
   getPublicConfig: () => request('/api/config/public'),
+  getStaffConfig: () => request('/api/config/staff'),
   getDevConfig: () => request('/api/dev/config'),
   patchDevConfig: (patch) =>
     request('/api/dev/config', {
@@ -209,6 +205,9 @@ export const api = {
     request(`/api/admin/upload-batches${status ? `?status=${encodeURIComponent(status)}` : ''}`),
   retryUploadBatch: (id) =>
     request(`/api/admin/upload-batches/${encodeURIComponent(String(id || ''))}/retry`, { method: 'POST' }),
+  getMaintenance: () => request('/api/admin/maintenance'),
+  updateMaintenance: (payload) =>
+    request('/api/admin/maintenance', { method: 'PATCH', body: JSON.stringify(payload || {}) }),
   getAnnouncements: () => request('/api/admin/announcements'),
   createAnnouncement: (payload) =>
     request('/api/admin/announcements', { method: 'POST', body: JSON.stringify(payload || {}) }),
@@ -250,11 +249,8 @@ export const api = {
     if (!file) throw new Error('file is required');
     const formData = new FormData();
     formData.append('file', file);
-    const token = getStoredToken();
     const url = `${getApiBaseURL()}/api/admin/manual/upload`;
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
@@ -289,10 +285,7 @@ export const api = {
   fetchManualPdfBlob: async (filePath) => {
     const url = api.resolveUploadUrl(filePath);
     if (!url) throw new Error('Invalid file path');
-    const token = getStoredToken();
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+    const res = await fetch(url, { method: 'GET', credentials: 'include' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(getResponseErrorText(data) || `HTTP ${res.status}`);
@@ -598,11 +591,8 @@ export const supportDocuments = {
     if (options.provider === 'typhoon') {
       formData.append('provider', 'typhoon');
     }
-    const token = getStoredToken();
     const url = `${getApiBaseURL()}/api/documents/${encodeURIComponent(id)}/files/ocr`;
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
@@ -615,12 +605,15 @@ export const supportDocuments = {
     }
     return data;
   },
-  structureOcrWithAi: async (documentId, text) => {
+  structureOcrWithAi: async (documentId, text, model = '') => {
     const id = documentId != null ? String(documentId).trim() : '';
     if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
     return request(`/api/documents/${encodeURIComponent(id)}/files/ocr/structure-text`, {
       method: 'POST',
-      body: JSON.stringify({ text: typeof text === 'string' ? text : '' }),
+      body: JSON.stringify({
+        text: typeof text === 'string' ? text : '',
+        ...(model ? { model } : {}),
+      }),
     });
   },
   attachOriginal: async (documentId, fileIndex, file) => {
@@ -628,11 +621,8 @@ export const supportDocuments = {
     if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
     const formData = new FormData();
     formData.append('file', file);
-    const token = getStoredToken();
     const url = `${getApiBaseURL()}/api/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/original`;
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'POST', headers, body: formData, credentials: 'include' });
+    const res = await fetch(url, { method: 'POST', body: formData, credentials: 'include' });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       let msg = getResponseErrorText(data) || `HTTP ${res.status}`;
@@ -648,12 +638,9 @@ export const supportDocuments = {
   fetchOriginalBlob: async (documentId, fileIndex, { inline = false } = {}) => {
     const id = documentId != null ? String(documentId).trim() : '';
     if (!id || id === 'undefined' || id === 'null') throw new Error('Invalid document ID');
-    const token = getStoredToken();
     const qs = inline ? '?inline=1' : '';
     const url = `${getApiBaseURL()}/api/documents/${encodeURIComponent(id)}/files/${encodeURIComponent(String(fileIndex))}/download${qs}`;
-    const headers = {};
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+    const res = await fetch(url, { method: 'GET', credentials: 'include' });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       let msg = getResponseErrorText(data) || `HTTP ${res.status}`;

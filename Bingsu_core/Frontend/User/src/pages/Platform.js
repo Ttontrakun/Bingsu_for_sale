@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { HiOutlineClock, HiOutlineLink, HiOutlineSearch } from 'react-icons/hi';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
-import mascot from '../assets/images/bingsu-mascot.png';
+import campusBg from '../assets/images/nt-hq-campus.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { userAPI } from '../services/api';
 import { useSystemConfig } from '../context/SystemConfigContext';
@@ -10,29 +10,32 @@ import { useSystemConfig } from '../context/SystemConfigContext';
 const COPY = {
   th: {
     subtitle: 'ผู้ช่วยตอบจากเอกสารองค์กร',
+    highlight: 'ค้นจากเอกสารจริง พร้อมอ้างอิงให้ตรวจได้',
+    detail: 'ถามจากคลังเอกสารในระบบ ตรวจอำนาจอนุมัติ และเปิดแหล่งที่มาได้ทันที',
     features: [
       { Icon: HiOutlineSearch, text: 'ค้นหาเอกสารอย่างแม่นยำ' },
       { Icon: HiOutlineClock, text: 'เช็คอำนาจอนุมัติได้ชัดเจน' },
       { Icon: HiOutlineLink, text: 'อ้างอิงแหล่งที่มาให้ตรวจสอบ' },
     ],
-    signup: 'สมัครใช้งาน',
-    login: 'เข้าสู่ระบบ',
+    sectionTitle: 'ความสามารถ',
+    authCta: 'สมัครใช้งาน / เข้าสู่ระบบ',
   },
   en: {
     subtitle: 'Enterprise document assistant',
+    highlight: 'Search real documents with sources you can verify',
+    detail: 'Ask from the official document library, check approval authority, and open the cited source.',
     features: [
       { Icon: HiOutlineSearch, text: 'Accurate document search' },
       { Icon: HiOutlineClock, text: 'Clear approval authority checks' },
       { Icon: HiOutlineLink, text: 'Cited sources you can verify' },
     ],
-    signup: 'Sign up',
-    login: 'Log in',
+    sectionTitle: 'CAPABILITIES',
+    authCta: 'Sign up / Log in',
   },
 };
 
 function Platform() {
-  const navigate = useNavigate();
-  const { appName } = useSystemConfig();
+  const { appName, logoSrc } = useSystemConfig();
   const [authed, setAuthed] = useState(false);
   const [lang, setLang] = useState('th');
 
@@ -68,114 +71,120 @@ function Platform() {
   const t = COPY[lang];
 
   return (
-    <div className="platform-page relative flex min-h-screen flex-col overflow-hidden bg-[#D9D9D9]">
+    <div className="platform-page relative flex h-screen flex-col overflow-hidden bg-white">
       <NtBrandBar
         logoSrc={ntLogo}
-        className="relative z-20 flex h-[55px] shrink-0 items-center bg-white px-6 shadow-sm md:px-10 lg:px-14"
+        className="relative z-20 flex h-[55px] shrink-0 items-center bg-white px-5 shadow-sm md:px-10 lg:px-14"
         logoClassName="h-9 w-auto max-w-[240px] object-contain object-left"
         trailing={
-          <div
-            className="platform-font-body inline-flex items-center rounded-full border border-zinc-300 bg-zinc-100 p-0.5 text-xs font-semibold shadow-sm md:text-sm"
-            role="group"
-            aria-label="Language"
-          >
-            <button
-              type="button"
-              onClick={() => setLang('th')}
-              className={`rounded-full px-2.5 py-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-1 ${
-                lang === 'th'
-                  ? 'bg-[#FFD100] text-zinc-900 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700'
-              }`}
-              aria-pressed={lang === 'th'}
+          <div className="flex items-center gap-3 md:gap-5">
+            <div
+              className="platform-font-body inline-flex items-center rounded-full border border-zinc-200 bg-zinc-50 p-0.5 text-xs font-semibold"
+              role="group"
+              aria-label="Language"
             >
-              TH
-            </button>
-            <button
-              type="button"
-              onClick={() => setLang('en')}
-              className={`rounded-full px-2.5 py-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-1 ${
-                lang === 'en'
-                  ? 'bg-[#FFD100] text-zinc-900 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700'
-              }`}
-              aria-pressed={lang === 'en'}
+              <button
+                type="button"
+                onClick={() => setLang('th')}
+                className={`rounded-full px-2.5 py-1 transition ${
+                  lang === 'th' ? 'bg-[#FFD100] text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                aria-pressed={lang === 'th'}
+              >
+                TH
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang('en')}
+                className={`rounded-full px-2.5 py-1 transition ${
+                  lang === 'en' ? 'bg-[#FFD100] text-zinc-900 shadow-sm' : 'text-zinc-500 hover:text-zinc-700'
+                }`}
+                aria-pressed={lang === 'en'}
+              >
+                EN
+              </button>
+            </div>
+            <Link
+              to="/auth"
+              className="platform-font-body inline-flex rounded-full bg-[#FFD100] px-5 py-2 text-sm font-semibold text-zinc-900 shadow-sm transition hover:bg-[#FCBA03]"
             >
-              EN
-            </button>
+              {t.authCta}
+            </Link>
           </div>
         }
       />
 
-      <main className="relative min-h-0 flex-1 overflow-hidden">
+      <main className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <img
+          src={campusBg}
+          alt=""
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover object-[center_32%] select-none"
+          draggable={false}
+        />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(ellipse 70% 70% at 78% 72%, rgba(255,209,0,0.55) 0%, rgba(252,186,3,0.18) 38%, transparent 70%), linear-gradient(165deg, #E8E8E8 0%, #D9D9D9 45%, #C8C8C8 100%)',
-          }}
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-[0.04]"
-          style={{
-            backgroundImage:
-              'repeating-linear-gradient(-18deg, #3f3f46 0 1px, transparent 1px 14px)',
+              'linear-gradient(180deg, rgba(255,255,255,0.50) 0%, rgba(255,255,255,0.20) 36%, rgba(255,255,255,0.16) 62%, rgba(255,255,255,0.55) 100%)',
           }}
         />
 
-        <div className="absolute inset-0 z-10 mx-auto w-full max-w-7xl px-6 md:px-10 lg:px-14">
-          <div className="relative z-10 flex h-full max-w-xl flex-col justify-center py-8 md:max-w-[48%]">
-            <div className="platform-hero-copy">
-              <p
-                className="platform-font-brand mb-3 text-[clamp(2.4rem,4.8vw,3.75rem)] font-semibold leading-[1.08] tracking-tight text-zinc-900"
-                aria-label={brand}
-              >
-                {brand}
-              </p>
-              <h1 className="platform-font-body mb-6 text-[clamp(1.15rem,2vw,1.45rem)] font-semibold leading-snug text-zinc-800">
-                {t.subtitle}
-              </h1>
+        <section className="relative z-10 flex min-h-0 flex-1 flex-col justify-center px-5 py-6 md:px-10 lg:px-14">
+          <div className="platform-hero-copy mx-auto w-full max-w-xl text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-[#FFD100] shadow-md ring-4 ring-white md:h-[4.5rem] md:w-[4.5rem]">
+              <img src={logoSrc} alt="" className="h-full w-full object-cover" />
+            </div>
+            <p
+              className="platform-font-brand mb-2 text-[clamp(2rem,4.2vw,3rem)] font-bold leading-[1.1] tracking-tight text-zinc-950"
+              style={{ textShadow: '0 1px 12px rgba(255,255,255,0.85)' }}
+            >
+              {brand}
+            </p>
+            <h1
+              className="platform-font-body mb-3 text-[clamp(1.15rem,2.1vw,1.5rem)] font-semibold leading-snug text-zinc-900"
+              style={{ textShadow: '0 1px 10px rgba(255,255,255,0.8)' }}
+            >
+              {t.subtitle}
+            </h1>
+            <p
+              className="platform-font-body mx-auto mb-2 max-w-md text-sm font-semibold text-zinc-900"
+              style={{ textShadow: '0 1px 10px rgba(255,255,255,0.85)' }}
+            >
+              {t.highlight}
+            </p>
+            <p
+              className="platform-font-body mx-auto max-w-md text-[15px] font-medium leading-7 text-zinc-800"
+              style={{ textShadow: '0 1px 10px rgba(255,255,255,0.85)' }}
+            >
+              {t.detail}
+            </p>
+          </div>
+        </section>
 
-              <ul className="platform-font-body mb-8 space-y-3">
-                {t.features.map(({ Icon, text }) => (
-                  <li key={text} className="flex items-center gap-3 text-[0.95rem] text-zinc-700 md:text-base">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80 text-zinc-700 shadow-sm ring-1 ring-zinc-300/60">
-                      <Icon className="h-4 w-4" aria-hidden />
-                    </span>
-                    <span>{text}</span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  to="/auth"
-                  className="platform-font-body inline-flex min-w-[148px] items-center justify-center rounded-lg bg-[#FFD100] px-6 py-3.5 text-sm font-semibold text-zinc-900 shadow-[0_8px_20px_-12px_rgba(0,0,0,0.35)] transition hover:bg-[#FCBA03] focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-2"
+        <section id="capabilities" className="relative z-10 shrink-0 px-5 pb-8 pt-2 md:px-10 md:pb-10 lg:px-14">
+          <div className="mx-auto max-w-5xl">
+            <h2
+              className="platform-font-body mb-4 text-center text-sm font-bold tracking-[0.22em] text-zinc-900"
+              style={{ textShadow: '0 1px 8px rgba(255,255,255,0.85)' }}
+            >
+              {t.sectionTitle}
+            </h2>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {t.features.map(({ Icon, text }) => (
+                <div
+                  key={text}
+                  className="flex items-center gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-3.5 shadow-sm backdrop-blur-[2px]"
                 >
-                  {t.login}
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => navigate('/auth', { state: { mode: 'signup' } })}
-                  className="platform-font-body inline-flex min-w-[148px] items-center justify-center rounded-lg border border-zinc-400/70 bg-white/85 px-6 py-3.5 text-sm font-semibold text-zinc-800 backdrop-blur-sm transition hover:bg-white focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-800 focus-visible:ring-offset-2"
-                >
-                  {t.signup}
-                </button>
-              </div>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFD100] text-zinc-950">
+                    <Icon className="h-5 w-5" aria-hidden />
+                  </span>
+                  <p className="platform-font-body text-sm font-semibold leading-snug text-zinc-900">{text}</p>
+                </div>
+              ))}
             </div>
           </div>
-
-          <div className="platform-mascot-stage pointer-events-none absolute bottom-24 right-0 flex w-[55%] max-w-[560px] items-end justify-end md:bottom-32 md:w-[52%] md:max-w-none lg:right-2 lg:bottom-36">
-            <img
-              src={mascot}
-              alt=""
-              className="h-[min(42vh,320px)] w-auto max-h-[calc(100vh-7rem)] object-contain object-bottom select-none md:h-[min(70vh,620px)]"
-              draggable={false}
-            />
-          </div>
-        </div>
+        </section>
       </main>
     </div>
   );

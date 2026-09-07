@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import { 
   HiUsers, 
   HiKey, 
@@ -6,8 +6,6 @@ import {
   HiBookOpen, 
   HiUserGroup,
   HiExclamationCircle,
-  HiArrowUp,
-  HiArrowDown,
   HiSparkles,
   HiCheckCircle,
   HiShieldCheck
@@ -29,299 +27,53 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { api } from '../services/api';
+import {
+  COLORS,
+  GRADIENT_COLORS,
+  isErrorLogEvent,
+  getErrorTypeKey,
+  getErrorCategoryKey,
+  getErrorWindowStartMs,
+  getErrorRangeLabel,
+  TOKEN_RANGE_DAYS,
+  getTokenRangeLabel,
+  RANGE_DAYS,
+  getRangeLabel,
+  getLocalDateKey,
+} from './dashboard/helpers';
+import AnimatedCounter from './dashboard/AnimatedCounter';
+import StatCard from './dashboard/StatCard';
 
-// Mock data for dashboard metrics (ใช้เมื่อ API ไม่มีหรือสำหรับ chart/รายละเอียดที่ backend ยังไม่มี)
-const mockDashboardData = {
-  // Overall stats - All filter
-  totalBots: 17,
-  totalKnowledge: 18,
-  totalUsers: 23,
-  usersExpiringSoon: 9,
-  usersPendingApproval: 18,
-  dailyUsers: {
-    today: 16,
-    yesterday: 14,
-    change: 14.3
-  },
-  tokenUsage: {
-    today: 2458934,
-    yesterday: 2312456,
-    change: 6.3
-  },
-  // 7 days data for charts
-  dailyUsersChart: [
-    { date: '6 วันก่อน', users: 12 },
-    { date: '5 วันก่อน', users: 13 },
-    { date: '4 วันก่อน', users: 14 },
-    { date: '3 วันก่อน', users: 15 },
-    { date: '2 วันก่อน', users: 15 },
-    { date: 'เมื่อวาน', users: 14 },
-    { date: 'วันนี้', users: 16 }
-  ],
-  tokenUsageChart: [
-    { date: '6 วันก่อน', tokens: 2100456 },
-    { date: '5 วันก่อน', tokens: 2156789 },
-    { date: '4 วันก่อน', tokens: 2234567 },
-    { date: '3 วันก่อน', tokens: 2289123 },
-    { date: '2 วันก่อน', tokens: 2298765 },
-    { date: 'เมื่อวาน', tokens: 2312456 },
-    { date: 'วันนี้', tokens: 2458934 }
-  ],
-  frequentlyAskedQuestions: [
-    { type: 'คำถามเกี่ยวกับบอท', count: 342, percentage: 28.5 },
-    { type: 'คำถามเกี่ยวกับการใช้งาน', count: 298, percentage: 24.8 },
-    { type: 'คำถามเกี่ยวกับการชำระเงิน', count: 187, percentage: 15.6 },
-    { type: 'คำถามเกี่ยวกับบัญชี', count: 156, percentage: 13.0 },
-    { type: 'คำถามเกี่ยวกับเทคนิค', count: 134, percentage: 11.2 },
-    { type: 'คำถามอื่นๆ', count: 83, percentage: 6.9 }
-  ],
-  userRoleDistribution: [
-    { role: 'ผู้ใช้งาน', count: 28 },
-    { role: 'รอดำเนินการ', count: 15 },
-    { role: 'ผู้ดูแล', count: 5 },
-    { role: 'แอดมิน', count: 2 }
-  ],
-  hourlyActivity: [
-    { hour: '00:00', users: 45, tokens: 89000 },
-    { hour: '04:00', users: 32, tokens: 67000 },
-    { hour: '08:00', users: 156, tokens: 320000 },
-    { hour: '12:00', users: 289, tokens: 580000 },
-    { hour: '16:00', users: 312, tokens: 640000 },
-    { hour: '20:00', users: 198, tokens: 410000 }
-  ],
-  botKnowledgeAccuracy: {
-    overallAccuracy: 94.1,
-    totalQuestions: 4052,
-    knowledgeMatches: 3828,
-    nonKnowledgeAnswers: 224,
-    averageResponseTime: '1.2s',
-    improvement: 2.3
-  },
-  botIntegrations: {
-    totalIntegrationLines: 15,
-    totalWidgets: 8
-  },
-  systemStatus: {
-    api: { status: 'healthy', uptime: '99.9%', responseTime: '120ms' },
-    database: { status: 'healthy', uptime: '99.8%', responseTime: '45ms' },
-    storage: { status: 'healthy', usage: '68%', available: '320GB' },
-    ai: { status: 'healthy', uptime: '99.7%', responseTime: '250ms', model: 'GPT-4', requests: 12456 },
-    ocr: { status: 'healthy', uptime: '99.6%', responseTime: '180ms', processed: 8934, accuracy: '96.8%' },
-    server: { status: 'healthy', uptime: '99.95%', cpu: '45%', memory: '62%', disk: '68%' }
-  },
-  weekComparison: {
-    users: { thisWeek: 8721, lastWeek: 8234, change: 5.9 },
-    tokens: { thisWeek: 17234567, lastWeek: 16123456, change: 6.9 },
-    interactions: { thisWeek: 12456, lastWeek: 11890, change: 4.8 }
-  },
-  // User-specific data
-  userData: {
-    totalBots: 17,
-    totalKnowledge: 18,
-    totalUsers: 23,
-    totalGroups: 5,
-    usersExpiringSoon: 9,
-    usersPendingApproval: 18,
-    dailyUsers: {
-      today: 16,
-      yesterday: 14,
-      change: 14.3
-    },
-    tokenUsage: {
-      today: 1823456,
-      yesterday: 1712345,
-      change: 6.5
-    },
-    dailyUsersChart: [
-      { date: '6 วันก่อน', users: 12 },
-      { date: '5 วันก่อน', users: 13 },
-      { date: '4 วันก่อน', users: 14 },
-      { date: '3 วันก่อน', users: 15 },
-      { date: '2 วันก่อน', users: 15 },
-      { date: 'เมื่อวาน', users: 14 },
-      { date: 'วันนี้', users: 16 }
-    ],
-    tokenUsageChart: [
-      { date: '6 วันก่อน', tokens: 1567890 },
-      { date: '5 วันก่อน', tokens: 1612345 },
-      { date: '4 วันก่อน', tokens: 1678901 },
-      { date: '3 วันก่อน', tokens: 1701234 },
-      { date: '2 วันก่อน', tokens: 1695678 },
-      { date: 'เมื่อวาน', tokens: 1712345 },
-      { date: 'วันนี้', tokens: 1823456 }
-    ]
-  },
-  // System-specific data
-  systemData: {
-    totalBots: 17,
-    totalKnowledge: 18,
-    totalUsers: 23,
-    usersExpiringSoon: 9,
-    usersPendingApproval: 18,
-    dailyUsers: {
-      today: 16,
-      yesterday: 14,
-      change: 14.3
-    },
-    tokenUsage: {
-      today: 635478,
-      yesterday: 600111,
-      change: 5.9
-    },
-    dailyUsersChart: [
-      { date: '6 วันก่อน', users: 17 },
-      { date: '5 วันก่อน', users: 18 },
-      { date: '4 วันก่อน', users: 19 },
-      { date: '3 วันก่อน', users: 21 },
-      { date: '2 วันก่อน', users: 22 },
-      { date: 'เมื่อวาน', users: 21 },
-      { date: 'วันนี้', users: 23 }
-    ],
-    tokenUsageChart: [
-      { date: '6 วันก่อน', tokens: 532567 },
-      { date: '5 วันก่อน', tokens: 544444 },
-      { date: '4 วันก่อน', tokens: 555666 },
-      { date: '3 วันก่อน', tokens: 588777 },
-      { date: '2 วันก่อน', tokens: 602087 },
-      { date: 'เมื่อวาน', tokens: 600111 },
-      { date: 'วันนี้', tokens: 635478 }
-    ]
-  }
-};
-
-const COLORS = ['#F5C200', '#F5D547', '#F0A500', '#8B8680', '#A89A91', '#6B6560'];
-const GRADIENT_COLORS = {
-  sandy: ['#F5C200', '#8B8680'],
-  gold: ['#F5C200', '#8B8680'],
-  tan: ['#F5C200', '#8B8680'],
-  warmgray: ['#F5C200', '#8B8680'],
-  light: ['#F5C200', '#8B8680'],
-  pale: ['#F5C200', '#8B8680']
-};
-
-const isErrorLogEvent = (message) => {
-  const key = String(message || '').toLowerCase();
-  return key === 'http.error' || key === 'http.exception' || key.endsWith('.failed');
-};
-
-const getErrorTypeKey = (message) => {
-  const key = String(message || '').toLowerCase();
-  if (key === 'http.error') return 'httpError';
-  if (key === 'http.exception') return 'httpException';
-  if (key.endsWith('.failed')) return 'failed';
-  return 'other';
-};
-
-const getErrorCategoryKey = (row) => {
-  const key = String(row?.message || '').toLowerCase();
-  const meta = row?.meta && typeof row.meta === 'object' ? row.meta : {};
-  const raw = `${key} ${String(meta?.error || '').toLowerCase()} ${String(meta?.url || '').toLowerCase()} ${String(meta?.path || '').toLowerCase()}`;
-
-  if (raw.includes('ocr')) return 'ocr';
-  if (raw.includes('vector') || raw.includes('qdrant') || raw.includes('embed')) return 'vector';
-  if (raw.includes('upload')) return 'upload';
-  if (key === 'http.error' || key === 'http.exception') return 'http';
-  if (key.endsWith('.failed')) return 'failed';
-  return 'other';
-};
-
-const getErrorWindowStartMs = (range) => {
-  const now = Date.now();
-  if (range === 'day') return now - (24 * 60 * 60 * 1000);
-  if (range === 'month') return now - (30 * 24 * 60 * 60 * 1000);
-  return now - (7 * 24 * 60 * 60 * 1000);
-};
-
-const getErrorRangeLabel = (range) => {
-  if (range === 'day') return 'วันล่าสุด';
-  if (range === 'month') return 'เดือนล่าสุด';
-  return 'สัปดาห์ล่าสุด';
-};
-
-const TOKEN_RANGE_DAYS = { day: 1, week: 7, month: 30 };
-const getTokenRangeLabel = (range) => {
-  if (range === 'day') return '1 วันล่าสุด';
-  if (range === 'week') return '7 วันล่าสุด';
-  return '30 วันล่าสุด';
-};
-const RANGE_DAYS = TOKEN_RANGE_DAYS;
-const getRangeLabel = getTokenRangeLabel;
-
-const getLocalDateKey = (value) => {
-  const d = value instanceof Date ? value : new Date(value || 0);
-  if (!Number.isFinite(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
-
-// Animated Counter Component
-const AnimatedCounter = ({ value, duration = 2000 }) => {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    let startTime = null;
-    const startValue = 0;
-    const endValue = value;
-
-    const animate = (currentTime) => {
-      if (!startTime) startTime = currentTime;
-      const progress = Math.min((currentTime - startTime) / duration, 1);
-      
-      // Easing function for smooth animation
-      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-      const currentCount = Math.floor(startValue + (endValue - startValue) * easeOutQuart);
-      
-      setCount(currentCount);
-      
-      if (progress < 1) {
-        requestAnimationFrame(animate);
-      } else {
-        setCount(endValue);
-      }
-    };
-
-    requestAnimationFrame(animate);
-  }, [value, duration]);
-
-  return <span>{count.toLocaleString('th-TH')}</span>;
-};
-
-// Sparkline Component
-const Sparkline = ({ data, color = '#3B82F6', height = 40 }) => {
-  const maxValue = Math.max(...data);
-  const minValue = Math.min(...data);
-  const range = maxValue - minValue || 1;
-
-  const points = data.map((value, index) => {
-    const x = (index / (data.length - 1)) * 100;
-    const y = 100 - ((value - minValue) / range) * 100;
-    return `${x},${y}`;
-  }).join(' ');
-
+/** บอกให้ชัดว่ากราฟกำลังโหลด หรือโหลดไม่ได้ — กันเข้าใจผิดว่าเลขศูนย์คือยอดจริง */
+const ActivityNotice = ({ status, onRetry }) => {
+  if (status === 'ready') return null;
+  const loading = status === 'loading';
   return (
-    <svg width="100%" height={height} className="overflow-visible">
-      <defs>
-        <linearGradient id={`gradient-${color}`} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <polyline
-        points={points}
-        fill="none"
-        stroke={color}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="drop-shadow-sm"
-      />
-      <polygon
-        points={`0,100 ${points} 100,100`}
-        fill={`url(#gradient-${color})`}
-      />
-    </svg>
+    <div
+      className={`mb-4 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+        loading ? 'border-gray-200 bg-gray-50 text-gray-600' : 'border-red-200 bg-red-50 text-red-700'
+      }`}
+    >
+      {loading ? (
+        <span className="h-4 w-4 flex-shrink-0 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+      ) : (
+        <HiExclamationCircle className="flex-shrink-0 text-base" />
+      )}
+      <span className="flex-1">
+        {loading
+          ? 'กำลังโหลดข้อมูลจากระบบ...'
+          : 'โหลดข้อมูลไม่สำเร็จ ตัวเลขที่เห็นเป็นศูนย์เพราะไม่มีข้อมูล ไม่ใช่ยอดจริง'}
+      </span>
+      {!loading && (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="flex-shrink-0 rounded-md border border-red-300 bg-white px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+        >
+          ลองใหม่
+        </button>
+      )}
+    </div>
   );
 };
 
@@ -338,6 +90,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
   const [faqCategories, setFaqCategories] = useState(null);
   const [citedDocs, setCitedDocs] = useState(null); // เอกสารที่ถูกอ้างอิงบ่อย
   const [adminActivity, setAdminActivity] = useState(null);
+  const [activityStatus, setActivityStatus] = useState('loading'); // loading | ready | error
   const [tokenUsageData, setTokenUsageData] = useState(null);
   const [userRoleDistributionData, setUserRoleDistributionData] = useState(null);
   const [errorLogOverview, setErrorLogOverview] = useState(null);
@@ -355,10 +108,24 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
     api.getMetrics().then(setMetricsData).catch(() => {});
   }, [userRole]);
 
-  useEffect(() => {
+  const loadAdminActivity = useCallback(() => {
     const days = RANGE_DAYS[usersRange] || 7;
-    api.getAdminActivity(days).then(setAdminActivity).catch(() => setAdminActivity(null));
-  }, [userRole, usersRange]);
+    setActivityStatus('loading');
+    api
+      .getAdminActivity(days)
+      .then((data) => {
+        setAdminActivity(data);
+        setActivityStatus('ready');
+      })
+      .catch(() => {
+        setAdminActivity(null);
+        setActivityStatus('error');
+      });
+  }, [usersRange]);
+
+  useEffect(() => {
+    loadAdminActivity();
+  }, [userRole, loadAdminActivity]);
 
   useEffect(() => {
     const t0 = Date.now();
@@ -738,23 +505,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
       dailyUsersChart = userSeries.map((r) => ({ date: r.date, users: r.value }));
       tokenUsageChart = modelSeries.map((r) => ({ date: r.date, tokens: r.value }));
     } else {
-      // fallback
-      if (filter === 'user') {
-        dailyUsers = mockDashboardData.userData.dailyUsers;
-        tokenUsage = mockDashboardData.userData.tokenUsage;
-        dailyUsersChart = mockDashboardData.userData.dailyUsersChart;
-        tokenUsageChart = mockDashboardData.userData.tokenUsageChart;
-      } else if (filter === 'system') {
-        dailyUsers = mockDashboardData.systemData.dailyUsers;
-        tokenUsage = mockDashboardData.systemData.tokenUsage;
-        dailyUsersChart = mockDashboardData.systemData.dailyUsersChart;
-        tokenUsageChart = mockDashboardData.systemData.tokenUsageChart;
-      } else {
-        dailyUsers = mockDashboardData.dailyUsers;
-        tokenUsage = mockDashboardData.tokenUsage;
-        dailyUsersChart = mockDashboardData.dailyUsersChart;
-        tokenUsageChart = mockDashboardData.tokenUsageChart;
-      }
+      // ยังไม่มีข้อมูลจริง — คงโครงวันที่ไว้แต่ค่าเป็นศูนย์ ห้ามเดาตัวเลขให้ผู้ดูแลเห็น
+      const emptySeries = buildLastNDays([], 'user', RANGE_DAYS[usersRange] || 7);
+      dailyUsers = { today: 0, yesterday: 0, change: 0 };
+      tokenUsage = { today: 0, yesterday: 0, change: 0 };
+      dailyUsersChart = emptySeries.map((r) => ({ date: r.date, users: 0 }));
+      tokenUsageChart = emptySeries.map((r) => ({ date: r.date, tokens: 0 }));
     }
 
     // override token usage with real data (UsageDaily) when available
@@ -798,7 +554,16 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               storeRawLabel: '—',
               s3Line: '',
             },
-            ai: { status: 'loading', responseTime: '—', model: '—', error: '', gatewayLine: '—' },
+            ai: {
+              status: 'loading',
+              responseTime: '—',
+              responseTimeLabel: 'เวลาตอบ',
+              model: '—',
+              error: '',
+              gatewayLine: '—',
+              methodLine: '',
+              modelWarning: '',
+            },
             ocr: {
               status: 'loading',
               typhoonLine: '—',
@@ -828,6 +593,13 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
         const aiResponseMs = healthData.ai?.responseTimeMs != null ? `${healthData.ai.responseTimeMs}ms` : '—';
         const aiModel = healthData.ai?.model ?? '—';
         const aiError = healthData.ai?.error ?? '';
+        const aiDeepMode = healthData.ai?.mode === 'completion';
+        const aiResponseTimeLabel = aiDeepMode ? 'เวลาตอบ LLM' : 'เวลาตอบ gateway';
+        const aiMethodLine = aiDeepMode
+          ? 'ตรวจด้วยการถามโมเดลจริง (ใช้ token)'
+          : 'ตรวจด้วย /models — ไม่ใช้ token';
+        const aiModelWarning =
+          healthData.ai?.modelAvailable === false ? 'ไม่พบโมเดลนี้ในรายการของ gateway' : '';
         const dbError = healthData.database?.error ?? '';
         const qdrantError = healthData.qdrant?.error ?? '';
 
@@ -925,9 +697,12 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           ai: {
             status: aiOk ? 'healthy' : 'unhealthy',
             responseTime: aiResponseMs,
+            responseTimeLabel: aiResponseTimeLabel,
             model: aiModel,
             error: aiError,
             gatewayLine,
+            methodLine: aiMethodLine,
+            modelWarning: aiModelWarning,
           },
           ocr: {
             status: ocrStatus,
@@ -978,93 +753,6 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
     };
   }, [filter, users, groups, reportData, metricsData, adminActivity, healthData, healthResponseTimeMs, faqCategories, tokenUsageData, userRoleDistributionData, errorLogOverview, errorRange, usersRange]);
 
-  const StatCard = ({ 
-    title, 
-    value, 
-    valueSuffix,
-    icon: Icon, 
-    change, 
-    changeType, 
-    subtitle, 
-    iconColor = 'bg-[#F5C200]',
-    gradient = ['#3B82F6', '#1D4ED8'],
-    sparklineData,
-    delay = 0,
-    onCardClick = null,
-    bgColor = 'bg-white'
-  }) => {
-    const [isHovered, setIsHovered] = useState(false);
-    
-    return (
-      <div 
-        className={`${bgColor} rounded-2xl shadow-lg border border-gray-100 p-6 hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 cursor-pointer ${
-          isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
-        }`}
-        style={{ transitionDelay: `${delay}ms` }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
-        onClick={onCardClick}
-      >
-        <div className="relative overflow-hidden">
-          {/* Solid Color Background */}
-          <div 
-            className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-10 blur-3xl transition-all duration-500"
-            style={{ 
-              background: gradient[0],
-              transform: isHovered ? 'scale(1.5)' : 'scale(1)'
-            }}
-          />
-          
-          <div className="relative">
-            {/* Icon + Title Section */}
-            <div className="flex items-center gap-2 mb-3">
-              <div 
-                className="rounded-lg p-2 transition-all duration-300"
-                style={{ background: gradient[0] }}
-              >
-                <Icon className="text-white text-lg" />
-              </div>
-              <p className="text-base font-bold text-gray-800">{title}</p>
-            </div>
-            
-            {/* Value Section */}
-            <div className="ml-10">
-              <p className="text-4xl font-bold text-gray-900 mb-2">
-                <AnimatedCounter value={value} />
-                {valueSuffix ? <span>{valueSuffix}</span> : null}
-              </p>
-              {subtitle && (
-                <p className="text-xs text-gray-500 mb-3">{subtitle}</p>
-              )}
-              {change !== undefined && (
-                <div className={`flex items-center gap-1 ${changeType === 'up' ? 'text-[#F5C200]' : 'text-[#8B8680]'}`}>
-                  {changeType === 'up' ? (
-                    <HiArrowUp className="text-sm" />
-                  ) : (
-                    <HiArrowDown className="text-sm" />
-                  )}
-                  <span className="text-sm font-semibold">{Math.abs(change)}%</span>
-                  <span className="text-sm text-gray-500 ml-1">จากเมื่อวาน</span>
-                </div>
-              )}
-            </div>
-            
-            {/* Sparkline */}
-            {sparklineData && (
-              <div className="mt-4 h-12">
-                <Sparkline 
-                  data={sparklineData} 
-                  color={gradient[0]}
-                  height={48}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // Custom tooltip for charts
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
@@ -1109,10 +797,10 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="bg-[#F5C200] rounded-xl p-3 shadow-lg">
-              <HiSparkles className="text-white text-3xl" />
+              <HiSparkles className="text-white text-2xl" />
             </div>
             <div>
-              <h1 className="text-4xl font-bold text-gray-800">
+              <h1 className="text-2xl font-bold text-gray-800">
                 Dashboard
               </h1>
               <p className="text-sm text-gray-600 mt-1">ภาพรวมระบบและสถิติการใช้งานแบบ Real-time</p>
@@ -1278,6 +966,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           delay={200}
           bgColor="bg-white"
           onCardClick={() => scrollToChart(dailyUsersChartRef)}
+          isVisible={isVisible}
         />
         <StatCard
           title="Service พร้อมใช้งาน"
@@ -1287,6 +976,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           subtitle="API, DB, Redis, Vector, AI, OCR, Server"
           iconColor="bg-[#F5C200]"
           gradient={['#8B8680', '#6B6560']}
+          isVisible={isVisible}
           delay={300}
           bgColor="bg-white"
         />
@@ -1441,6 +1131,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
           delay={600}
           bgColor="bg-white"
           onCardClick={() => scrollToChart(tokenUsageChartRef)}
+          isVisible={isVisible}
         />
       </div>
       )}
@@ -1459,7 +1150,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 <HiUsers className="text-white text-2xl" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-800">ผู้ใช้งาน</h3>
+                <h3 className="text-xl font-bold text-gray-800">ผู้ใช้งาน</h3>
                 <p className="text-sm text-gray-600">{getRangeLabel(usersRange)}</p>
               </div>
             </div>
@@ -1484,6 +1175,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               ))}
             </div>
           </div>
+          <ActivityNotice status={activityStatus} onRetry={loadAdminActivity} />
           <ResponsiveContainer width="100%" height={320}>
             <LineChart
               data={metrics.dailyUsersChart}
@@ -1537,7 +1229,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 <HiKey className="text-white text-2xl" />
               </div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-800">Token</h3>
+                <h3 className="text-xl font-bold text-gray-800">Token</h3>
                 <p className="text-sm text-gray-600">
                   {getTokenRangeLabel(tokenRange)}
                   <span className="text-gray-400"> · รวม </span>
@@ -1568,6 +1260,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               ))}
             </div>
           </div>
+          {!tokenUsageData && <ActivityNotice status={activityStatus} onRetry={loadAdminActivity} />}
           <ResponsiveContainer width="100%" height={320}>
             <AreaChart
               data={metrics.tokenUsageChart}
@@ -1625,7 +1318,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               <HiUserGroup className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">บทบาทผู้ใช้</h3>
+              <h3 className="text-xl font-bold text-gray-800">บทบาทผู้ใช้</h3>
               <p className="text-sm text-gray-600">การกระจายตามบทบาท</p>
             </div>
           </div>
@@ -1674,7 +1367,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               <HiBookOpen className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">เอกสารที่ถูกอ้างอิงบ่อย</h3>
+              <h3 className="text-xl font-bold text-gray-800">เอกสารที่ถูกอ้างอิงบ่อย</h3>
               <p className="text-sm text-gray-600">จำนวนคำตอบที่อ้างอิงเอกสารแต่ละฉบับ (30 วันล่าสุด)</p>
             </div>
           </div>
@@ -1744,7 +1437,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               <HiExclamationCircle className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">จำนวน Error</h3>
+              <h3 className="text-xl font-bold text-gray-800">จำนวน Error</h3>
               <p className="text-sm text-gray-600">
                 {getErrorRangeLabel(errorRange)}
                 <span className="text-gray-400"> · รวม </span>
@@ -1881,7 +1574,7 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
               <HiCheckCircle className="text-white text-2xl" />
             </div>
             <div>
-              <h3 className="text-2xl font-bold text-gray-800">สถานะระบบ</h3>
+              <h3 className="text-xl font-bold text-gray-800">สถานะระบบ</h3>
               <p className="text-sm text-gray-600">System Health</p>
             </div>
           </div>
@@ -1999,8 +1692,16 @@ function Dashboard({ users = [], groups = [], userRole = 'support' }) {
                 </span>
               </div>
               <div className="text-xs text-gray-600 space-y-1">
-                <p>เวลาตอบ LLM: {metrics.systemStatus.ai.responseTime}</p>
+                <p>
+                  {metrics.systemStatus.ai.responseTimeLabel}: {metrics.systemStatus.ai.responseTime}
+                </p>
                 <p>โมเดล: {metrics.systemStatus.ai.model}</p>
+                {metrics.systemStatus.ai.methodLine && (
+                  <p className="text-gray-500">{metrics.systemStatus.ai.methodLine}</p>
+                )}
+                {metrics.systemStatus.ai.modelWarning && (
+                  <p className="text-red-600 break-words">{metrics.systemStatus.ai.modelWarning}</p>
+                )}
                 {metrics.systemStatus.ai.status === 'unhealthy' && metrics.systemStatus.ai.error && (
                   <p className="text-red-600 mt-1 break-words">สาเหตุ: {metrics.systemStatus.ai.error}</p>
                 )}

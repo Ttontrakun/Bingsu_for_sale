@@ -16,6 +16,7 @@ import MyKnowledgeCreate from './pages/MyKnowledgeCreate';
 import MyKnowledgeAddData from './pages/MyKnowledgeAddData';
 import ToastContainer from './components/ToastNotification';
 import RequireAuth from './components/RequireAuth';
+import MaintenanceOverlay from './components/MaintenanceOverlay';
 import { SystemConfigProvider } from './context/SystemConfigContext';
 
 function App() {
@@ -23,9 +24,11 @@ function App() {
     <SystemConfigProvider>
       <Router>
         <ToastContainer />
+        <MaintenanceOverlay />
         <Routes>
-          <Route path="/" element={<Platform />} />
+          <Route path="/" element={<Auth />} />
           <Route path="/auth" element={<Auth />} />
+          <Route path="/platform" element={<Platform />} />
           <Route path="/forgotpassword" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/verifying" element={<Verifying />} />

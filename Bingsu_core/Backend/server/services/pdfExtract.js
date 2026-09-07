@@ -274,13 +274,30 @@ function buildOcrForm(buffer, fileName, contentType, options = {}) {
   return form;
 }
 
-/** ล้างผล OCR จาก Typhoon — เอา metadata/code ออก เหลือแค่ข้อความ (ตารางคงโครงสร้างไว้) */
+/** แปลงตาราง HTML จาก Typhoon ให้เป็น markdown ก่อนเก็บ/แสดงผล */
+function normalizeTyphoonOcrResult(result) {
+  if (!result || typeof result !== "object") return result;
+  const pages = Array.isArray(result.pages)
+    ? result.pages.map((page) =>
+        page && typeof page === "object"
+          ? { ...page, text: postProcessOcrText(String(page.text || "").trim()) }
+          : page,
+      )
+    : result.pages;
+  return {
+    ...result,
+    text: postProcessOcrText(String(result.text || "").trim()),
+    pages,
+  };
+}
+
+/** ล้างผล OCR จาก Typhoon — เอา metadata/code ออก แล้วแปลงตาราง HTML เป็น markdown */
 function cleanTyphoonOcrOutput(content) {
   let text = String(content || "").trim();
   text = text.replace(/<figure>[\s\S]*?<\/figure>\s*/gi, "");
   text = text.replace(/```[\w]*\n[\s\S]*?```\s*/g, "");
   text = text.replace(/\n{3,}/g, "\n\n").trim();
-  return text;
+  return postProcessOcrText(text);
 }
 
 /** เรียก Open Typhoon OCR API (api.opentyphoon.ai/v1/ocr) — ส่ง model, task_type, max_tokens, temperature, top_p, repetition_penalty, pages ตาม spec. pageNumbers = ส่งเฉพาะเลขหน้าที่จะ OCR (ถ้าไม่ส่ง = ทุกหน้า) */
@@ -374,7 +391,7 @@ async function callTyphoonOcrDirect({ buffer, fileName, contentType, maxPages, p
     }
   }
 
-  return parseResponse(response);
+  return normalizeTyphoonOcrResult(await parseResponse(response));
 }
 
 export const runOcrExtract = async ({
@@ -530,7 +547,7 @@ export const runOcrExtract = async ({
   if (body && body.ok === false && body.error) {
     throw new Error(body.error);
   }
-  return body;
+  return ocrProvider === "typhoon" ? normalizeTyphoonOcrResult(body) : body;
 };
 
 /**

@@ -5,39 +5,21 @@
 /* Sidebar Navigation Styles */
 @layer components {
   .nav-item {
-    @apply flex items-center gap-3 cursor-pointer transition px-3 py-2 rounded-lg;
+    @apply flex items-center gap-2.5 cursor-pointer transition-colors px-2.5 py-2 rounded-xl text-sm;
   }
 
-  .nav-item-active {
-    @apply text-gray-900 font-semibold bg-gray-300;
-  }
-
-  .nav-item-inactive {
-    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
-  }
-
-  .nav-item-bots-active {
-    @apply text-gray-900 font-semibold bg-gray-300;
-  }
-
-  .nav-item-bots-inactive {
-    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
-  }
-
-  .nav-item-knowledge-active {
-    @apply text-gray-900 font-semibold bg-gray-300;
-  }
-
-  .nav-item-knowledge-inactive {
-    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
-  }
-
+  .nav-item-active,
+  .nav-item-bots-active,
+  .nav-item-knowledge-active,
   .nav-item-integration-active {
-    @apply text-gray-900 font-semibold bg-gray-300;
+    @apply text-gray-900 font-semibold bg-yellow-400 shadow-sm;
   }
 
+  .nav-item-inactive,
+  .nav-item-bots-inactive,
+  .nav-item-knowledge-inactive,
   .nav-item-integration-inactive {
-    @apply text-[#5d5e59] hover:text-black hover:bg-gray-300;
+    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100;
   }
 }
 

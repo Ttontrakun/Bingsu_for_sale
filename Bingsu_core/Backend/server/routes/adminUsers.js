@@ -10,6 +10,7 @@ import { getRequestContext } from "../lib/requestContext.js";
 import { logEvent } from "../lib/logging.js";
 import { getLastActivityByUserIds } from "../lib/lastUserActivity.js";
 import { invalidateUserCaches } from "../lib/cache.js";
+import { bcryptRounds } from "../config.js";
 
 export const adminUsersRouter = express.Router();
 
@@ -206,7 +207,7 @@ adminUsersRouter.post("/users/:id/reset-password", authenticate, requireAdmin, a
     return;
   }
 
-  const passwordHash = await bcrypt.hash(nextPassword, 10);
+  const passwordHash = await bcrypt.hash(nextPassword, bcryptRounds);
   await prisma.$transaction([
     prisma.user.update({
       where: { id: target.id },

@@ -108,11 +108,15 @@ function Homepage({ privateMode = false }) {
   const [chatInput, setChatInput] = useState('');
   const [botOptions, setBotOptions] = useState([]);
   const [botsList, setBotsList] = useState([]); // Store full bots list
+  const [botsLoading, setBotsLoading] = useState(true);
+  const [botsLoadFailed, setBotsLoadFailed] = useState(false);
+  const reloadBotsRef = useRef(null);
   // โหมดส่วนตัว: แสดงเพียงสถานะว่ามีข้อมูลตั้งไว้แล้วหรือยัง (จัดการผ่าน /จำ และ /สั่ง ในแชท)
   const [privateHasData, setPrivateHasData] = useState(false);
   const [privateInstructionsText, setPrivateInstructionsText] = useState('');
   const [privateRememberItems, setPrivateRememberItems] = useState([]);
   const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+  const [memoryConfirm, setMemoryConfirm] = useState(null);
   const [memorySearch, setMemorySearch] = useState('');
   const [memoryMaxChars, setMemoryMaxChars] = useState(12000);
   const [memoryMaxInstructionsChars, setMemoryMaxInstructionsChars] = useState(2000);
@@ -263,6 +267,17 @@ function Homepage({ privateMode = false }) {
     }
   };
 
+  const handleConfirmMemoryDelete = async () => {
+    if (!memoryConfirm) return;
+    const target = memoryConfirm;
+    setMemoryConfirm(null);
+    if (target.type === 'instruction') {
+      await handleDeleteInstruction();
+    } else {
+      await handleDeleteMemoryItem(target.index);
+    }
+  };
+
   const handleDeleteMemoryItem = async (index) => {
     const nextItems = privateRememberItems.filter((_, i) => i !== index);
     try {
@@ -369,6 +384,8 @@ function Homepage({ privateMode = false }) {
   // โหลด bots จาก API
   useEffect(() => {
     const loadBots = async () => {
+      setBotsLoading(true);
+      setBotsLoadFailed(false);
       try {
         const botsData = await botAPI.getBots();
         
@@ -409,10 +426,14 @@ function Homepage({ privateMode = false }) {
         console.error('Error loading bots:', error);
         setBotOptions([]);
         setBotsList([]);
+        setBotsLoadFailed(true);
+      } finally {
+        setBotsLoading(false);
       }
     };
 
     loadBots();
+    reloadBotsRef.current = loadBots;
   }, []);
 
   // เลือกบอทอัตโนมัติเมื่อยังไม่ได้เลือก — ถ้ามีหลายตัว เลือกบอทระบบก่อน
@@ -460,7 +481,7 @@ function Homepage({ privateMode = false }) {
   const typedPrivateCommand = composerPrivateCommand;
 
   return (
-    <div className='flex h-screen bg-white relative'>
+    <div className='flex h-screen bg-[#f7f7f8] relative'>
     {/* Sidebar Component */}
     <Sidebar
       onCollapseChange={setIsSidebarCollapsed}
@@ -470,7 +491,8 @@ function Homepage({ privateMode = false }) {
     />
 
     {/* Main Content */}
-    <main className={`flex-1 bg-white px-8 py-6 overflow-auto flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16' : ''}`}>
+    {/* จอเล็ก sidebar ที่หุบเป็น overlay (w-0) จึงต้องเว้นที่ให้ปุ่มขยายลอย ส่วนจอ md ขึ้นไป rail กินพื้นที่จริงอยู่แล้ว */}
+    <main className={`flex-1 min-w-0 bg-[#f7f7f8] px-8 py-6 overflow-auto flex flex-col transition-all duration-300 ${isSidebarCollapsed ? 'pl-16 md:pl-8' : ''}`}>
       <div className='-mx-4 -mt-3 mb-2'>
         <AnnouncementBanner />
       </div>
@@ -521,13 +543,36 @@ function Homepage({ privateMode = false }) {
               )}
             </div>
           ) : (
-            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0'>
-              <span className='font-medium whitespace-nowrap'>{selectedBotObject.name}</span>
-              <span className='text-xs text-gray-500 shrink-0'>(ไม่สามารถเปลี่ยนได้)</span>
+            <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 min-w-0 max-w-[min(100vw-4rem,22rem)]'>
+              <span className='font-medium truncate' title={selectedBotObject.name}>
+                {selectedBotObject.name}
+              </span>
             </div>
           )
+        ) : botsLoading ? (
+          <div className='h-9 w-40 animate-pulse rounded-lg bg-gray-200' aria-label='กำลังโหลดบอท' />
+        ) : botsLoadFailed ? (
+          <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-red-200 bg-red-50 text-red-700'>
+            <span>โหลดรายชื่อบอทไม่สำเร็จ</span>
+            <button
+              type='button'
+              onClick={() => reloadBotsRef.current?.()}
+              className='font-semibold underline underline-offset-2 hover:text-red-800'
+            >
+              ลองใหม่
+            </button>
+          </div>
         ) : (
-          <span className='text-sm italic text-gray-400'>กำลังโหลดบอท...</span>
+          <div className='flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-600'>
+            <span>ยังไม่มีบอทที่ใช้งานได้</span>
+            <button
+              type='button'
+              onClick={() => navigate('/my-bots/create')}
+              className='font-semibold text-gray-800 underline underline-offset-2 hover:text-gray-900'
+            >
+              สร้างบอท
+            </button>
+          </div>
         )}
       </div>
 
@@ -546,7 +591,7 @@ function Homepage({ privateMode = false }) {
           </div>
         )}
         <h1
-          className='text-2xl font-semibold text-gray-800 mb-4'
+          className='text-2xl font-bold text-gray-800 mb-4'
           style={
             privateMode
               ? privateTitleStyle
@@ -564,7 +609,7 @@ function Homepage({ privateMode = false }) {
 
         {/* Description — ใช้คำอธิบายบอทที่ตั้งในฟอร์ม (สร้าง/แก้ไขบอท) หรือข้อความจาก Dev Studio */}
         <p
-          className='text-gray-600 text-center max-w-2xl leading-relaxed mb-10'
+          className='text-gray-600 text-sm text-center max-w-2xl leading-relaxed mb-10'
           style={
             isDefaultBotDescription(selectedBotObject?.description) ||
             isCorruptedText(selectedBotObject?.description)
@@ -769,6 +814,9 @@ function Homepage({ privateMode = false }) {
               <HiOutlinePaperAirplane className='transform rotate-90' />
             </button>
             </div>
+            <p className='text-xs text-gray-500 text-center mt-2'>
+              Enterprise AI Chatbot อาจทำผิดพลาดได้ กรุณาตรวจสอบข้อมูลสำคัญ
+            </p>
           </div>
         </div>
 
@@ -789,7 +837,7 @@ function Homepage({ privateMode = false }) {
         >
           {/* Header — สไตล์หน้า Projects ของ Claude */}
           <div className='px-8 pt-6 pb-4 flex items-start justify-between gap-4 flex-shrink-0'>
-            <h2 className='text-2xl font-semibold text-gray-900'>คลังข้อมูลส่วนตัว</h2>
+            <h2 className='text-xl font-bold text-gray-900'>คลังข้อมูลส่วนตัว</h2>
             <div className='flex items-center gap-2'>
               <input
                 type='text'
@@ -882,7 +930,7 @@ function Homepage({ privateMode = false }) {
                     {privateInstructionsText && (
                       <button
                         type='button'
-                        onClick={handleDeleteInstruction}
+                        onClick={() => setMemoryConfirm({ type: 'instruction' })}
                         className='px-2 py-1 text-xs rounded-md text-red-600 hover:bg-red-50'
                       >
                         ลบ
@@ -980,7 +1028,9 @@ function Homepage({ privateMode = false }) {
                         </button>
                         <button
                           type='button'
-                          onClick={() => handleDeleteMemoryItem(idx)}
+                          onClick={() =>
+                            setMemoryConfirm({ type: 'item', index: idx, title: item.title })
+                          }
                           className='px-2 py-1 text-xs rounded-md text-red-600 hover:bg-red-50'
                         >
                           ลบ
@@ -1031,6 +1081,45 @@ function Homepage({ privateMode = false }) {
                 ยังไม่มีความจำที่บันทึกไว้ — กด "+ เพิ่มความจำ" หรือพิมพ์ /จำ ในแชท
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {memoryConfirm && (
+      <div
+        className='fixed inset-0 z-[60] flex items-center justify-center p-4'
+        role='dialog'
+        aria-modal='true'
+      >
+        <div
+          className='absolute inset-0 bg-black/50'
+          onClick={() => setMemoryConfirm(null)}
+        />
+        <div className='relative w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl'>
+          <h3 className='mb-2 text-lg font-semibold text-gray-800'>
+            {memoryConfirm.type === 'instruction' ? 'ลบคำสั่งนี้หรือไม่?' : 'ลบความจำนี้หรือไม่?'}
+          </h3>
+          <p className='mb-6 text-sm text-gray-600 break-words'>
+            {memoryConfirm.type === 'instruction'
+              ? 'บอทจะเลิกทำตามคำสั่งนี้ทันที และกู้คืนข้อความเดิมไม่ได้'
+              : `“${memoryConfirm.title || 'ความจำนี้'}” จะถูกลบออกจากความจำส่วนตัว และกู้คืนไม่ได้`}
+          </p>
+          <div className='flex justify-end gap-3'>
+            <button
+              type='button'
+              onClick={() => setMemoryConfirm(null)}
+              className='rounded-lg border border-gray-300 px-4 py-2 text-gray-700 transition-colors hover:bg-gray-50'
+            >
+              ยกเลิก
+            </button>
+            <button
+              type='button'
+              onClick={handleConfirmMemoryDelete}
+              className='rounded-lg bg-red-600 px-4 py-2 font-semibold text-white shadow-md transition-colors hover:bg-red-700'
+            >
+              ลบ
+            </button>
           </div>
         </div>
       </div>

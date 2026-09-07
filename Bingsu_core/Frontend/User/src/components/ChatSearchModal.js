@@ -81,7 +81,7 @@ function ChatSearchModal({ isOpen, onClose, chats = [], onSelectChat, onNewChat 
       >
         <div className='px-8 pt-6 pb-3 flex items-start justify-between gap-4 flex-shrink-0'>
           <h2
-            className='text-2xl font-semibold text-gray-900'
+            className='text-xl font-bold text-gray-900'
             style={getTextStyle('user.search.title')}
           >
             {searchTitle}

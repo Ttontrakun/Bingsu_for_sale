@@ -398,6 +398,15 @@ function Sidebar({
   };
 
   const chatGroups = buildChatGroups();
+  const isHomePage = location.pathname === '/homepage' || location.pathname === '/private';
+  const isBotsPage = location.pathname.startsWith('/my-bots');
+  const isKnowledgePage = location.pathname.startsWith('/my-knowledge');
+  const navBtn = (active) =>
+    `w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-xl transition-colors text-sm ${
+      active
+        ? 'bg-yellow-400 text-gray-900 font-semibold shadow-sm'
+        : 'font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+    }`;
 
   return (
     <>
@@ -447,15 +456,15 @@ function Sidebar({
 
       {/* Logo */}
       <div
-        className={`flex items-center gap-2 mb-6 pb-6 border-b border-gray-200 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
+        className={`flex items-center gap-2 mb-5 pb-5 border-b border-gray-100 cursor-pointer hover:opacity-80 transition-all duration-300 ease-in-out ${
           isCollapsed ? 'justify-center' : ''
         }`}
         onClick={() => navigate(homePath)}
         title={appName}
       >
-        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0' />
+        <img src={logoSrc} alt="logo" className='w-10 h-10 rounded-full object-cover flex-shrink-0 ring-2 ring-yellow-300' />
         {!isCollapsed && (
-          <span className='text-orange-500 font-bold text-lg leading-tight'>
+          <span className='text-amber-600 font-bold text-lg leading-tight'>
             <span className='block'>{appNameLine1}</span>
             {appNameLine2 ? <span className='block'>{appNameLine2}</span> : null}
           </span>
@@ -463,15 +472,15 @@ function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className='flex flex-col gap-4 flex-1 min-h-0 w-full transition-all duration-300 ease-in-out'>
+      <nav className='flex flex-col gap-1 flex-1 min-h-0 w-full transition-all duration-300 ease-in-out'>
         {/* Fixed Navigation Items */}
-        <div className='flex flex-col gap-3 flex-shrink-0'>
+        <div className='flex flex-col gap-1 flex-shrink-0'>
         {/* แชทใหม่ */}
         {menuEnabled('home') && (
         <button
           type='button'
           onClick={() => navigate(homePath)}
-          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+          className={navBtn(isHomePage)}
           title='สร้างแชทใหม่'
         >
           <HiPlus className='text-lg flex-shrink-0' />
@@ -484,7 +493,7 @@ function Sidebar({
         <button
           type='button'
           onClick={() => setIsChatSearchOpen(true)}
-          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+          className={navBtn(false)}
           title='ค้นหาแชท'
         >
           <HiSearch className='text-lg flex-shrink-0' />
@@ -499,7 +508,7 @@ function Sidebar({
           role='switch'
           aria-checked={privateWorkspace}
           onClick={() => navigate(privateWorkspace ? '/homepage' : '/private')}
-          className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+          className={navBtn(false)}
           title={privateWorkspace ? 'ปิดเพื่อกลับโหมดปกติ' : 'เปิดเพื่อเข้า Personal'}
           aria-label='Personal'
         >
@@ -521,7 +530,7 @@ function Sidebar({
           <button
             type='button'
             onClick={() => navigate('/my-bots')}
-            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100 ${location.pathname.startsWith('/my-bots') ? 'bg-gray-100' : ''}`}
+            className={navBtn(isBotsPage)}
             title='Bots'
           >
             <HiDesktopComputer className='text-lg flex-shrink-0' />
@@ -533,7 +542,7 @@ function Sidebar({
           <button
             type='button'
             onClick={() => navigate('/my-knowledge')}
-            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100 ${location.pathname.startsWith('/my-knowledge') ? 'bg-gray-100' : ''}`}
+            className={navBtn(isKnowledgePage)}
             title='Knowledge'
           >
             <HiBookOpen className='text-lg flex-shrink-0' />
@@ -552,7 +561,7 @@ function Sidebar({
                 navigate('/private', { state: { privateMode: true, openMemory: true } });
               }
             }}
-            className={`w-full py-2 px-2.5 flex items-center ${isCollapsed ? 'justify-center' : 'justify-start'} gap-2 rounded-lg transition-colors text-sm font-medium text-gray-700 hover:bg-gray-100`}
+            className={navBtn(false)}
             title='Memory'
           >
             <HiDatabase className='text-lg flex-shrink-0' />
@@ -710,13 +719,13 @@ function Sidebar({
 
       {/* Profile */}
       <div
-        className={`flex items-center gap-3 pt-4 border-t border-gray-200 cursor-pointer hover:bg-gray-100 rounded-lg p-2 transition-colors ${
+        className={`flex items-center gap-3 pt-4 border-t border-gray-100 cursor-pointer hover:bg-gray-50 rounded-xl p-2 transition-colors ${
           isCollapsed ? 'justify-center' : ''
         }`}
         onClick={() => setIsProfileModalOpen(true)}
         title={getSidebarFirstName(me?.name)}
       >
-        <div className='w-10 h-10 bg-white rounded-full flex items-center justify-center flex-shrink-0'>
+        <div className='w-10 h-10 bg-yellow-100 rounded-full flex items-center justify-center flex-shrink-0 ring-1 ring-yellow-200'>
           {getPresetAvatarSrc(me?.avatarUrl) ? (
             <img
               src={getPresetAvatarSrc(me?.avatarUrl)}

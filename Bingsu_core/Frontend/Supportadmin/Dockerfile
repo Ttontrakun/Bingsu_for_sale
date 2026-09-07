@@ -2,8 +2,8 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# default ให้ตรงสแต็ก bb (legacy :5052); override ผ่าน compose build args ได้
-ARG REACT_APP_API_BASE_URL=http://localhost:5052
+# ใช้ origin ของหน้า + nginx /api — ห้าม bake เป็น :5052 (พอร์ต API ไม่เปิดออกนอกเครื่องแล้ว)
+ARG REACT_APP_API_BASE_URL=
 ENV REACT_APP_API_BASE_URL=$REACT_APP_API_BASE_URL
 
 COPY package*.json ./

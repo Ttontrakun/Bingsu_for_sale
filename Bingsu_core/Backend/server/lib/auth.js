@@ -15,7 +15,7 @@ const hashSessionToken = (token) =>
 /**
  * Get bearer token from Authorization header or cookie.
  */
-function getToken(req) {
+export function getTokenFromRequest(req) {
   const auth = req.headers.authorization;
   if (auth && typeof auth === "string" && auth.startsWith("Bearer ")) {
     return auth.slice(7).trim();
@@ -26,8 +26,18 @@ function getToken(req) {
 /**
  * Middleware: require authenticated user. Sets req.user and req.session.
  */
+export async function lookupSessionUser(token) {
+  const tokenHash = hashSessionToken(token);
+  const session = await prisma.session.findUnique({
+    where: { token: tokenHash },
+    include: { user: true },
+  });
+  if (!session || session.expiresAt < new Date() || !session.user?.isActive) return null;
+  return session.user;
+}
+
 export async function authenticate(req, res, next) {
-  const token = getToken(req);
+  const token = getTokenFromRequest(req);
   if (!token) {
     res.status(401).json({ error: "Not authenticated" });
     return;

@@ -9,6 +9,19 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Get-PostgresPassword {
+  $envFile = Join-Path $PSScriptRoot "..\Backend\.env"
+  if (Test-Path $envFile) {
+    $line = Get-Content $envFile | Where-Object { $_ -match '^\s*POSTGRES_PASSWORD=(.+)$' } | Select-Object -First 1
+    if ($line -match '^\s*POSTGRES_PASSWORD=(.+)$') {
+      $value = $Matches[1].Trim().Trim('"').Trim("'")
+      if ($value) { return $value }
+    }
+  }
+  if ($env:POSTGRES_PASSWORD) { return $env:POSTGRES_PASSWORD }
+  throw "POSTGRES_PASSWORD not found in Backend/.env"
+}
+
 function Write-Step([string]$message) {
   Write-Host "[backup] $message"
 }
@@ -60,7 +73,8 @@ $postgresDumpPath = Join-Path $targetDir "postgres.sql"
 $manifestPath = Join-Path $targetDir "manifest.json"
 
 Write-Step "Creating PostgreSQL dump to $postgresDumpPath"
-docker compose -f $ComposeFile exec -T postgres sh -lc "PGPASSWORD=postgres pg_dump -U $DbUser $DbName" |
+$pgPassword = Get-PostgresPassword
+docker compose -f $ComposeFile exec -T -e "PGPASSWORD=$pgPassword" postgres pg_dump -U $DbUser $DbName |
   Out-File -Encoding utf8 $postgresDumpPath
 $postgresStoredPath = Protect-FileAes -Path $postgresDumpPath -KeyMaterial $EncryptionKey
 

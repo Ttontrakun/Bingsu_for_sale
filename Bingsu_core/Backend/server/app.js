@@ -32,6 +32,8 @@ import { internalRouter } from "./routes/internal.js";
 import { configRouter } from "./routes/config.js";
 import { devConfigRouter } from "./routes/devConfig.js";
 import { logEvent } from "./lib/logging.js";
+import { rateLimit } from "./lib/rateLimit.js";
+import { maintenanceGuard } from "./lib/maintenanceGuard.js";
 
 const app = express();
 const SENSITIVE_QUERY_KEYS = new Set(["token", "email", "password", "newPassword", "currentPassword"]);
@@ -56,7 +58,12 @@ const sanitizeUrlForLogs = (rawUrl) => {
 app.set("trust proxy", 1);
 app.use(cors(corsOptions));
 app.use(helmet({
-  contentSecurityPolicy: false,
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+    },
+  },
   crossOriginResourcePolicy: { policy: "same-origin" },
 }));
 app.disable("x-powered-by");
@@ -89,6 +96,24 @@ app.post(
 );
 app.use(express.json({ limit: "25mb" })); // ใหญ่ขึ้นเพื่อหน้าเทส OCR (ส่งไฟล์ base64)
 app.use(cookieParser());
+app.use(async (req, res, next) => {
+  const urlPath = String(req.originalUrl || "").split("?")[0];
+  const limited =
+    urlPath.startsWith("/api/chat")
+    || urlPath.startsWith("/api/messages")
+    || urlPath.startsWith("/api/documents")
+    || urlPath.startsWith("/api/conversations");
+  if (!limited) return next();
+  const ip = req.ip || req.headers["x-forwarded-for"] || "unknown";
+  const group = urlPath.split("/")[2] || "api";
+  const allowed = await rateLimit(`route:${group}:${ip}`, { windowMs: 60 * 1000, max: 90 });
+  if (!allowed) {
+    res.status(429).json({ error: "ส่งคำขอบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่" });
+    return;
+  }
+  next();
+});
+app.use(maintenanceGuard);
 app.use("/uploads/avatars", express.static(path.join(uploadsDir, "avatars"), { fallthrough: false }));
 app.use("/uploads/bot-avatars", express.static(path.join(uploadsDir, "bot-avatars"), { fallthrough: false }));
 app.use("/uploads/branding", express.static(path.join(uploadsDir, "branding"), { fallthrough: false }));

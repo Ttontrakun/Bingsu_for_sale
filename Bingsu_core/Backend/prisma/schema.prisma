@@ -405,6 +405,16 @@ model Announcement {
   @@index([active])
 }
 
+/** โหมดปิดปรับปรุงฝั่งผู้ใช้ — เปิดจากแท็บประกาศใน Supportadmin */
+model MaintenanceMode {
+  id           String   @id @default("default")
+  enabled      Boolean  @default(false)
+  message      String   @default("เว็บมีปัญหา กำลังแก้ไข กรุณาลองใหม่อีกครั้งในภายหลัง")
+  contactEmail String   @default("aisupport@ntplc.co.th")
+  updatedAt    DateTime @updatedAt
+  updatedBy    String?
+}
+
 /** อัตราค่าบริการ NT Corporate Internet / Lite — แก้ไขได้ผ่านหน้า admin เพื่อให้เครื่องคำนวณราคาใช้ค่าล่าสุด
  *  service: "corp" | "lite" ; kind: "intl" (International Bandwidth) | "local" (Local Access) */
 model ServiceRate {

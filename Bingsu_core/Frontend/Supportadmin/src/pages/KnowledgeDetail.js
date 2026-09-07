@@ -93,7 +93,7 @@ function KnowledgeDetail() {
 
       <div className='mb-6 min-w-0'>
         <div className='flex items-start justify-between gap-3'>
-          <h1 className='text-3xl font-semibold text-gray-900 mb-1 break-words'>{knowledgeName}</h1>
+          <h1 className='text-2xl font-bold text-gray-800 mb-1 break-words'>{knowledgeName}</h1>
           <button
             type='button'
             onClick={() => {

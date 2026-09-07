@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HiOutlineMail, HiLockClosed, HiOutlineUser, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
+import { HiOutlineMail, HiLockClosed, HiOutlineEye, HiOutlineEyeOff } from 'react-icons/hi';
 import ntLogo from '../assets/images/nt-logo-on-yellow.png';
 import NtBrandBar from '../components/NtBrandBar';
 import { api } from '../services/api';
@@ -11,31 +11,15 @@ function Login() {
   const { getCopy, getTextStyle, logoSrc } = useAdminSystemConfig();
   const titleLine1 = getCopy('admin.login.titleLine1', 'Enterprise AI Chatbot');
   const titleLine2 = getCopy('admin.login.titleLine2', 'Support & Admin');
-  const [isSignIn, setIsSignIn] = useState(true);
-
-  // Form states for Sign In
   const [signInEmail, setSignInEmail] = useState('');
   const [signInPassword, setSignInPassword] = useState('');
   const [showSignInPassword, setShowSignInPassword] = useState(false);
   const [signInError, setSignInError] = useState('');
   const [signInLoading, setSignInLoading] = useState(false);
-  
-  // Form states for Sign Up
-  const [signUpName, setSignUpName] = useState('');
-  const [signUpEmail, setSignUpEmail] = useState('');
-  const [signUpPassword, setSignUpPassword] = useState('');
-  const [signUpConfirmPassword, setSignUpConfirmPassword] = useState('');
-  const [signUpError, setSignUpError] = useState('');
-  const [signUpSuccess, setSignUpSuccess] = useState('');
-  const [signUpLoading, setSignUpLoading] = useState(false);
 
   // Validation functions
   const isSignInValid = () => {
     return signInEmail.trim() !== '' && signInPassword.trim() !== '';
-  };
-
-  const isSignUpValid = () => {
-    return signUpName.trim() !== '' && signUpEmail.trim() !== '' && signUpPassword.length >= 8 && signUpPassword === signUpConfirmPassword;
   };
 
   const handleSignIn = async (e) => {
@@ -57,38 +41,6 @@ function Login() {
       setSignInError(err.message || 'เข้าสู่ระบบไม่สำเร็จ');
     } finally {
       setSignInLoading(false);
-    }
-  };
-
-  const handleSignUp = async (e) => {
-    e.preventDefault();
-    setSignUpError('');
-    setSignUpSuccess('');
-    if (!isSignUpValid()) return;
-
-    setSignUpLoading(true);
-    try {
-      await api.signup(signUpName.trim(), signUpEmail.trim(), signUpPassword);
-      setSignUpSuccess('สมัครสำเร็จแล้ว กรุณาเข้าสู่ระบบ');
-      setSignUpName('');
-      setSignUpEmail('');
-      setSignUpPassword('');
-      setSignUpConfirmPassword('');
-      setIsSignIn(true);
-    } catch (err) {
-      let msg = err?.message;
-      if (msg != null && typeof msg !== 'string') msg = String(msg);
-      else if (!msg) msg = String(err || '');
-      // แทนที่ข้อความยาวเรื่อง Vector/docker/legacy ทุกแบบ (รวม "ดู docker compose logs legacy และ api")
-      const confusing =
-        /network\s*error|แปลง\s*vector|docker\s*compose|backend\s*ล้ม|บันทึก.*vector|legacy\s*และ\s*api|ถ้าเกิดตอนกดบันทึก|เชื่อมต่อเซิร์ฟเวอร์ไม่ได้|ดู\s*docker|logs\s*legacy/i.test(msg) ||
-        (msg.includes('Vector') && msg.includes('backend')) ||
-        msg.includes('ดู docker compose logs');
-      setSignUpError(confusing
-        ? 'เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ — ตรวจสอบว่า backend รันอยู่ และใน .env ตั้ง REACT_APP_API_BASE_URL ให้ชี้ไปพอร์ตที่ backend รัน (เช่น 5052 หรือ 8083) แล้ว restart แอป'
-        : (msg || 'ลงทะเบียนไม่สำเร็จ กรุณาลองใหม่'));
-    } finally {
-      setSignUpLoading(false);
     }
   };
 
@@ -117,23 +69,8 @@ function Login() {
             <span className="block" style={getTextStyle('admin.login.titleLine2')}>{titleLine2}</span>
           </h2>
 
-          <div className="w-full max-w-xs relative overflow-hidden" style={{ minHeight: '280px' }}>
-            <div 
-              className="transition-all duration-700 ease-in-out"
-              style={{
-                transform: isSignIn ? 'translateX(0) scale(1)' : 'translateX(-100%) scale(0.95)',
-                opacity: isSignIn ? 1 : 0,
-                maxHeight: isSignIn ? '500px' : '0',
-                overflow: 'hidden',
-                transition: 'transform 0.7s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-            >
-              {/* Sign In Form */}
-              <form 
-                key="signin"
-                className="w-full"
-                onSubmit={handleSignIn}
-              >
+          <div className="w-full max-w-xs">
+              <form className="w-full" onSubmit={handleSignIn}>
               <div className="mb-4 relative">
                 <label htmlFor="login-email" className="block text-xs text-zinc-500 mb-2 transition-colors duration-400">Email</label>
                 <div className="relative">
@@ -203,123 +140,6 @@ function Login() {
                 </button>
               </div>
               </form>
-            </div>
-            <div 
-              className="transition-all duration-700 ease-in-out"
-              style={{
-                transform: !isSignIn ? 'translateX(0) scale(1)' : 'translateX(100%) scale(0.95)',
-                opacity: !isSignIn ? 1 : 0,
-                maxHeight: !isSignIn ? '500px' : '0',
-                overflow: 'hidden',
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                width: '100%',
-                transition: 'transform 0.7s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.7s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.7s cubic-bezier(0.4, 0, 0.2, 1)'
-              }}
-            >
-              {/* Sign Up Form */}
-              <form 
-                key="signup"
-                className="w-full"
-                onSubmit={handleSignUp}
-              >
-              <div className="mb-4 relative">
-                <label htmlFor="signup-name" className="block text-xs text-zinc-500 mb-2 transition-colors duration-400">Full Name</label>
-                <div className="relative">
-                  <HiOutlineUser className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 transition-all duration-500 group-focus-within:text-yellow-400" />
-                  <input
-                    id="signup-name"
-                    type="text"
-                    placeholder="Enter your full name"
-                    value={signUpName}
-                    onChange={(e) => setSignUpName(e.target.value)}
-                    required
-                    className="w-full pl-10 pr-3 py-3 rounded-lg border border-zinc-300 text-sm text-black placeholder-zinc-400 focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-500 hover:border-zinc-400"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-4 relative">
-                <label htmlFor="signup-email" className="block text-xs text-zinc-500 mb-2 transition-colors duration-400">Email</label>
-                <div className="relative">
-                  <HiOutlineMail className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 transition-all duration-500 group-focus-within:text-yellow-400" />
-                  <input
-                    id="signup-email"
-                    type="email"
-                    placeholder="Enter your email"
-                    value={signUpEmail}
-                    onChange={(e) => setSignUpEmail(e.target.value)}
-                    required
-                    className="w-full pl-10 pr-3 py-3 rounded-lg border border-zinc-300 text-sm text-black placeholder-zinc-400 focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-500 hover:border-zinc-400"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-4 relative">
-                <label htmlFor="signup-password" className="block text-xs text-zinc-500 mb-2 transition-colors duration-400">Password (อย่างน้อย 8 ตัว)</label>
-                <div className="relative">
-                  <HiLockClosed className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    id="signup-password"
-                    type="password"
-                    placeholder="Enter password"
-                    value={signUpPassword}
-                    onChange={(e) => setSignUpPassword(e.target.value)}
-                    required
-                    minLength={8}
-                    className="w-full pl-10 pr-3 py-3 rounded-lg border border-zinc-300 text-sm text-black placeholder-zinc-400 focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-500 hover:border-zinc-400"
-                  />
-                </div>
-              </div>
-
-              <div className="mb-4 relative">
-                <label htmlFor="signup-confirm-password" className="block text-xs text-zinc-500 mb-2 transition-colors duration-400">Confirm Password</label>
-                <div className="relative">
-                  <HiLockClosed className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-                  <input
-                    id="signup-confirm-password"
-                    type="password"
-                    placeholder="Confirm password"
-                    value={signUpConfirmPassword}
-                    onChange={(e) => setSignUpConfirmPassword(e.target.value)}
-                    required
-                    minLength={8}
-                    className="w-full pl-10 pr-3 py-3 rounded-lg border border-zinc-300 text-sm text-black placeholder-zinc-400 focus:outline-none focus:border-yellow-400 focus:ring-2 focus:ring-yellow-400/20 transition-all duration-500 hover:border-zinc-400"
-                  />
-                </div>
-                {signUpConfirmPassword && signUpPassword !== signUpConfirmPassword && (
-                  <p className="mt-1 text-xs text-red-600">รหัสผ่านไม่ตรงกัน</p>
-                )}
-              </div>
-
-              {signUpSuccess && (
-                <div className="mb-3 p-2 rounded-lg bg-green-50 border border-green-200">
-                  <p className="text-xs text-green-700">{signUpSuccess}</p>
-                </div>
-              )}
-              {signUpError && (
-                <div className="mb-3 p-2 rounded-lg bg-red-50 border border-red-200">
-                  <p className="text-xs text-red-600">{signUpError}</p>
-                </div>
-              )}
-
-              <div className="flex justify-center mt-6">
-                <button 
-                  type="submit" 
-                  disabled={!isSignUpValid() || signUpLoading}
-                  className={`w-36 h-9 rounded-lg bg-yellow-400 text-sm font-medium text-white transition-all duration-500 transform shadow-md ${
-                    isSignUpValid() && !signUpLoading
-                      ? 'hover:bg-yellow-500 hover:scale-105 active:scale-95 hover:shadow-lg cursor-pointer'
-                      : 'opacity-50 cursor-not-allowed'
-                  }`}
-                >
-                  {signUpLoading ? 'Signing up...' : 'Sign up'}
-                </button>
-              </div>
-              </form>
-        </div>
         </div>
         </div>
       </div>

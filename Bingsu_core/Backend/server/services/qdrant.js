@@ -100,13 +100,11 @@ export const deleteDocumentVectors = async (documentId) => {
 
 export const searchQdrant = async (vector, { docIds = [], limit } = {}) => {
   if (!vector || !vector.length) return [];
-  const must = [];
-  if (docIds.length) {
-    must.push({
-      key: "docId",
-      match: { any: docIds },
-    });
-  }
+  if (!Array.isArray(docIds) || docIds.length === 0) return [];
+  const must = [{
+    key: "docId",
+    match: { any: docIds },
+  }];
 
   const response = await qdrantFetch(`/collections/${qdrantCollectionName}/points/search`, {
     method: "POST",
